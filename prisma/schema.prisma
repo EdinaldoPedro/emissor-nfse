@@ -1,0 +1,64 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // <--- Mudamos para SQLite (arquivo local)
+  url      = "file:./dev.db"
+}
+
+// --- MODELAGEM DAS TABELAS ---
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  senhaHash String   
+  nome      String   
+  createdAt DateTime @default(now())
+  
+  // Relacionamentos
+  clientes      Cliente[]
+  notasFiscais  NotaFiscal[]
+}
+
+model Cliente {
+  id        String   @id @default(uuid())
+  nome      String
+  documento String   // CPF ou CNPJ
+  email     String
+  
+  // Relacionamento com o Dono (User)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  
+  notas     NotaFiscal[]
+
+  createdAt DateTime @default(now())
+}
+
+model NotaFiscal {
+  id              String   @id @default(uuid())
+  valor           Decimal
+  descricao       String
+  
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  
+  clienteId       String
+  cliente         Cliente  @relation(fields: [clienteId], references: [id])
+  
+  createdAt       DateTime @default(now())
+}
+
+model Usuario {
+  id        String   @id @default(uuid())
+  nome      String
+  email     String   @unique
+  senha     String   // Aqui vai o hash, não a senha real
+  criadoEm  DateTime @default(now())
+
+  // Opcional: Se quiser diferenciar admin de cliente
+  tipo      String   @default("CLIENTE") 
+}
