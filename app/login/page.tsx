@@ -29,11 +29,16 @@ export default function Login() {
         return;
       }
 
-      // === A MÁGICA DO LOGIN INTELIGENTE ===
+      // === CORREÇÃO IMPORTANTE AQUI ===
+      // Salvamos o ID no navegador para usar nas outras telas
+      localStorage.setItem('userId', dados.id); 
+      // ================================
+
+      // Redirecionamento Inteligente
       if (dados.tipo === 'ADMIN') {
-        router.push('/admin/dashboard'); // Dono vai para o painel de controle
+        router.push('/admin/dashboard');
       } else {
-        router.push('/cliente/dashboard'); // Cliente vai para a área de emissão
+        router.push('/cliente/dashboard');
       }
 
     } catch (err) {
