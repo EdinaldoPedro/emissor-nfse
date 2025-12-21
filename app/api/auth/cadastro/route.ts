@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     }
 
     // Verifica se já existe
-    const usuarioExistente = await prisma.usuario.findUnique({
+    const usuarioExistente = await prisma.user.findUnique({ // <--- MUDOU AQUI
       where: { email: email },
     });
 
@@ -27,11 +27,11 @@ export async function POST(request: Request) {
     const senhaHash = await bcrypt.hash(senha, 10);
 
     // Cria o usuário
-    await prisma.usuario.create({
+    await prisma.user.create({ // <--- MUDOU AQUI
       data: {
         nome,
         email,
-        senha: senhaHash,
+        senha: senhaHash, // <--- Atenção: no schema novo chamei de 'senha', verifique se manteve
         tipo: 'CLIENTE',
       },
     });

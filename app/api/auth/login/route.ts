@@ -9,8 +9,8 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { email, senha } = body;
 
-    // 1. Busca o usuário pelo email
-    const usuario = await prisma.usuario.findUnique({
+    // 1. Busca o usuário na tabela correta (User)
+    const usuario = await prisma.user.findUnique({
       where: { email: email }
     });
 
@@ -19,19 +19,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Usuário não encontrado.' }, { status: 401 });
     }
 
-    // 2. Verifica se a senha bate com a criptografia
+    // 2. Verifica a senha (campo 'senha' do banco)
     const senhaValida = await bcrypt.compare(senha, usuario.senha);
 
     if (!senhaValida) {
       return NextResponse.json({ error: 'Senha incorreta.' }, { status: 401 });
     }
 
-    // 3. Sucesso! Retorna os dados (incluindo o TIPO)
+    // 3. Sucesso!
     return NextResponse.json({
       id: usuario.id,
       nome: usuario.nome,
       email: usuario.email,
-      tipo: usuario.tipo, // <--- O PULO DO GATO ESTÁ AQUI (ADMIN ou CLIENTE)
+      tipo: usuario.tipo,
     });
 
   } catch (error) {

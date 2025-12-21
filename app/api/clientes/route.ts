@@ -6,8 +6,8 @@ const prisma = new PrismaClient();
 export async function GET() {
   try {
     // Busca usuários cadastrados para mostrar na lista
-    const usuarios = await prisma.usuario.findMany({
-      orderBy: { criadoEm: 'desc' }
+    const usuarios = await prisma.user.findMany({ // <--- MUDOU AQUI
+      orderBy: { createdAt: 'desc' }
     });
 
     const listaFormatada = usuarios.map(usuario => ({

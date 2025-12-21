@@ -5,19 +5,28 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite" // <--- Mudamos para SQLite (arquivo local)
+  provider = "sqlite"
   url      = "file:./dev.db"
 }
 
-// --- MODELAGEM DAS TABELAS ---
+// --- MODELAGEM CORRIGIDA E UNIFICADA ---
 
+// Unificamos 'User' e 'Usuario' nesta tabela completa
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  senhaHash String   
+  senha     String   // Senha criptografada
   nome      String   
-  createdAt DateTime @default(now())
+  tipo      String   @default("CLIENTE") // ADMIN ou CLIENTE
   
+  // Dados da Empresa (para emitir nota depois)
+  documento       String? // CPF ou CNPJ
+  razaoSocial     String?
+  nomeFantasia    String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt // Adiciona data de atualização automática
+
   // Relacionamentos
   clientes      Cliente[]
   notasFiscais  NotaFiscal[]
@@ -27,14 +36,15 @@ model Cliente {
   id        String   @id @default(uuid())
   nome      String
   documento String   // CPF ou CNPJ
-  email     String
+  email     String?
+  endereco  String?
   
-  // Relacionamento com o Dono (User)
+  // O cliente pertence a um User (Dono do SaaS)
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   
   notas     NotaFiscal[]
-
+  
   createdAt DateTime @default(now())
 }
 
@@ -42,23 +52,15 @@ model NotaFiscal {
   id              String   @id @default(uuid())
   valor           Decimal
   descricao       String
+  status          String   @default("RASCUNHO") // RASCUNHO, EMITIDA, CANCELADA
   
+  // Quem está emitindo
   userId          String
   user            User     @relation(fields: [userId], references: [id])
   
+  // Para quem é a nota
   clienteId       String
   cliente         Cliente  @relation(fields: [clienteId], references: [id])
   
   createdAt       DateTime @default(now())
-}
-
-model Usuario {
-  id        String   @id @default(uuid())
-  nome      String
-  email     String   @unique
-  senha     String   // Aqui vai o hash, não a senha real
-  criadoEm  DateTime @default(now())
-
-  // Opcional: Se quiser diferenciar admin de cliente
-  tipo      String   @default("CLIENTE") 
 }
