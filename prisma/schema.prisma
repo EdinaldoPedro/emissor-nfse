@@ -9,58 +9,115 @@ datasource db {
   url      = "file:./dev.db"
 }
 
-// --- MODELAGEM CORRIGIDA E UNIFICADA ---
-
-// Unificamos 'User' e 'Usuario' nesta tabela completa
+// --- USUÁRIO (Dono do SaaS) ---
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
-  senha     String   // Senha criptografada
+  senha     String
   nome      String   
-  tipo      String   @default("CLIENTE") // ADMIN ou CLIENTE
+  tipo      String   @default("CLIENTE")
   
-  // Dados da Empresa (para emitir nota depois)
-  documento       String? // CPF ou CNPJ
+  // Dados Pessoais
+  cpf             String?
+  telefone        String?
+  plano           String?  @default("GRATUITO")
+  
+  // Dados da Empresa (PJ)
+  documento       String? 
   razaoSocial     String?
   nomeFantasia    String?
+  inscricaoMunicipal String?
+  regimeTributario String? @default("MEI")
   
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt // Adiciona data de atualização automática
+  // Endereço
+  cep             String?
+  logradouro      String?
+  numero          String?
+  complemento     String?
+  bairro          String?
+  cidade          String?
+  uf              String?
+  codigoIbge      String?
 
-  // Relacionamentos
-  clientes      Cliente[]
-  notasFiscais  NotaFiscal[]
+  // Certificado
+  certificadoA1   String?
+  senhaCertificado String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamentos com DELETE CASCADE (Se apagar o User, apaga tudo dele)
+  clientes      Cliente[]    @relation(name: "UserClientes")
+  notasFiscais  NotaFiscal[] @relation(name: "UserNotas")
+  atividades    Cnae[]
 }
 
+// --- TABELA AUXILIAR DE CNAES ---
+model Cnae {
+  id          String @id @default(uuid())
+  codigo      String 
+  descricao   String 
+  principal   Boolean @default(false)
+  
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --- CLIENTES (Tomadores) ---
 model Cliente {
   id        String   @id @default(uuid())
   nome      String
-  documento String   // CPF ou CNPJ
   email     String?
-  endereco  String?
+  telefone  String?
   
-  // O cliente pertence a um User (Dono do SaaS)
+  // Dados Fiscais
+  documento String   
+  inscricaoMunicipal String?
+  
+  // Endereço
+  cep             String?
+  logradouro      String?
+  numero          String?
+  complemento     String?
+  bairro          String?
+  cidade          String?
+  uf              String?
+  codigoIbge      String?
+
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(name: "UserClientes", fields: [userId], references: [id], onDelete: Cascade)
   
+  // Relacionamento inverso
   notas     NotaFiscal[]
   
   createdAt DateTime @default(now())
 }
 
+// --- NOTAS FISCAIS ---
 model NotaFiscal {
   id              String   @id @default(uuid())
+  numero          Int?
   valor           Decimal
   descricao       String
-  status          String   @default("RASCUNHO") // RASCUNHO, EMITIDA, CANCELADA
   
-  // Quem está emitindo
+  // Dados Específicos
+  codigoServico   String?
+  cnae            String?
+  
+  status          String   @default("RASCUNHO")
+  
+  // Retornos da API
+  chaveAcesso     String?
+  linkPdf         String?
+  xmlAutorizado   String?
+  
   userId          String
-  user            User     @relation(fields: [userId], references: [id])
+  user            User     @relation(name: "UserNotas", fields: [userId], references: [id], onDelete: Cascade)
   
-  // Para quem é a nota
   clienteId       String
-  cliente         Cliente  @relation(fields: [clienteId], references: [id])
+  // AQUI ESTÁ A CORREÇÃO MÁGICA: onDelete: Cascade
+  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   
+  dataEmissao     DateTime?
   createdAt       DateTime @default(now())
 }
