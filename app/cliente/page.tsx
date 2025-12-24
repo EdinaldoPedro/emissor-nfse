@@ -303,7 +303,7 @@ export default function MeusClientes() {
             <tr>
               <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Nome / Razão</th>
               <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Email</th>
-              <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Documento</th>
+              <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">CNPJ</th>
               {/* NOVA COLUNA */}
               <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Município/UF</th>
               <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Ações</th>

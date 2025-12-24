@@ -21,7 +21,7 @@ export async function GET(request: Request) {
       id: v.empresa.id, // ID da empresa
       vinculoId: v.id,
       nome: v.empresa.razaoSocial,
-      email: null, // Empresa não tem email no schema atual, ok
+      email: v.empresa.email,
       documento: v.empresa.documento,
       cidade: v.empresa.cidade,
       uf: v.empresa.uf
@@ -65,4 +65,39 @@ export async function DELETE(request: Request) {
   });
 
   return NextResponse.json({ success: true });
+}
+
+export async function PUT(request: Request) {
+  try {
+    const userId = request.headers.get('x-user-id');
+    const body = await request.json();
+
+    if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
+
+    // Atualiza a tabela Empresa diretamente
+    await prisma.empresa.update({
+      where: { id: body.id }, // O ID da empresa que vem do formulário
+      data: {
+        // Mapeamos 'nome' (do formulário) para 'razaoSocial' (do banco)
+        razaoSocial: body.nome, 
+        
+        // === O IMPORTANTE: SALVAR O EMAIL ===
+        email: body.email, 
+        
+        // Atualiza endereço também
+        cep: body.cep,
+        logradouro: body.logradouro,
+        numero: body.numero,
+        bairro: body.bairro,
+        cidade: body.cidade,
+        uf: body.uf,
+        codigoIbge: body.codigoIbge
+      }
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Erro na atualização:", error);
+    return NextResponse.json({ error: "Erro ao atualizar dados." }, { status: 500 });
+  }
 }

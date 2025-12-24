@@ -15,18 +15,24 @@ export async function GET(request: Request) {
 
   if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
-  // Segurança para evitar erro se não tiver empresa
   const empresa = user.empresa || {};
 
-  // Monta a estrutura
+  // === CORREÇÃO AQUI ===
+  // 1. Extraímos o email da empresa separadamente para não conflitar
+  const { email: emailEmpresa, ...dadosEmpresa } = empresa as any;
+
   const responseData = {
-    // 1. Dados Básicos (Raiz)
+    // 2. Jogamos os dados da empresa PRIMEIRO (Base)
+    ...dadosEmpresa,
+    emailComercial: emailEmpresa, // Enviamos com outro nome se precisar usar no futuro
+
+    // 3. Dados do Usuário vêm DEPOIS (Garante que o email do login prevaleça)
     nome: user.nome,
-    email: user.email,
+    email: user.email, // <--- Este é o que vai aparecer no "Minha Conta"
     cpf: user.cpf,
     telefone: user.telefone,
 
-    // 2. Objetos Estruturados (Para a nova tela "Minha Conta")
+    // 4. Estruturas aninhadas
     plano: {
       tipo: user.plano || 'Gratuito',
       status: user.planoStatus || 'active',
@@ -47,12 +53,7 @@ export async function GET(request: Request) {
       lastLoginAt: user.lastLoginAt,
       ipOrigem: user.ipOrigem
     },
-
-    // 3. COMPATIBILIDADE (Para a tela "Minha Empresa" não quebrar)
-    // Espalhamos as propriedades da empresa na raiz do JSON
-    ...empresa, 
     
-    // Mantemos o objeto original acessível caso precise
     empresaDados: empresa
   };
 

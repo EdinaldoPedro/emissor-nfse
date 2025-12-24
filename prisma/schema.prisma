@@ -3,11 +3,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql" // <--- MUDANÇA PRINCIPAL
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// --- ENUMS (Agora funcionam!) ---
+// --- ENUMS ---
 enum Role {
   ADMIN
   COMUM
@@ -29,18 +29,17 @@ model User {
   senha     String
   nome      String
   role      Role     @default(COMUM)
-  cpf       String   @unique
+  cpf       String?  @unique // Deixei opcional (?) pois as vezes falha se não tiver
   telefone  String?
   
-  // --- PLANO DETALHADO ---
-  plano            String?   @default("GRATUITO") // Tipo (Premium, Basic, etc)
-  planoStatus      String    @default("active")   // active, inactive, cancelled
-  planoExpiresAt   DateTime?                      // Data de vencimento
+  // --- PLANO ---
+  plano            String?    @default("GRATUITO")
+  planoStatus      String     @default("active")
+  planoExpiresAt   DateTime?
 
   // --- PERFIL ---
   cargo            String?
   avatarUrl        String?
-  // Empresa já está vinculada via relação 'empresa'
 
   // --- CONFIGURAÇÕES ---
   darkMode         Boolean   @default(false)
@@ -51,13 +50,12 @@ model User {
   ipOrigem         String?
   lastLoginAt      DateTime? 
   
-  // ... (restante das relações: empresaId, clientes, notas, etc)
+  // --- RELAÇÕES ---
   empresaId String?  @unique
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
+  
   clientes  UserCliente[]
-  certificadoA1    String? 
-  senhaCertificado String?
-  notasEmitidas NotaFiscal[]
+  // (NotaFiscal removida daqui, correto!)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -68,17 +66,18 @@ model Empresa {
   id        String   @id @default(uuid())
   documento String   @unique
   
+  email     String?
   razaoSocial  String
   nomeFantasia String?
   
-  cep          String?
-  logradouro   String?
-  numero       String?
-  complemento  String?
-  bairro       String?
-  cidade       String?
-  uf           String?
-  codigoIbge   String?
+  cep        String?
+  logradouro String?
+  numero     String?
+  complemento String?
+  bairro     String?
+  cidade     String?
+  uf         String?
+  codigoIbge String?
 
   inscricaoMunicipal String?
   regimeTributario   String? @default("MEI")
@@ -86,6 +85,11 @@ model Empresa {
   donoUser     User?         @relation("DonoEmpresa")
   vinculadoA   UserCliente[] 
   atividades   Cnae[]
+
+  // --- CAMPOS MOVIDOS DO USER PARA CÁ (CORRETO) ---
+  certificadoA1    String? 
+  senhaCertificado String?
+  notasEmitidas    NotaFiscal[] // Agora a empresa tem as notas
 
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime? 
@@ -121,7 +125,7 @@ model Cnae {
 model NotaFiscal {
   id              String   @id @default(uuid())
   numero          Int?
-  valor           Decimal  @db.Decimal(10, 2) // Postgres exige precisão para Decimal
+  valor           Decimal  @db.Decimal(10, 2)
   descricao       String
   
   prestadorCnpj   String
@@ -129,15 +133,28 @@ model NotaFiscal {
   
   status          StatusNota @default(RASCUNHO)
   
-  xmlBase64       String?  @db.Text // @db.Text permite strings gigantes (base64)
+  xmlBase64       String?  @db.Text
   pdfBase64       String?  @db.Text
   
   chaveAcesso     String?
   protocolo       String?
   
-  userId          String
-  user            User     @relation(fields: [userId], references: [id])
+  // === AQUI ESTAVA O ERRO, CORRIGIDO: ===
   
+  // 1. Vinculamos à EMPRESA (quem emite)
+  empresaId       String
+  empresa         Empresa @relation(fields: [empresaId], references: [id])
+
+  // 2. Mantemos apenas o ID do cliente tomador
+  clienteId       String
+  
+  // 3. Opcional: Se quiser saber QUAL usuário logado apertou o botão (auditoria)
+  // criadoPorId     String? 
+  
+  // Campos extras usados na API
+  cnae            String?
+  codigoServico   String?
+
   dataEmissao     DateTime?
   createdAt       DateTime @default(now())
 }

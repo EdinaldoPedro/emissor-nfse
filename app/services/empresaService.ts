@@ -6,8 +6,7 @@ export async function upsertEmpresaAndLinkUser(cnpj: string, userId: string, dad
   const cnpjLimpo = cnpj.replace(/\D/g, '');
   if (cnpjLimpo.length !== 14) throw new Error("CNPJ Inválido");
 
-  // 1. Tenta buscar dados da API externa (usando sua rota existente)
-  // Se falhar ou não trouxer nada, usa os dadosManuais (preenchidos no formulário)
+  // 1. Tenta buscar dados da API externa
   let dadosApi = null;
   try {
     const baseUrl = process.env.URL_API_LOCAL || 'http://localhost:3000';
@@ -16,15 +15,21 @@ export async function upsertEmpresaAndLinkUser(cnpj: string, userId: string, dad
     });
     if (res.ok) dadosApi = await res.json();
   } catch (e) {
-    console.log("Falha ao consultar API externa, usando dados manuais se houver");
+    console.log("Falha ao consultar API externa, usando dados manuais");
   }
 
   // Se a API falhou, usamos o que o usuário digitou no formulário
   const dados = dadosApi || dadosManuais;
 
+  // === CORREÇÃO 1: Mapear 'nome' para 'razaoSocial' ===
+  // O formulário envia 'nome', mas o banco exige 'razaoSocial'.
+  // Se faltar a razão social, usamos o nome digitado.
+  if (dados && !dados.razaoSocial && dados.nome) {
+      dados.razaoSocial = dados.nome;
+  }
+
   if (!dados || !dados.razaoSocial) {
-      // Se não tem nem API nem dados manuais, não dá pra criar
-      throw new Error("Dados da empresa não encontrados.");
+      throw new Error("Dados da empresa não encontrados (Razão Social obrigatória).");
   }
 
   // 2. Busca ou Cria a Empresa (Centralizada)
@@ -34,6 +39,7 @@ export async function upsertEmpresaAndLinkUser(cnpj: string, userId: string, dad
         // Atualiza se já existir
         razaoSocial: dados.razaoSocial,
         nomeFantasia: dados.nomeFantasia,
+        email: dados.email, // <--- CORREÇÃO 2: Gravando e-mail na atualização
         cep: dados.cep,
         logradouro: dados.logradouro,
         numero: dados.numero,
@@ -47,6 +53,7 @@ export async function upsertEmpresaAndLinkUser(cnpj: string, userId: string, dad
         documento: cnpjLimpo,
         razaoSocial: dados.razaoSocial,
         nomeFantasia: dados.nomeFantasia,
+        email: dados.email, // <--- CORREÇÃO 2: Gravando e-mail na criação
         cep: dados.cep,
         logradouro: dados.logradouro,
         numero: dados.numero,
