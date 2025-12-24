@@ -28,22 +28,35 @@ model User {
   email     String   @unique
   senha     String
   nome      String
-  
-  // Agora usamos o Enum nativo
-  role      Role     @default(COMUM) 
-  
-  cpf       String?
+  role      Role     @default(COMUM)
+  cpf       String   @unique
   telefone  String?
   
+  // --- PLANO DETALHADO ---
+  plano            String?   @default("GRATUITO") // Tipo (Premium, Basic, etc)
+  planoStatus      String    @default("active")   // active, inactive, cancelled
+  planoExpiresAt   DateTime?                      // Data de vencimento
+
+  // --- PERFIL ---
+  cargo            String?
+  avatarUrl        String?
+  // Empresa já está vinculada via relação 'empresa'
+
+  // --- CONFIGURAÇÕES ---
+  darkMode         Boolean   @default(false)
+  idioma           String    @default("pt-BR")
+  notificacoesEmail Boolean  @default(true)
+
+  // --- METADATA ---
+  ipOrigem         String?
+  lastLoginAt      DateTime? 
+  
+  // ... (restante das relações: empresaId, clientes, notas, etc)
   empresaId String?  @unique
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
-
   clientes  UserCliente[]
-
   certificadoA1    String? 
   senhaCertificado String?
-  plano            String? @default("GRATUITO")
-
   notasEmitidas NotaFiscal[]
 
   createdAt DateTime @default(now())

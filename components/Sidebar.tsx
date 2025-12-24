@@ -67,7 +67,8 @@ export default function Sidebar() {
               <p><span className="font-medium text-gray-700">Nome:</span> {userData?.nome || '...'}</p>
               <p><span className="font-medium text-gray-700">Email:</span> {userData?.email || '...'}</p>
               <p><span className="font-medium text-gray-700">CPF:</span> {userData?.cpf || 'Não informado'}</p>
-              <p><span className="font-medium text-gray-700">Plano:</span> <span className="text-green-600 font-bold">{userData?.plano || 'Gratuito'}</span></p>
+              {/* CORREÇÃO AQUI: Acessamos .tipo dentro do objeto plano */}
+              <p><span className="font-medium text-gray-700">Plano:</span> <span className="text-green-600 font-bold">{userData?.plano?.tipo || 'Gratuito'}</span></p>
               <Link href="/configuracoes/minha-conta" className="text-blue-600 hover:underline text-xs block mt-2">
                 Editar Dados Pessoais
               </Link>

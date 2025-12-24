@@ -1,20 +1,51 @@
-'use client'; // <--- OBRIGATÓRIO NA PRIMEIRA LINHA
+'use client'; 
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation'; // Nota: use 'next/navigation' no App Router
+import { useRouter } from 'next/navigation'; 
+// CORREÇÃO AQUI: Adicionei '/app' no caminho
+import { validarCPF } from '@/app/utils/cpf'; 
 
 export default function Cadastro() {
   const router = useRouter();
-  const [form, setForm] = useState({ nome: '', email: '', senha: '' });
+  const [form, setForm] = useState({ nome: '', email: '', senha: '', cpf: '' });
   const [msg, setMsg] = useState('');
   const [erro, setErro] = useState(false);
+  const [cpfInvalido, setCpfInvalido] = useState(false);
 
-  const handleChange = (e) => {
+  const handleCpfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value.replace(/\D/g, '');
+    if (value.length > 11) value = value.slice(0, 11);
+
+    value = value.replace(/(\d{3})(\d)/, '$1.$2');
+    value = value.replace(/(\d{3})(\d)/, '$1.$2');
+    value = value.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+
+    setForm({ ...form, cpf: value });
+    if (cpfInvalido) setCpfInvalido(false);
+  };
+
+  const handleBlurCpf = () => {
+    if (form.cpf && !validarCPF(form.cpf)) {
+        setCpfInvalido(true);
+    } else {
+        setCpfInvalido(false);
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!validarCPF(form.cpf)) {
+        setErro(true);
+        setMsg('Corrija o CPF antes de continuar.');
+        setCpfInvalido(true);
+        return;
+    }
+
     setMsg('Processando...');
     setErro(false);
 
@@ -56,6 +87,21 @@ export default function Cadastro() {
               className="w-full p-2 border rounded border-gray-300 focus:outline-none focus:border-blue-500"
               required
             />
+          </div>
+
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2">CPF</label>
+            <input 
+              type="text" 
+              name="cpf" 
+              value={form.cpf} 
+              onChange={handleCpfChange} 
+              onBlur={handleBlurCpf} 
+              placeholder="000.000.000-00"
+              className={`w-full p-2 border rounded focus:outline-none ${cpfInvalido ? 'border-red-500 focus:border-red-500 bg-red-50' : 'border-gray-300 focus:border-blue-500'}`}
+              required
+            />
+            {cpfInvalido && <p className="text-xs text-red-500 mt-1">CPF inválido.</p>}
           </div>
 
           <div>
