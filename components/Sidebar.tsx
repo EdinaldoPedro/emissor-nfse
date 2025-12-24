@@ -84,7 +84,6 @@ export default function Sidebar() {
             <div className="space-y-3 text-sm">
               <p><span className="font-medium text-gray-700">Razão Social:</span> {userData?.razaoSocial || '...'}</p>
               <p><span className="font-medium text-gray-700">CNPJ:</span> {userData?.documento || 'Não informado'}</p>
-              <p><span className="font-medium text-gray-700">CNAE:</span> {userData?.cnaePrincipal || '...'}</p>
               <p><span className="font-medium text-gray-700">Certificado:</span> <span className="text-red-500">Pendente</span></p>
               
               <Link href="/configuracoes" className="text-blue-600 hover:underline text-xs block mt-2">

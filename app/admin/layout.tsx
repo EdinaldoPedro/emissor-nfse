@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { LayoutDashboard, Users, Settings, LogOut, ShieldCheck, FileText } from 'lucide-react';
+// Adicionamos novos ícones: Users (Clientes), Database (Empresas), Shield (Colaboradores), List (CNAE)
+import { LayoutDashboard, Users, Database, Shield, List, LogOut } from 'lucide-react'; 
 import Link from 'next/link';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -10,7 +11,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
-    // Proteção: Se não for ADMIN, chuta pro login
     const role = localStorage.getItem('userRole');
     if (role !== 'ADMIN') {
       router.push('/login');
@@ -21,19 +21,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   if (!authorized) return null;
 
+  // --- AQUI ESTÁ A NOVA ESTRUTURA DO MENU ---
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
-    { icon: Users, label: 'Usuários & Empresas', href: '/admin/usuarios' },
-    { icon: Settings, label: 'Configurações', href: '/admin/configuracoes' },
+    { icon: Users, label: 'Clientes (Usuários SaaS)', href: '/admin/usuarios' }, // Gestão de contrato/acesso
+    { icon: Database, label: 'Empresas (Base de Dados)', href: '/admin/empresas' }, // Espelho do BD para edição bruta
+    { icon: Shield, label: 'Colaboradores (Time)', href: '/admin/colaboradores' }, // Admins e Suporte
+    { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' }, // Nova opção
+    { icon: List, label: 'Configurações', href: '/admin/configuracoes' },
   ];
 
   return (
     <div className="min-h-screen bg-slate-100 flex">
-      {/* Sidebar Escura */}
       <aside className="w-64 bg-slate-900 text-white flex flex-col fixed h-full shadow-xl z-20">
         <div className="p-6 border-b border-slate-800 flex items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-lg">
-            <ShieldCheck size={24} className="text-white" />
+            <Shield size={24} className="text-white" />
           </div>
           <div>
             <h1 className="font-bold text-lg tracking-tight">Admin</h1>
@@ -64,7 +67,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
 
-      {/* Área de Conteúdo */}
       <main className="flex-1 ml-64 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
           {children}

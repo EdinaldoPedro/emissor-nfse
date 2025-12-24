@@ -29,6 +29,9 @@ const handleSubmit = async (e: any) => {
         return;
       }
 
+      localStorage.removeItem('isSupportMode'); 
+      localStorage.removeItem('adminBackUpId');
+
       // Salva ID e Role no navegador
       localStorage.setItem('userId', dados.id); 
       localStorage.setItem('userRole', dados.role); // <--- IMPORTANTE

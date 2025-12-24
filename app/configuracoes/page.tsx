@@ -380,6 +380,33 @@ export default function ConfiguracoesEmpresa() {
               </div>
             )}
 
+            {/* INPUT DE CERTIFICADO - Adicione isto antes do botão Salvar */}
+<div className="bg-slate-50 p-4 border border-slate-200 rounded-lg mb-6">
+  <label className="block text-sm font-bold text-slate-700 mb-2">
+    Certificado Digital A1 (e-CNPJ)
+  </label>
+  <div className="flex flex-col gap-2">
+    <input 
+      type="file" 
+      accept=".pfx,.p12"
+      className="block w-full text-sm text-slate-500
+        file:mr-4 file:py-2 file:px-4
+        file:rounded-full file:border-0
+        file:text-xs file:font-semibold
+        file:bg-blue-50 file:text-blue-700
+        hover:file:bg-blue-100"
+    />
+    <input 
+      type="password" 
+      placeholder="Senha do Certificado"
+      className="w-full p-2 border rounded text-sm"
+    />
+    <p className="text-[10px] text-gray-400">
+      Obrigatório para emissão de notas. Formato .pfx ou .p12
+    </p>
+  </div>
+</div>
+
             <button 
               type="submit" 
               disabled={loading}
