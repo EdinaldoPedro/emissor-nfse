@@ -3,94 +3,114 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// GET: Busca dados do usuário E AS ATIVIDADES (CNAEs)
+// GET: Pega dados do usuário + dados da empresa dele
 export async function GET(request: Request) {
-  try {
-    const userId = request.headers.get('x-user-id');
+  const userId = request.headers.get('x-user-id');
+  if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
-    if (!userId) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-    }
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { empresa: { include: { atividades: true } } }
+  });
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { 
-        atividades: true // <--- O SEGREDO: Traz os CNAEs salvos junto
-      }
-    });
+  if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
-    if (!user) {
-      return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
-    }
+  // Achata os dados para o frontend (facilita para não quebrar a tela existente)
+  const dados = {
+    nome: user.nome,
+    email: user.email,
+    cpf: user.cpf,
+    telefone: user.telefone,
+    plano: user.plano,
+    // Dados da Empresa (se houver)
+    documento: user.empresa?.documento || '',
+    razaoSocial: user.empresa?.razaoSocial || '',
+    nomeFantasia: user.empresa?.nomeFantasia || '',
+    inscricaoMunicipal: user.empresa?.inscricaoMunicipal || '',
+    regimeTributario: user.empresa?.regimeTributario || 'MEI',
+    cep: user.empresa?.cep || '',
+    logradouro: user.empresa?.logradouro || '',
+    numero: user.empresa?.numero || '',
+    bairro: user.empresa?.bairro || '',
+    cidade: user.empresa?.cidade || '',
+    uf: user.empresa?.uf || '',
+    codigoIbge: user.empresa?.codigoIbge || '',
+    atividades: user.empresa?.atividades || []
+  };
 
-    const { senha, ...dadosSeguros } = user;
-    return NextResponse.json(dadosSeguros);
-  } catch (error) {
-    return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
-  }
+  return NextResponse.json(dados);
 }
 
-// PUT: Atualiza perfil e lista de CNAEs
+// PUT: Atualiza User e cria/atualiza Empresa
 export async function PUT(request: Request) {
-  try {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+  const userId = request.headers.get('x-user-id');
+  const body = await request.json();
 
-    const body = await request.json();
+  if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
-    const usuarioAtualizado = await prisma.$transaction(async (tx) => {
-      
-      // 1. Atualiza dados básicos
-      const user = await tx.user.update({
-        where: { id: userId },
-        data: {
-          documento: body.documento,
-          razaoSocial: body.razaoSocial,
-          nomeFantasia: body.nomeFantasia,
-          inscricaoMunicipal: body.inscricaoMunicipal,
-          regimeTributario: body.regimeTributario,
-          cep: body.cep,
-          logradouro: body.logradouro,
-          numero: body.numero,
-          complemento: body.complemento,
-          bairro: body.bairro,
-          cidade: body.cidade,
-          uf: body.uf,
-          codigoIbge: body.codigoIbge ? `${body.codigoIbge}` : null,
-          // Atualiza dados pessoais se vierem
-          nome: body.nome,
-          cpf: body.cpf,
-          telefone: body.telefone
+  // 1. Atualiza dados pessoais
+  await prisma.user.update({
+    where: { id: userId },
+    data: { nome: body.nome, cpf: body.cpf, telefone: body.telefone }
+  });
+
+  // 2. Se vier dados de empresa (CNPJ), atualiza/cria a empresa
+  if (body.documento) {
+    const cnpjLimpo = body.documento.replace(/\D/g, '');
+    
+    // Upsert na empresa
+    const empresa = await prisma.empresa.upsert({
+        where: { documento: cnpjLimpo },
+        update: {
+            razaoSocial: body.razaoSocial,
+            nomeFantasia: body.nomeFantasia,
+            inscricaoMunicipal: body.inscricaoMunicipal,
+            regimeTributario: body.regimeTributario,
+            cep: body.cep,
+            logradouro: body.logradouro,
+            numero: body.numero,
+            bairro: body.bairro,
+            cidade: body.cidade,
+            uf: body.uf,
+            codigoIbge: body.codigoIbge
+        },
+        create: {
+            documento: cnpjLimpo,
+            razaoSocial: body.razaoSocial,
+            nomeFantasia: body.nomeFantasia,
+            inscricaoMunicipal: body.inscricaoMunicipal,
+            regimeTributario: body.regimeTributario,
+            cep: body.cep,
+            logradouro: body.logradouro,
+            numero: body.numero,
+            bairro: body.bairro,
+            cidade: body.cidade,
+            uf: body.uf,
+            codigoIbge: body.codigoIbge
         }
-      });
+    });
 
-      // 2. Atualiza a tabela de Atividades (CNAEs) se vier uma lista nova
-      if (body.cnaes && Array.isArray(body.cnaes)) {
-        // Remove os antigos
-        await tx.cnae.deleteMany({
-            where: { userId: userId }
-        });
+    // Conecta a empresa ao usuário (Dono)
+    await prisma.user.update({
+        where: { id: userId },
+        data: { empresaId: empresa.id }
+    });
 
-        // Insere os novos (se a lista não estiver vazia)
+    // Atualiza CNAEs (apaga antigos e cria novos para simplificar)
+    if (body.cnaes && Array.isArray(body.cnaes)) {
+        await prisma.cnae.deleteMany({ where: { empresaId: empresa.id } });
         if (body.cnaes.length > 0) {
-            await tx.cnae.createMany({
+            await prisma.cnae.createMany({
                 data: body.cnaes.map((c: any) => ({
-                    codigo: `${c.codigo}`,
+                    empresaId: empresa.id,
+                    codigo: c.codigo,
                     descricao: c.descricao,
-                    principal: c.principal,
-                    userId: userId
+                    principal: c.principal
                 }))
             });
         }
-      }
-
-      return user;
-    });
-
-    return NextResponse.json(usuarioAtualizado);
-
-  } catch (error) {
-    console.error("Erro ao atualizar:", error);
-    return NextResponse.json({ error: 'Erro ao atualizar dados' }, { status: 500 });
+    }
   }
+
+  return NextResponse.json({ success: true });
 }

@@ -9,38 +9,23 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { nome, email, senha } = body;
 
-    // Validação básica
-    if (!nome || !email || !senha) {
-      return NextResponse.json({ message: 'Preencha todos os campos.' }, { status: 400 });
-    }
+    if (!nome || !email || !senha) return NextResponse.json({ message: 'Dados incompletos.' }, { status: 400 });
 
-    // Verifica se já existe
-    const usuarioExistente = await prisma.user.findUnique({ // <--- MUDOU AQUI
-      where: { email: email },
-    });
+    const existe = await prisma.user.findUnique({ where: { email } });
+    if (existe) return NextResponse.json({ message: 'Email já cadastrado.' }, { status: 400 });
 
-    if (usuarioExistente) {
-      return NextResponse.json({ message: 'Este email já está cadastrado.' }, { status: 400 });
-    }
-
-    // Criptografa senha
     const senhaHash = await bcrypt.hash(senha, 10);
+    
+    // Define role
+    const total = await prisma.user.count();
+    const role = total === 0 ? 'ADMIN' : 'COMUM';
 
-    // Cria o usuário
-    await prisma.user.create({ // <--- MUDOU AQUI
-      data: {
-        nome,
-        email,
-        senha: senhaHash, // <--- Atenção: no schema novo chamei de 'senha', verifique se manteve
-        tipo: 'CLIENTE',
-      },
+    await prisma.user.create({
+      data: { nome, email, senha: senhaHash, role }
     });
 
-    // O retorno de sucesso tem que estar DENTRO do bloco try
-    return NextResponse.json({ message: 'Conta criada com sucesso!' }, { status: 201 });
-
+    return NextResponse.json({ message: 'Sucesso!' }, { status: 201 });
   } catch (error) {
-    console.error("Erro no cadastro:", error);
-    return NextResponse.json({ message: 'Erro interno ao criar conta.' }, { status: 500 });
+    return NextResponse.json({ message: 'Erro interno.' }, { status: 500 });
   }
 }

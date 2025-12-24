@@ -1,123 +1,138 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql" // <--- MUDANÇA PRINCIPAL
+  url      = env("DATABASE_URL")
 }
 
-// --- USUÁRIO (Dono do SaaS) ---
+// --- ENUMS (Agora funcionam!) ---
+enum Role {
+  ADMIN
+  COMUM
+  SUPORTE
+}
+
+enum StatusNota {
+  RASCUNHO
+  PROCESSANDO
+  AUTORIZADA
+  ERRO
+  CANCELADA
+}
+
+// --- USUÁRIO ---
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
   senha     String
-  nome      String   
-  tipo      String   @default("CLIENTE")
+  nome      String
   
-  // Dados Pessoais
-  cpf             String?
-  telefone        String?
-  plano           String?  @default("GRATUITO")
+  // Agora usamos o Enum nativo
+  role      Role     @default(COMUM) 
   
-  // Dados da Empresa (PJ)
-  documento       String? 
-  razaoSocial     String?
-  nomeFantasia    String?
-  inscricaoMunicipal String?
-  regimeTributario String? @default("MEI")
+  cpf       String?
+  telefone  String?
   
-  // Endereço
-  cep             String?
-  logradouro      String?
-  numero          String?
-  complemento     String?
-  bairro          String?
-  cidade          String?
-  uf              String?
-  codigoIbge      String?
+  empresaId String?  @unique
+  empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
 
-  // Certificado
-  certificadoA1   String?
+  clientes  UserCliente[]
+
+  certificadoA1    String? 
   senhaCertificado String?
+  plano            String? @default("GRATUITO")
+
+  notasEmitidas NotaFiscal[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  // Relacionamentos com DELETE CASCADE (Se apagar o User, apaga tudo dele)
-  clientes      Cliente[]    @relation(name: "UserClientes")
-  notasFiscais  NotaFiscal[] @relation(name: "UserNotas")
-  atividades    Cnae[]
 }
 
-// --- TABELA AUXILIAR DE CNAES ---
+// --- EMPRESAS ---
+model Empresa {
+  id        String   @id @default(uuid())
+  documento String   @unique
+  
+  razaoSocial  String
+  nomeFantasia String?
+  
+  cep          String?
+  logradouro   String?
+  numero       String?
+  complemento  String?
+  bairro       String?
+  cidade       String?
+  uf           String?
+  codigoIbge   String?
+
+  inscricaoMunicipal String?
+  regimeTributario   String? @default("MEI")
+  
+  donoUser     User?         @relation("DonoEmpresa")
+  vinculadoA   UserCliente[] 
+  atividades   Cnae[]
+
+  updatedAt    DateTime @updatedAt
+  lastApiCheck DateTime? 
+}
+
+// --- RELAÇÃO USER <-> CLIENTE ---
+model UserCliente {
+  id        String @id @default(uuid())
+  
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  empresaId String
+  empresa   Empresa @relation(fields: [empresaId], references: [id])
+
+  apelido   String? 
+  createdAt DateTime @default(now())
+
+  @@unique([userId, empresaId])
+}
+
 model Cnae {
   id          String @id @default(uuid())
   codigo      String 
   descricao   String 
   principal   Boolean @default(false)
   
-  userId      String
-  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// --- CLIENTES (Tomadores) ---
-model Cliente {
-  id        String   @id @default(uuid())
-  nome      String
-  email     String?
-  telefone  String?
-  
-  // Dados Fiscais
-  documento String   
-  inscricaoMunicipal String?
-  
-  // Endereço
-  cep             String?
-  logradouro      String?
-  numero          String?
-  complemento     String?
-  bairro          String?
-  cidade          String?
-  uf              String?
-  codigoIbge      String?
-
-  userId    String
-  user      User     @relation(name: "UserClientes", fields: [userId], references: [id], onDelete: Cascade)
-  
-  // Relacionamento inverso
-  notas     NotaFiscal[]
-  
-  createdAt DateTime @default(now())
+  empresaId   String
+  empresa     Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 }
 
 // --- NOTAS FISCAIS ---
 model NotaFiscal {
   id              String   @id @default(uuid())
   numero          Int?
-  valor           Decimal
+  valor           Decimal  @db.Decimal(10, 2) // Postgres exige precisão para Decimal
   descricao       String
   
-  // Dados Específicos
-  codigoServico   String?
-  cnae            String?
+  prestadorCnpj   String
+  tomadorCnpj     String
   
-  status          String   @default("RASCUNHO")
+  status          StatusNota @default(RASCUNHO)
   
-  // Retornos da API
+  xmlBase64       String?  @db.Text // @db.Text permite strings gigantes (base64)
+  pdfBase64       String?  @db.Text
+  
   chaveAcesso     String?
-  linkPdf         String?
-  xmlAutorizado   String?
+  protocolo       String?
   
   userId          String
-  user            User     @relation(name: "UserNotas", fields: [userId], references: [id], onDelete: Cascade)
-  
-  clienteId       String
-  // AQUI ESTÁ A CORREÇÃO MÁGICA: onDelete: Cascade
-  cliente         Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id])
   
   dataEmissao     DateTime?
   createdAt       DateTime @default(now())
+}
+
+// --- CONFIG ---
+model ConfiguracaoSistema {
+  id             String @id @default("config")
+  modeloDpsJson  String?
+  versaoApi      String @default("1.00")
+  ambiente       String @default("HOMOLOGACAO")
 }

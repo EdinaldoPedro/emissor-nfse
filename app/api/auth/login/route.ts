@@ -6,35 +6,22 @@ const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { email, senha } = body;
+    const { email, senha } = await request.json();
 
-    // 1. Busca o usuário na tabela correta (User)
-    const usuario = await prisma.user.findUnique({
-      where: { email: email }
-    });
+    const user = await prisma.user.findUnique({ where: { email } });
 
-    // Se não achar o email
-    if (!usuario) {
-      return NextResponse.json({ error: 'Usuário não encontrado.' }, { status: 401 });
+    if (!user || !(await bcrypt.compare(senha, user.senha))) {
+      return NextResponse.json({ error: 'Credenciais inválidas.' }, { status: 401 });
     }
 
-    // 2. Verifica a senha (campo 'senha' do banco)
-    const senhaValida = await bcrypt.compare(senha, usuario.senha);
-
-    if (!senhaValida) {
-      return NextResponse.json({ error: 'Senha incorreta.' }, { status: 401 });
-    }
-
-    // 3. Sucesso!
+    // Retorna 'role' (ADMIN ou COMUM) para o frontend decidir
     return NextResponse.json({
-      id: usuario.id,
-      nome: usuario.nome,
-      email: usuario.email,
-      tipo: usuario.tipo,
+      id: user.id,
+      nome: user.nome,
+      email: user.email,
+      role: user.role, 
     });
-
   } catch (error) {
-    return NextResponse.json({ error: 'Erro interno no servidor.' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
   }
 }

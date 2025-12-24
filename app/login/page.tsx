@@ -9,7 +9,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: any) => {
+const handleSubmit = async (e: any) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -29,16 +29,15 @@ export default function Login() {
         return;
       }
 
-      // === CORREÇÃO IMPORTANTE AQUI ===
-      // Salvamos o ID no navegador para usar nas outras telas
+      // Salva ID e Role no navegador
       localStorage.setItem('userId', dados.id); 
-      // ================================
+      localStorage.setItem('userRole', dados.role); // <--- IMPORTANTE
 
-      // Redirecionamento Inteligente
-      if (dados.tipo === 'ADMIN') {
-        router.push('/admin/dashboard');
+      // Redirecionamento Correto
+      if (dados.role === 'ADMIN') {
+        router.push('/admin/dashboard'); // Vai para a área VIP
       } else {
-        router.push('/cliente/dashboard');
+        router.push('/cliente/dashboard'); // Vai para a área comum
       }
 
     } catch (err) {
