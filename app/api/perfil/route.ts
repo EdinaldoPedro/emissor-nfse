@@ -136,6 +136,8 @@ export async function PUT(request: Request) {
                       principal: c.principal
                   }))
               });
+
+            await syncCnaesGlobalmente(body.cnaes, empresa.codigoIbge);
           }
       }
     }

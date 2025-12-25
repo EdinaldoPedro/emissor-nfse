@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { syncCnaesGlobalmente } from './syncService';
 
 const prisma = new PrismaClient();
 
@@ -39,7 +40,7 @@ export async function upsertEmpresaAndLinkUser(cnpj: string, userId: string, dad
         // Atualiza se já existir
         razaoSocial: dados.razaoSocial,
         nomeFantasia: dados.nomeFantasia,
-        email: dados.email, // <--- CORREÇÃO 2: Gravando e-mail na atualização
+        email: dados.email,
         cep: dados.cep,
         logradouro: dados.logradouro,
         numero: dados.numero,
@@ -53,7 +54,7 @@ export async function upsertEmpresaAndLinkUser(cnpj: string, userId: string, dad
         documento: cnpjLimpo,
         razaoSocial: dados.razaoSocial,
         nomeFantasia: dados.nomeFantasia,
-        email: dados.email, // <--- CORREÇÃO 2: Gravando e-mail na criação
+        email: dados.email,
         cep: dados.cep,
         logradouro: dados.logradouro,
         numero: dados.numero,
@@ -87,6 +88,20 @@ export async function upsertEmpresaAndLinkUser(cnpj: string, userId: string, dad
           }
       });
   }
+
+  // === NOVO: Sincronização Automática com Tabelas Globais ===
+  // Se a empresa tem CNAEs, salvamos eles nas tabelas de inteligência fiscal (Admin)
+  if (dados.cnaes && Array.isArray(dados.cnaes)) {
+      const cnaesParaSync = dados.cnaes.map((c: any) => ({
+          codigo: String(c.codigo || ''),
+          descricao: c.descricao || ''
+      }));
+      
+      // Chama o serviço de sincronização
+      // Passamos o codigoIbge para já criar a regra municipal (se não existir)
+      await syncCnaesGlobalmente(cnaesParaSync, empresa.codigoIbge);
+  }
+  // ==========================================================
 
   return empresa;
 }

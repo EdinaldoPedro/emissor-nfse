@@ -166,3 +166,36 @@ model ConfiguracaoSistema {
   versaoApi      String @default("1.00")
   ambiente       String @default("HOMOLOGACAO")
 }
+
+model GlobalCnae {
+  id                        String   @id @default(uuid()) // <--- Corrigido (espaço)
+  codigo                    String   @unique // Ex: 6202-3/00
+  descricao                 String
+  
+  // Campos editáveis pelo Admin
+  itemLc                    String?  // <--- Corrigido (espaço)
+  codigoTributacaoNacional  String? // Código padrão nacional (Ex: 01.07.01)
+  
+  aliquotaPadrao            Decimal? @db.Decimal(5,2) // Opcional: Alíquota sugerida
+
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
+// 2. Exceções Municipais (Substituto Tributário / De-Para)
+model TributacaoMunicipal {
+  id                        String   @id @default(uuid())
+  
+  cnae                      String // O CNAE que dispara a regra
+  codigoIbge                String // O Município onde a regra se aplica
+  
+  // A informação crucial para a NFS-e naquele município
+  codigoTributacaoMunicipal String 
+  
+  descricaoServicoMunicipal String? // Algumas prefeituras exigem descrição específica
+
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@unique([cnae, codigoIbge, codigoTributacaoMunicipal])
+}

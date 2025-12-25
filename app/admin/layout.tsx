@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 // Adicionamos novos ícones: Users (Clientes), Database (Empresas), Shield (Colaboradores), List (CNAE)
-import { LayoutDashboard, Users, Database, Shield, List, LogOut } from 'lucide-react'; 
+import { LayoutDashboard, Users, Database, Shield, List, LogOut, MapPin } from 'lucide-react'; 
 import Link from 'next/link';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -27,8 +27,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { icon: Users, label: 'Clientes (Usuários SaaS)', href: '/admin/usuarios' }, // Gestão de contrato/acesso
     { icon: Database, label: 'Empresas (Base de Dados)', href: '/admin/empresas' }, // Espelho do BD para edição bruta
     { icon: Shield, label: 'Colaboradores (Time)', href: '/admin/colaboradores' }, // Admins e Suporte
-    { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' }, // Nova opção
     { icon: List, label: 'Configurações', href: '/admin/configuracoes' },
+    { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' },
+    { icon: MapPin, label: 'Trib. Municipal', href: '/admin/tributacao-municipal' }, // ADICIONE ESTA LINHA (Importe MapPin do lucide-react)
   ];
 
   return (
