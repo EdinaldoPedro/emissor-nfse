@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+// === ADICIONE O IMPORT QUE FALTAVA ===
+import { syncCnaesGlobalmente } from '@/app/services/syncService'; 
 
 const prisma = new PrismaClient();
 
-// GET: Retorna o perfil completo (Híbrido: Aninhado + Plano)
+// GET: Retorna o perfil completo
 export async function GET(request: Request) {
   const userId = request.headers.get('x-user-id');
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
@@ -16,23 +18,15 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
   const empresa = user.empresa || {};
-
-  // === CORREÇÃO AQUI ===
-  // 1. Extraímos o email da empresa separadamente para não conflitar
   const { email: emailEmpresa, ...dadosEmpresa } = empresa as any;
 
   const responseData = {
-    // 2. Jogamos os dados da empresa PRIMEIRO (Base)
     ...dadosEmpresa,
-    emailComercial: emailEmpresa, // Enviamos com outro nome se precisar usar no futuro
-
-    // 3. Dados do Usuário vêm DEPOIS (Garante que o email do login prevaleça)
+    emailComercial: emailEmpresa,
     nome: user.nome,
-    email: user.email, // <--- Este é o que vai aparecer no "Minha Conta"
+    email: user.email,
     cpf: user.cpf,
     telefone: user.telefone,
-
-    // 4. Estruturas aninhadas
     plano: {
       tipo: user.plano || 'Gratuito',
       status: user.planoStatus || 'active',
@@ -53,14 +47,13 @@ export async function GET(request: Request) {
       lastLoginAt: user.lastLoginAt,
       ipOrigem: user.ipOrigem
     },
-    
     empresaDados: empresa
   };
 
   return NextResponse.json(responseData);
 }
 
-// PUT: Atualiza User (Perfil/Config) E Empresa (se enviado)
+// PUT: Atualiza User e Empresa
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
   const body = await request.json();
@@ -68,13 +61,12 @@ export async function PUT(request: Request) {
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
   try {
-    // 1. Atualiza dados do USUÁRIO (Perfil e Configurações)
+    // 1. Atualiza dados do USUÁRIO
     await prisma.user.update({
       where: { id: userId },
       data: {
         nome: body.nome,
         telefone: body.telefone,
-        // Campos opcionais (podem vir undefined, o Prisma ignora)
         cargo: body.perfil?.cargo,
         avatarUrl: body.perfil?.avatarUrl,
         darkMode: body.configuracoes?.darkMode,
@@ -83,7 +75,7 @@ export async function PUT(request: Request) {
       }
     });
 
-    // 2. Se vier dados de EMPRESA (identificado pelo CNPJ/documento), atualiza a empresa
+    // 2. Se vier dados de EMPRESA, atualiza
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
       
@@ -100,7 +92,8 @@ export async function PUT(request: Request) {
               bairro: body.bairro,
               cidade: body.cidade,
               uf: body.uf,
-              codigoIbge: body.codigoIbge
+              codigoIbge: body.codigoIbge,
+              email: body.emailComercial || body.email 
           },
           create: {
               documento: cnpjLimpo,
@@ -114,30 +107,32 @@ export async function PUT(request: Request) {
               bairro: body.bairro,
               cidade: body.cidade,
               uf: body.uf,
-              codigoIbge: body.codigoIbge
+              codigoIbge: body.codigoIbge,
+              email: body.emailComercial || body.email
           }
       });
 
-      // Garante o vínculo
       await prisma.user.update({
           where: { id: userId },
           data: { empresaId: empresa.id }
       });
 
-      // Atualiza CNAEs se fornecidos
+      // Atualiza CNAEs e Sincroniza
       if (body.cnaes && Array.isArray(body.cnaes)) {
           await prisma.cnae.deleteMany({ where: { empresaId: empresa.id } });
+          
           if (body.cnaes.length > 0) {
               await prisma.cnae.createMany({
                   data: body.cnaes.map((c: any) => ({
                       empresaId: empresa.id,
-                      codigo: c.codigo,
+                      codigo: String(c.codigo).replace(/\D/g, ''),
                       descricao: c.descricao,
                       principal: c.principal
                   }))
               });
 
-            await syncCnaesGlobalmente(body.cnaes, empresa.codigoIbge);
+              // === SINCRONIZAÇÃO ===
+              await syncCnaesGlobalmente(body.cnaes, empresa.codigoIbge);
           }
       }
     }

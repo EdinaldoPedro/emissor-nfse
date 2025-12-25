@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { getTributacaoPorCnae } from '../../utils/tributacao'; // <--- IMPORTE O NOVO ARQUIVO
+// Removemos o import do arquivo estático, pois agora vamos usar o Banco de Dados
+// import { getTributacaoPorCnae } from '../../utils/tributacao'; 
 
 const prisma = new PrismaClient();
 
@@ -17,59 +18,94 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Dados incompletos (Cliente, CNAE, Valor ou Descrição).' }, { status: 400 });
     }
 
-    // 2. Buscar Prestador
+    // 2. Buscar Prestador (Quem emite)
     const prestador = await prisma.user.findUnique({
       where: { id: userId },
-      include: { atividades: true }
+      include: { empresa: true } // Alterado para buscar a empresa vinculada
     });
 
-    if (!prestador || !prestador.documento) {
+    // Ajuste para pegar a empresa corretamente (seja via relação direta ou campo empresaId)
+    // Assumindo que no seu schema User tem empresaId ou relação one-to-one
+    const empresaPrestador = prestador?.empresa;
+
+    if (!empresaPrestador || !empresaPrestador.documento) {
       return NextResponse.json({ error: 'Seu CNPJ não está cadastrado.' }, { status: 400 });
     }
-    if (!prestador.codigoIbge) {
+    if (!empresaPrestador.codigoIbge) {
       return NextResponse.json({ error: 'Seu cadastro está sem Código IBGE. Atualize em "Minha Empresa".' }, { status: 400 });
     }
 
-    // 3. Buscar Tomador
-    const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } });
-
-    if (!tomador || !tomador.documento) {
-      return NextResponse.json({ error: 'Cliente incompleto.' }, { status: 400 });
+    // 3. Buscar Tomador (Cliente)
+    const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } }); // Nota: Seu schema usa 'Cliente' ou 'UserCliente'? Ajuste conforme seu prisma.
+    // Baseado no seu schema.prisma anterior, existe um model Cliente? 
+    // Vou usar o model 'Empresa' ou o relacionamento correto. 
+    // Se 'clienteId' refere-se a uma empresa cadastrada na tabela UserCliente/Empresa:
+    
+    // VERIFICAÇÃO DE SEGURANÇA: Vamos buscar a empresa destino corretamente
+    // Se o cliente for apenas um registro simples, ok. Se for vinculado a uma Empresa:
+    const empresaTomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
+    
+    if (!empresaTomador) {
+         return NextResponse.json({ error: 'Cliente não encontrado.' }, { status: 404 });
     }
-    if (!tomador.codigoIbge) {
-        return NextResponse.json({ error: `Cliente ${tomador.nome} sem Código IBGE. Atualize o cadastro dele.` }, { status: 400 });
+
+    // --- A MÁGICA DA INTELIGÊNCIA FISCAL (ALTERAÇÃO PRINCIPAL) ---
+    const cnaeLimpo = codigoCnae.replace(/\D/g, '');
+    let itemLc = '01.01'; // Fallback padrão
+    let codigoTributacao = '01.01.01'; // Fallback padrão
+    let fonteDaRegra = 'Padrão do Sistema';
+
+    // A. Tenta achar regra específica MUNICIPAL (Exceção)
+    // Busca se existe regra para este CNAE na cidade do PRESTADOR (quem emite define a regra municipal na maioria dos casos de serviço local)
+    // *Nota: Dependendo da regra do município, pode ser na cidade do tomador, mas o padrão NFS-e nacional foca no prestador ou local da prestação.
+    const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
+        where: {
+            cnae: cnaeLimpo,
+            codigoIbge: empresaPrestador.codigoIbge
+        }
+    });
+
+    if (regraMunicipal && regraMunicipal.codigoTributacaoMunicipal !== 'A_DEFINIR') {
+        codigoTributacao = regraMunicipal.codigoTributacaoMunicipal;
+        fonteDaRegra = `Municipal (${empresaPrestador.codigoIbge})`;
+        // Tenta inferir o item LC do código municipal ou mantem o padrão se não tiver mapeado
+    } else {
+        // B. Se não tem regra municipal, busca a regra NACIONAL (Global)
+        const regraGlobal = await prisma.globalCnae.findUnique({
+            where: { codigo: cnaeLimpo }
+        });
+
+        if (regraGlobal) {
+            if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
+            if (regraGlobal.codigoTributacaoNacional) codigoTributacao = regraGlobal.codigoTributacaoNacional;
+            fonteDaRegra = 'Tabela Nacional (Global)';
+        }
     }
+    // -------------------------------------------------------------
 
-    // --- A MÁGICA ACONTECE AQUI ---
-    // Descobrimos a tributação correta baseada no CNAE escolhido
-    const dadosFiscais = getTributacaoPorCnae(codigoCnae);
-    // -----------------------------
-
-    // 4. Montagem da DPS
+    // 4. Montagem da DPS (Declaração de Prestação de Serviço)
     const dps = {
       versao: "1.00",
       id: `DPS${Date.now()}`,
       dataEmissao: new Date().toISOString(),
       prestador: {
-        cpfCnpj: prestador.documento.replace(/\D/g, ''),
-        inscricaoMunicipal: prestador.inscricaoMunicipal || '', 
-        codigoMunicipio: prestador.codigoIbge,
+        cpfCnpj: empresaPrestador.documento.replace(/\D/g, ''),
+        inscricaoMunicipal: empresaPrestador.inscricaoMunicipal || '', 
+        codigoMunicipio: empresaPrestador.codigoIbge,
       },
       tomador: {
-        cpfCnpj: tomador.documento.replace(/\D/g, ''),
-        razaoSocial: tomador.nome,
+        cpfCnpj: empresaTomador.documento.replace(/\D/g, ''),
+        razaoSocial: empresaTomador.razaoSocial,
         endereco: {
-            cep: tomador.cep || '',
-            codigoMunicipio: tomador.codigoIbge, 
-            uf: tomador.uf || ''
+            cep: empresaTomador.cep || '',
+            codigoMunicipio: empresaTomador.codigoIbge, 
+            uf: empresaTomador.uf || ''
         }
       },
       servico: {
-        codigoCnae: codigoCnae.replace(/\D/g, ''),
-        
-        // Agora usamos os dados dinâmicos do nosso mapa
-        codigoTributacaoNacional: dadosFiscais.codigoTributacaoNacional,
-        
+        codigoCnae: cnaeLimpo,
+        codigoTributacaoNacional: codigoTributacao, // Agora vem do Banco de Dados!
+        itemListaServico: itemLc, // Agora vem do Banco de Dados!
         discriminacao: descricao,
         valores: {
             valorServico: parseFloat(valor),
@@ -79,16 +115,19 @@ export async function POST(request: Request) {
       }
     };
 
-    // LOG VISUAL (Para você conferir se o código mudou no terminal)
+    // LOG VISUAL
     console.log("\n==================================================");
-    console.log("🚀 DPS GERADA COM MAPEAMENTO FISCAL INTELIGENTE");
-    console.log(`CNAE Original: ${codigoCnae}`);
-    console.log(`Tributação Definida: ${dadosFiscais.codigoTributacaoNacional} (${dadosFiscais.itemLC})`);
+    console.log("🚀 DPS GERADA COM INTELIGÊNCIA DE DADOS");
+    console.log(`CNAE: ${cnaeLimpo}`);
+    console.log(`Fonte da Regra: ${fonteDaRegra}`);
+    console.log(`Trib. Nacional: ${codigoTributacao}`);
+    console.log(`Item LC: ${itemLc}`);
     console.log("==================================================\n");
-    console.log(JSON.stringify(dps, null, 2)); 
 
+    // Simulação de envio (Delay)
     await new Promise(resolve => setTimeout(resolve, 1500));
 
+    // Salva a nota
     const novaNota = await prisma.notaFiscal.create({
       data: {
         valor: parseFloat(valor),
@@ -96,12 +135,17 @@ export async function POST(request: Request) {
         status: 'AUTORIZADA',
         numero: Math.floor(Math.random() * 100000),
         chaveAcesso: `352312${Date.now()}00019055001000000001`,
-        cnae: codigoCnae,
-        // Podemos salvar o código de tributação no banco também se quiser, 
-        // mas por enquanto salvamos o CNAE que é a origem.
-        codigoServico: dadosFiscais.codigoTributacaoNacional, 
-        userId: userId,
-        clienteId: clienteId,
+        cnae: cnaeLimpo,
+        codigoServico: codigoTributacao, 
+        userId: userId, // Dono da nota (quem emitiu)
+        
+        // Aqui assumimos que o relacionamento no schema é com a tabela de Clientes ou UserCliente. 
+        // Ajuste 'clienteId' conforme seu schema (se for relação com UserCliente ou Empresa)
+        clienteId: clienteId, 
+        
+        // Vínculo com a empresa emissora
+        empresaId: empresaPrestador.id,
+        
         dataEmissao: new Date()
       }
     });
@@ -110,6 +154,6 @@ export async function POST(request: Request) {
 
   } catch (error) {
     console.error("Erro emissão:", error);
-    return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno na emissão.' }, { status: 500 });
   }
 }
