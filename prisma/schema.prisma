@@ -95,6 +95,8 @@ model Empresa {
   senhaCertificado String?
   notasEmitidas    NotaFiscal[] // Agora a empresa tem as notas
 
+  logs          SystemLog[]
+
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime? 
 }
@@ -220,4 +222,20 @@ model Plan {
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String   // "INFO", "ERRO", "ALERTA", "DEBUG"
+  action    String   // Ex: "EMISSAO_NFSE", "CADASTRO_EMPRESA"
+  message   String   // "Iniciando emissão...", "Erro ao validar CNPJ"
+  
+  // O "Script" (JSON com os dados técnicos para você analisar)
+  details   String?  
+  
+  // Rastreabilidade
+  empresaId String?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id])
+  
+  createdAt DateTime @default(now())
 }

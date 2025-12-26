@@ -3,22 +3,26 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// GET: Lista todas as empresas e seus donos
+// GET: Lista todas as empresas (para o CRUD de manutenção)
 export async function GET() {
-  const empresas = await prisma.empresa.findMany({
-    include: {
-      donoUser: { select: { nome: true, email: true } } // Traz quem é o dono
-    },
-    orderBy: { updatedAt: 'desc' }
-  });
-  return NextResponse.json(empresas);
+  try {
+    const empresas = await prisma.empresa.findMany({
+      include: {
+        donoUser: { select: { nome: true, email: true } } // Traz o dono para exibir na tabela
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+    return NextResponse.json(empresas);
+  } catch (error) {
+    return NextResponse.json({ error: 'Erro ao buscar empresas' }, { status: 500 });
+  }
 }
 
-// PUT: Edição "Cirúrgica" de dados da empresa
+// PUT: Atualiza dados cadastrais (A funcionalidade que você quer de volta)
 export async function PUT(request: Request) {
-  const body = await request.json();
-  
   try {
+    const body = await request.json();
+    
     const updated = await prisma.empresa.update({
       where: { id: body.id },
       data: {
@@ -26,7 +30,6 @@ export async function PUT(request: Request) {
         nomeFantasia: body.nomeFantasia,
         regimeTributario: body.regimeTributario,
         inscricaoMunicipal: body.inscricaoMunicipal,
-        // Endereço
         cep: body.cep,
         cidade: body.cidade,
         uf: body.uf,
