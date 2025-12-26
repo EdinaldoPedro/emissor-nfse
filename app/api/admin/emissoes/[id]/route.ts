@@ -5,12 +5,13 @@ const prisma = new PrismaClient();
 
 export async function GET() {
   try {
-    // Busca empresas que são candidatas a emissão (Tem certificado OU já emitiram nota)
+    // 1. Busca empresas (Certificado, Notas OU Logs de Erro)
     const emissores = await prisma.empresa.findMany({
       where: {
         OR: [
-            { certificadoA1: { not: null } }, // Tem certificado
-            { notasEmitidas: { some: {} } }   // Ou já emitiu alguma nota
+            { certificadoA1: { not: null } }, 
+            { notasEmitidas: { some: {} } },
+            { logs: { some: {} } } 
         ]
       },
       include: {
@@ -21,20 +22,22 @@ export async function GET() {
       orderBy: { updatedAt: 'desc' }
     });
 
-    // Calcula erros recentes de forma otimizada
+    // 2. Conta erros das últimas 24h
     const dataComErros = await Promise.all(emissores.map(async (emp) => {
         const erros = await prisma.systemLog.count({
             where: {
                 empresaId: emp.id,
                 level: 'ERRO',
-                createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Últimas 24h
+                createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
             }
         });
         return { ...emp, errosRecentes: erros };
     }));
 
     return NextResponse.json(dataComErros);
+
   } catch (error) {
-    return NextResponse.json({ error: 'Erro ao listar emissores' }, { status: 500 });
+    console.error("Erro API Emissões:", error);
+    return NextResponse.json({ error: 'Erro interno ao listar.' }, { status: 500 });
   }
 }

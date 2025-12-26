@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { createLog } from '@/app/services/logger'; // <--- IMPORTANTE
+import { createLog } from '@/app/services/logger';
 
 const prisma = new PrismaClient();
 const formatMoney = (val: any) => parseFloat(val).toFixed(2);
@@ -8,7 +8,7 @@ const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
 
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id') || 'anonimo';
-  let empresaIdLog = null; // Para usar no catch
+  let empresaIdLog = null;
 
   try {
     const body = await request.json();
@@ -30,20 +30,38 @@ export async function POST(request: Request) {
     await createLog({
         level: 'INFO',
         action: 'EMISSAO_INICIO',
-        message: `Iniciando processo para CNAE ${codigoCnae}`,
+        message: `Iniciando emissão (R$ ${valor})`,
         empresaId: prestador.id,
-        details: { valor, clienteId }
+        details: { clienteId, cnae: codigoCnae, regime: prestador.regimeTributario }
     });
 
-    // 2. Validações
-    if (!prestador.codigoIbge || !prestador.inscricaoMunicipal) {
-        throw new Error('Cadastro incompleto: Falta IBGE ou Inscrição Municipal.');
+    // 2. Validações Cadastrais (CORRIGIDO PARA MEI)
+    if (!prestador.codigoIbge) {
+        throw new Error('Cadastro incompleto: Falta o Código IBGE da sua empresa (verifique em Configurações).');
+    }
+
+    // Só exige Inscrição Municipal se NÃO for MEI
+    const isMEI = prestador.regimeTributario === 'MEI';
+    if (!isMEI && !prestador.inscricaoMunicipal) {
+        throw new Error('Cadastro incompleto: Empresas não-MEI precisam de Inscrição Municipal.');
     }
 
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
-    if (!tomador) throw new Error('Tomador não encontrado.');
+    if (!tomador) throw new Error('Cliente tomador não encontrado.');
+    
+    // Validação do Cliente
+    if (!tomador.documento) throw new Error('Cliente sem CPF/CNPJ cadastrado.');
+    // Para NFS-e nacional, o endereço do tomador é crucial, mas vamos deixar passar se faltar algo e logar aviso
+    if (!tomador.codigoIbge) {
+        await createLog({
+            level: 'ALERTA',
+            action: 'EMISSAO_DADOS_TOMADOR',
+            message: 'Tomador sem IBGE. O imposto pode ser calculado errado.',
+            empresaId: prestador.id
+        });
+    }
 
-    // 3. Inteligência Tributária (Rastreando a decisão)
+    // 3. Inteligência Tributária
     const cnaeLimpo = cleanString(codigoCnae);
     let itemLc = '01.01';
     let codigoTribNacional = null;
@@ -67,35 +85,42 @@ export async function POST(request: Request) {
         }
     }
 
-    // LOG DA DECISÃO TRIBUTÁRIA
-    await createLog({
-        level: 'DEBUG',
-        action: 'EMISSAO_TRIBUTACAO',
-        message: `Regra fiscal definida via ${fonteRegra}`,
-        empresaId: prestador.id,
-        details: { cnae: cnaeLimpo, itemLc, codigoTribNacional }
-    });
-
     if (!codigoTribNacional) {
-        codigoTribNacional = '010101'; 
-        await createLog({ level: 'ALERTA', action: 'EMISSAO_FALLBACK', message: 'Sem regra definida, usando genérico.', empresaId: prestador.id });
+        codigoTribNacional = '010101'; // Fallback genérico
+        await createLog({ level: 'ALERTA', action: 'EMISSAO_FALLBACK', message: 'Sem regra tributária definida.', empresaId: prestador.id });
     }
 
     // 4. Montagem DPS
     const dpsId = `DPS${Date.now()}`;
     const dpsPayload = {
       "id": dpsId,
-      "prestador": { "cnpj": cleanString(prestador.documento) },
-      "tomador": { "cnpj": cleanString(tomador.documento) },
+      "dataEmissao": new Date().toISOString(),
+      "prestador": { 
+          "cnpj": cleanString(prestador.documento),
+          "inscricaoMunicipal": cleanString(prestador.inscricaoMunicipal) || "ISENTO", // Envia ISENTO se vazio (comum para MEI)
+          "codigoMunicipio": prestador.codigoIbge
+      },
+      "tomador": { 
+          "cpfCnpj": cleanString(tomador.documento),
+          "razaoSocial": tomador.razaoSocial,
+          "endereco": {
+              "codigoMunicipio": tomador.codigoIbge || "0000000", // Evita crash
+              "cep": cleanString(tomador.cep)
+          }
+      },
       "servico": {
         "codigoCnae": cnaeLimpo,
         "codigoTributacaoNacional": codigoTribNacional,
         "itemListaServico": itemLc,
-        "valores": { "valorServico": formatMoney(valor) }
+        "discriminacao": descricao,
+        "valores": { 
+            "valorServico": formatMoney(valor),
+            "issRetido": retencoes
+        }
       }
     };
 
-    // LOG DO JSON GERADO (O "Script" visual)
+    // LOG DO JSON GERADO
     await createLog({
         level: 'INFO',
         action: 'EMISSAO_JSON_GERADO',
@@ -105,14 +130,13 @@ export async function POST(request: Request) {
     });
 
     // 5. Simulação de Envio
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 1500));
     
     // Sucesso
     const novaNota = await prisma.notaFiscal.create({
       data: {
         empresaId: prestador.id,
         clienteId: tomador.id,
-        userId: userId,
         numero: Math.floor(Math.random() * 10000),
         valor: parseFloat(valor),
         descricao: descricao,
@@ -120,6 +144,9 @@ export async function POST(request: Request) {
         tomadorCnpj: cleanString(tomador.documento),
         status: 'AUTORIZADA',
         chaveAcesso: `KEY${Date.now()}`,
+        protocolo: `PROT${Date.now()}`,
+        cnae: cnaeLimpo,
+        codigoServico: codigoTribNacional,
         dataEmissao: new Date()
       }
     });
@@ -131,16 +158,16 @@ export async function POST(request: Request) {
         empresaId: prestador.id
     });
 
-    return NextResponse.json({ success: true, nota: novaNota }, { status: 201 });
+    return NextResponse.json({ success: true, nota: novaNota, mensagem: "Nota emitida com sucesso!" }, { status: 201 });
 
   } catch (error: any) {
-    // LOG DE ERRO (O mais importante)
+    // LOG DE ERRO (Agora captura validações também)
     await createLog({
         level: 'ERRO',
         action: 'EMISSAO_FALHA',
         message: error.message,
         empresaId: empresaIdLog || undefined,
-        details: error
+        details: error.stack
     });
 
     return NextResponse.json({ error: error.message }, { status: 500 });
