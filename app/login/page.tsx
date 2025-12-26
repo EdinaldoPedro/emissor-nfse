@@ -2,14 +2,16 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link'; // Import para links
 
 export default function Login() {
   const router = useRouter();
-  const [form, setForm] = useState({ email: '', senha: '' });
+  // Mudamos de 'email' para 'login'
+  const [form, setForm] = useState({ login: '', senha: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-const handleSubmit = async (e: any) => {
+  const handleSubmit = async (e: any) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -32,15 +34,13 @@ const handleSubmit = async (e: any) => {
       localStorage.removeItem('isSupportMode'); 
       localStorage.removeItem('adminBackUpId');
 
-      // Salva ID e Role no navegador
       localStorage.setItem('userId', dados.id); 
-      localStorage.setItem('userRole', dados.role); // <--- IMPORTANTE
+      localStorage.setItem('userRole', dados.role);
 
-      // Redirecionamento Correto
-      if (dados.role === 'ADMIN') {
-        router.push('/admin/dashboard'); // Vai para a área VIP
+      if (dados.role === 'ADMIN' || dados.role === 'MASTER' || dados.role === 'SUPORTE') {
+        router.push('/admin/dashboard');
       } else {
-        router.push('/cliente/dashboard'); // Vai para a área comum
+        router.push('/cliente/dashboard');
       }
 
     } catch (err) {
@@ -62,18 +62,29 @@ const handleSubmit = async (e: any) => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email ou CPF</label>
             <input
-              type="email"
+              type="text"
               required
+              placeholder="seu@email.com ou 000.000.000-00"
               className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-gray-900"
-              value={form.email}
-              onChange={(e) => setForm({...form, email: e.target.value})}
+              value={form.login}
+              onChange={(e) => setForm({...form, login: e.target.value})}
             />
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+            <div className="flex justify-between items-center mb-1">
+                <label className="block text-sm font-medium text-gray-700">Senha</label>
+                {/* BOTÃO ESQUECI MINHA SENHA */}
+                <button 
+                    type="button" 
+                    onClick={() => alert('Em breve: Funcionalidade de recuperação de senha via email.')}
+                    className="text-xs text-blue-600 hover:underline"
+                >
+                    Esqueceu a senha?
+                </button>
+            </div>
             <input
               type="password"
               required
@@ -93,7 +104,7 @@ const handleSubmit = async (e: any) => {
         </form>
         
         <p className="mt-4 text-center text-sm text-gray-600">
-          Não tem conta? <a href="/cadastro" className="text-blue-600 hover:underline">Cadastre-se</a>
+          Não tem conta? <Link href="/cadastro" className="text-blue-600 hover:underline">Cadastre-se</Link>
         </p>
       </div>
     </div>

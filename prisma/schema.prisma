@@ -9,9 +9,12 @@ datasource db {
 
 // --- ENUMS ---
 enum Role {
-  ADMIN
-  COMUM
-  SUPORTE
+  MASTER      // Pode tudo (Dono do SaaS)
+  ADMIN       // Adm Geral
+  SUPORTE     // Atendimento N1
+  SUPORTE_TI  // Técnico
+  CONTADOR    // Financeiro/Fiscal
+  COMUM       // Cliente Final
 }
 
 enum StatusNota {
@@ -33,7 +36,8 @@ model User {
   telefone  String?
   
   // --- PLANO ---
-  plano            String?    @default("GRATUITO")
+  plano            String?    @default("GRATUITO") // Funciona como o ID/Slug do plano (Ex: "PRO", "ENTERPRISE")
+  planoCiclo       String     @default("MENSAL")   // "MENSAL" ou "ANUAL"
   planoStatus      String     @default("active")
   planoExpiresAt   DateTime?
 
@@ -198,4 +202,22 @@ model TributacaoMunicipal {
   updatedAt                 DateTime @updatedAt
 
   @@unique([cnae, codigoIbge, codigoTributacaoMunicipal])
+}
+
+model Plan {
+  id            String   @id @default(uuid())
+  name          String   // Ex: "Profissional"
+  slug          String   @unique // Ex: "PRO" (Isso que salvamos no User)
+  description   String?
+  
+  priceMonthly  Decimal  @db.Decimal(10, 2) // Preço Mensal
+  priceYearly   Decimal  @db.Decimal(10, 2) // Preço Anual (geralmente com desconto)
+  
+  features      String   // Lista de benefícios (pode ser separado por vírgula ou JSON string)
+  
+  active        Boolean  @default(true)
+  recommended   Boolean  @default(false) // Para destacar na tela de preços
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

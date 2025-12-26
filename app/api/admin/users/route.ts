@@ -18,13 +18,14 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
     
-    // Segurança: só permite editar role e plano por aqui
+    const dataToUpdate: any = {};
+    if (body.role) dataToUpdate.role = body.role;
+    if (body.plano) dataToUpdate.plano = body.plano;
+    if (body.planoCiclo) dataToUpdate.planoCiclo = body.planoCiclo; // <--- ADICIONADO
+
     const updated = await prisma.user.update({
         where: { id: body.id },
-        data: {
-            role: body.role,
-            plano: body.plano
-        }
+        data: dataToUpdate
     });
     
     return NextResponse.json(updated);

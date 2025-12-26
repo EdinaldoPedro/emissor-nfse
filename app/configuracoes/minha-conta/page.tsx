@@ -2,24 +2,32 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, Phone, Calendar, CreditCard, Shield, Settings, Monitor } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X } from 'lucide-react';
+import PlanSelector from '@/components/PlanSelector';
 
 export default function MinhaContaPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  
+  // Controle do Modal de Planos
+  const [showPlans, setShowPlans] = useState(false);
 
-  // Estado inicial seguro
+  // Estado inicial completo
   const [data, setData] = useState({
     nome: '',
     email: '',
     cpf: '',
     telefone: '',
-    plano: { tipo: '', status: '', expiresAt: '' },
+    // Estrutura segura para o plano
+    plano: { tipo: 'GRATUITO', status: 'active', expiresAt: null, ciclo: 'MENSAL' }, 
     perfil: { cargo: '', empresa: '', avatarUrl: '' },
     configuracoes: { darkMode: false, idioma: 'pt-BR', notificacoesEmail: true },
-    metadata: { createdAt: '', lastLoginAt: '', ipOrigem: '' }
+    metadata: { createdAt: '', lastLoginAt: '', ipOrigem: '' },
+    // Campos auxiliares para a tela
+    planoSlug: 'GRATUITO', 
+    planoCiclo: 'MENSAL'
   });
 
   useEffect(() => {
@@ -29,11 +37,27 @@ export default function MinhaContaPage() {
     fetch('/api/perfil', { headers: { 'x-user-id': userId } })
       .then(res => res.json())
       .then(apiData => {
-        // Mesclamos o que veio da API com o estado inicial para evitar erros de undefined
+        // --- TRATAMENTO DOS DADOS DO PLANO ---
+        const planoObj = apiData.plano || {};
+        const slugReal = planoObj.tipo || 'GRATUITO'; 
+        const cicloReal = apiData.planoCiclo || 'MENSAL';
+
         setData(prev => ({
             ...prev,
             ...apiData,
-            plano: apiData.plano || prev.plano,
+            
+            // Atualiza auxiliares
+            planoSlug: slugReal,
+            planoCiclo: cicloReal,
+            
+            plano: { 
+                tipo: slugReal, 
+                status: planoObj.status, 
+                expiresAt: planoObj.expiresAt,
+                ciclo: cicloReal
+            },
+            
+            // Garante objetos aninhados
             perfil: apiData.perfil || prev.perfil,
             configuracoes: apiData.configuracoes || prev.configuracoes,
             metadata: apiData.metadata || prev.metadata
@@ -43,33 +67,81 @@ export default function MinhaContaPage() {
       .catch(err => { console.error(err); setLoading(false); });
   }, [router]);
 
-  const handleSalvar = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
+  // Função de troca de plano (Atualiza o estado e fecha o modal)
+  const handlePlanChange = async (newSlug: string, newCiclo: string) => {
     const userId = localStorage.getItem('userId');
-    
     try {
-      const res = await fetch('/api/perfil', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
-        // Enviamos o estado completo, a API saberá o que atualizar
-        body: JSON.stringify(data) 
-      });
+        const res = await fetch('/api/perfil', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+            body: JSON.stringify({ 
+                plano: newSlug,
+                planoCiclo: newCiclo 
+            }) 
+        });
 
-      if (res.ok) {
-        setMsg('✅ Perfil atualizado com sucesso!');
-        setTimeout(() => setMsg(''), 3000);
-      } else {
-        setMsg('❌ Erro ao atualizar.');
-      }
-    } catch (error) { setMsg('❌ Erro de conexão.'); } 
-    finally { setSaving(false); }
+        if(res.ok) {
+            setData(prev => ({ 
+                ...prev, 
+                planoSlug: newSlug, 
+                planoCiclo: newCiclo, 
+                plano: { ...prev.plano, tipo: newSlug, ciclo: newCiclo } 
+            }));
+            setShowPlans(false);
+            setMsg('✅ Plano alterado com sucesso!');
+            setTimeout(() => setMsg(''), 3000);
+        } else {
+            alert("Erro ao alterar plano.");
+        }
+    } catch (e) { alert("Erro de conexão."); }
+  };
+
+  const handleSalvar = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setSaving(true);
+      const userId = localStorage.getItem('userId');
+      try {
+        // Removemos campos auxiliares antes de enviar
+        const { planoSlug, planoCiclo, ...payload } = data;
+
+        const res = await fetch('/api/perfil', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+          body: JSON.stringify(payload) 
+        });
+        if (res.ok) { setMsg('✅ Salvo!'); setTimeout(() => setMsg(''), 3000); }
+      } catch(e) {} finally { setSaving(false); }
   };
 
   if (loading) return <div className="p-10 text-center text-gray-500">Carregando perfil...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 md:p-12">
+    <div className="min-h-screen bg-gray-50 p-6 md:p-12 relative">
+      
+      {/* --- MODAL DE SELEÇÃO DE PLANOS --- */}
+      {showPlans && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+                <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-800">Alterar Assinatura</h2>
+                        <p className="text-sm text-slate-500">Escolha o plano ideal para o seu negócio.</p>
+                    </div>
+                    <button onClick={() => setShowPlans(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
+                        <X size={24} className="text-gray-500"/>
+                    </button>
+                </div>
+                <div className="p-8 bg-gray-50">
+                    <PlanSelector 
+                        currentPlan={data.planoSlug} 
+                        currentCycle={data.planoCiclo}
+                        onSelectPlan={handlePlanChange}
+                    />
+                </div>
+            </div>
+        </div>
+      )}
+
       <div className="max-w-4xl mx-auto">
         
         {/* Header */}
@@ -100,23 +172,27 @@ export default function MinhaContaPage() {
                 <p className="text-xs text-blue-600 font-medium mt-1">{data.perfil.empresa}</p>
               </div>
 
-              {/* Card Plano */}
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+              {/* Card Plano (Com Botão de Troca) */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500"></div>
                 <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
-                    <CreditCard size={14}/> Seu Plano
+                    <CreditCard size={14}/> Assinatura Atual
                 </h3>
-                <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-100">
-                    <p className="text-2xl font-black text-blue-700">{data.plano.tipo}</p>
-                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase mt-2 ${data.plano.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {data.plano.status}
-                    </span>
-                    {data.plano.expiresAt && (
-                        <p className="text-xs text-gray-500 mt-2">Vence em: {new Date(data.plano.expiresAt).toLocaleDateString()}</p>
-                    )}
+                <div className="text-center">
+                    <p className="text-2xl font-black text-slate-800">{data.planoSlug}</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{data.planoCiclo}</p>
+                    
+                    <button 
+                        type="button"
+                        onClick={() => setShowPlans(true)}
+                        className="w-full py-2 bg-blue-50 text-blue-600 font-bold text-sm rounded-lg hover:bg-blue-100 transition border border-blue-200"
+                    >
+                        Trocar de Plano
+                    </button>
                 </div>
               </div>
 
-              {/* Metadata (Rodapé informativo) */}
+              {/* Metadata */}
               <div className="bg-gray-100 p-4 rounded-lg text-[10px] text-gray-500 space-y-1 font-mono">
                 <p>ID: {typeof window !== 'undefined' ? localStorage.getItem('userId') : '...'}</p>
                 <p>Criado em: {data.metadata.createdAt ? new Date(data.metadata.createdAt).toLocaleDateString() : '-'}</p>
@@ -168,7 +244,7 @@ export default function MinhaContaPage() {
                 </div>
               </div>
 
-              {/* Seção 2: Preferências */}
+              {/* Seção 2: Preferências (RESTAURADA) */}
               <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
                 <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2">
                     <Settings size={20}/> Preferências

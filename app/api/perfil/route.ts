@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-// === ADICIONE O IMPORT QUE FALTAVA ===
 import { syncCnaesGlobalmente } from '@/app/services/syncService'; 
 
 const prisma = new PrismaClient();
@@ -27,8 +26,12 @@ export async function GET(request: Request) {
     email: user.email,
     cpf: user.cpf,
     telefone: user.telefone,
+    
+    // === ADIÇÃO: Inclui o ciclo do plano ===
+    planoCiclo: user.planoCiclo, 
+    
     plano: {
-      tipo: user.plano || 'Gratuito',
+      tipo: user.plano || 'GRATUITO',
       status: user.planoStatus || 'active',
       expiresAt: user.planoExpiresAt
     },
@@ -61,10 +64,8 @@ export async function PUT(request: Request) {
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
   try {
-    // 1. Atualiza dados do USUÁRIO
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
+    // 1. Atualiza dados do USUÁRIO (Incluindo Plano e Ciclo se vierem)
+    const userData: any = {
         nome: body.nome,
         telefone: body.telefone,
         cargo: body.perfil?.cargo,
@@ -72,7 +73,14 @@ export async function PUT(request: Request) {
         darkMode: body.configuracoes?.darkMode,
         idioma: body.configuracoes?.idioma,
         notificacoesEmail: body.configuracoes?.notificacoesEmail,
-      }
+    };
+
+    if (body.plano) userData.plano = body.plano;
+    if (body.planoCiclo) userData.planoCiclo = body.planoCiclo;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: userData
     });
 
     // 2. Se vier dados de EMPRESA, atualiza
@@ -112,11 +120,6 @@ export async function PUT(request: Request) {
           }
       });
 
-      await prisma.user.update({
-          where: { id: userId },
-          data: { empresaId: empresa.id }
-      });
-
       // Atualiza CNAEs e Sincroniza
       if (body.cnaes && Array.isArray(body.cnaes)) {
           await prisma.cnae.deleteMany({ where: { empresaId: empresa.id } });
@@ -131,7 +134,7 @@ export async function PUT(request: Request) {
                   }))
               });
 
-              // === SINCRONIZAÇÃO ===
+              // Sincroniza com Global
               await syncCnaesGlobalmente(body.cnaes, empresa.codigoIbge);
           }
       }
