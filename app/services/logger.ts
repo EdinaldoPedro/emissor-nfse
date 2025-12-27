@@ -8,7 +8,7 @@ interface LogParams {
   message: string;
   details?: any; 
   empresaId?: string;
-  vendaId?: string; // <--- NOVO CAMPO
+  vendaId?: string; // <--- NOVO
 }
 
 export async function createLog({ level, action, message, details, empresaId, vendaId }: LogParams) {
@@ -29,7 +29,7 @@ export async function createLog({ level, action, message, details, empresaId, ve
         message,
         details: detailsStr,
         empresaId,
-        vendaId // <--- SALVA NO BANCO
+        vendaId // <--- Salvando
       }
     });
 

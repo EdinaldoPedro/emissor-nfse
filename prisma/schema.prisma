@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql" // Ou "sqlite" se estiver usando arquivo local dev.db
+  provider = "postgresql" // Ou "sqlite" se estiver usando dev.db
   url      = env("DATABASE_URL")
 }
 
@@ -35,26 +35,21 @@ model User {
   cpf       String?  @unique
   telefone  String?
   
-  // --- PLANO ---
   plano            String?    @default("GRATUITO")
   planoCiclo       String     @default("MENSAL")
   planoStatus      String     @default("active")
   planoExpiresAt   DateTime?
   
-  // --- PERFIL ---
   cargo            String?
   avatarUrl        String?
   
-  // --- CONFIGURAÇÕES ---
   darkMode         Boolean   @default(false)
   idioma           String    @default("pt-BR")
   notificacoesEmail Boolean  @default(true)
   
-  // --- METADATA ---
   ipOrigem         String?
   lastLoginAt      DateTime? 
   
-  // --- RELAÇÕES ---
   empresaId String?  @unique
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
   
@@ -92,11 +87,11 @@ model Empresa {
   certificadoA1    String?
   senhaCertificado String?
   
-  // Relações com Notas Fiscais
+  // Relações
   notasEmitidas    NotaFiscal[] @relation("PrestadorNota")
   notasRecebidas   NotaFiscal[] @relation("TomadorNota")
   
-  // Relações com Vendas (Ciclo de Negócio)
+  // Relações de Venda
   vendasRealizadas Venda[]      @relation("VendaPrestador")
   vendasCompradas  Venda[]      @relation("VendaTomador")
 
@@ -106,55 +101,46 @@ model Empresa {
   lastApiCheck DateTime?
 }
 
-// --- VENDAS (A Transação Comercial) ---
+// --- VENDAS (A Transação) ---
 model Venda {
   id              String   @id @default(uuid())
   
-  // Quem vendeu (Prestador)
   empresaId       String
   empresa         Empresa  @relation("VendaPrestador", fields: [empresaId], references: [id])
   
-  // Quem comprou (Tomador)
   clienteId       String
   cliente         Empresa  @relation("VendaTomador", fields: [clienteId], references: [id])
   
   valor           Decimal  @db.Decimal(10, 2)
   descricao       String
   
-  // Status da Venda (independente da nota)
+  // Status da Venda
   status          String   @default("PENDENTE") // PENDENTE, CONCLUIDA, ERRO_EMISSAO, CANCELADA
   
-  // Histórico dessa venda (Várias notas podem ser geradas para 1 venda se houver erro/correção)
   notas           NotaFiscal[]
-  logs            SystemLog[]  // Logs específicos desta venda
+  logs            SystemLog[]
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
 
-// --- RELAÇÃO USER <-> CLIENTE ---
 model UserCliente {
   id        String @id @default(uuid())
-  
   userId    String
   user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   empresaId String
   empresa   Empresa @relation(fields: [empresaId], references: [id])
-  
   apelido   String?
   createdAt DateTime @default(now())
 
   @@unique([userId, empresaId])
 }
 
-// --- CNAES DA EMPRESA ---
 model Cnae {
   id          String @id @default(uuid())
   codigo      String 
   descricao   String 
   principal   Boolean @default(false)
-  
   empresaId   String
   empresa     Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 }
@@ -163,7 +149,6 @@ model Cnae {
 model NotaFiscal {
   id              String   @id @default(uuid())
   
-  // Vínculo opcional com a Venda (para suportar notas legadas ou avulsas)
   vendaId         String?
   venda           Venda?   @relation(fields: [vendaId], references: [id])
 
@@ -176,17 +161,15 @@ model NotaFiscal {
   
   status          StatusNota @default(RASCUNHO)
   
-  xmlBase64       String? // @db.Text (se usar Postgres, descomente)
-  pdfBase64       String? // @db.Text
+  xmlBase64       String? // @db.Text se usar Postgres
+  pdfBase64       String? // @db.Text se usar Postgres
   
   chaveAcesso     String?
   protocolo       String?
   
-  // Quem emitiu
   empresaId       String
   empresa         Empresa @relation("PrestadorNota", fields: [empresaId], references: [id])
 
-  // Quem recebeu
   clienteId       String
   cliente         Empresa @relation("TomadorNota", fields: [clienteId], references: [id])
 
@@ -197,7 +180,6 @@ model NotaFiscal {
   createdAt       DateTime @default(now())
 }
 
-// --- CONFIGURAÇÕES GLOBAIS ---
 model ConfiguracaoSistema {
   id             String @id @default("config")
   modeloDpsJson  String?
@@ -209,12 +191,9 @@ model GlobalCnae {
   id                        String   @id @default(uuid())
   codigo                    String   @unique
   descricao                 String
-  
   itemLc                    String?
   codigoTributacaoNacional  String?
-  
   aliquotaPadrao            Decimal? @db.Decimal(5,2)
-
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 }
@@ -225,10 +204,8 @@ model TributacaoMunicipal {
   codigoIbge                String 
   codigoTributacaoMunicipal String 
   descricaoServicoMunicipal String?
-
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
-
   @@unique([cnae, codigoIbge, codigoTributacaoMunicipal])
 }
 
@@ -242,7 +219,6 @@ model Plan {
   features      String   
   active        Boolean  @default(true)
   recommended   Boolean  @default(false)
-
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -257,7 +233,6 @@ model SystemLog {
   empresaId String?
   empresa   Empresa? @relation(fields: [empresaId], references: [id])
   
-  // Log vinculado a uma venda específica (Novo)
   vendaId   String?
   venda     Venda?   @relation(fields: [vendaId], references: [id])
   

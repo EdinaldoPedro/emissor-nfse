@@ -8,28 +8,27 @@ const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
 
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id') || 'anonimo';
-  let empresaIdLog = null;
   let vendaIdLog = null;
+  let empresaIdLog = null;
 
   try {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae, retencoes } = body;
 
-    // 1. Identificar Prestador
+    // 1. Prestador
     const userPrestador = await prisma.user.findUnique({
       where: { id: userId },
       include: { empresa: true }
     });
     const prestador = userPrestador?.empresa;
-
-    if (!prestador) throw new Error("Usuário não possui empresa vinculada.");
+    if (!prestador) throw new Error("Usuário sem empresa.");
     empresaIdLog = prestador.id;
 
-    // 2. Identificar Tomador
+    // 2. Tomador
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
-    if (!tomador) throw new Error('Cliente tomador não encontrado.');
+    if (!tomador) throw new Error('Cliente não encontrado.');
 
-    // === 3. CRIAR A VENDA (O Registro da Operação) ===
+    // 3. CRIAR VENDA (Status: PROCESSANDO)
     const venda = await prisma.venda.create({
         data: {
             empresaId: prestador.id,
@@ -41,40 +40,29 @@ export async function POST(request: Request) {
     });
     vendaIdLog = venda.id;
 
-    // LOG INICIAL VINCULADO À VENDA
     await createLog({
-        level: 'INFO',
-        action: 'VENDA_INICIADA',
-        message: `Venda iniciada. Preparando emissão...`,
+        level: 'INFO', action: 'VENDA_INICIADA',
+        message: `Venda iniciada (R$ ${valor}).`,
         empresaId: prestador.id,
         vendaId: venda.id,
-        details: { cliente: tomador.razaoSocial, valor, cnae: codigoCnae }
+        details: { cliente: tomador.razaoSocial, cnae: codigoCnae }
     });
 
-    // 4. Validações e Inteligência Tributária
-    if (!prestador.codigoIbge) throw new Error('Falta Código IBGE da sua empresa.');
+    // 4. Validações
+    if (!prestador.codigoIbge) throw new Error('Falta IBGE do prestador.');
     
-    // ... (Lógica de Tributação idêntica à anterior) ...
+    // 5. Tributação
     const cnaeLimpo = cleanString(codigoCnae);
     let itemLc = '01.01';
-    let codigoTribNacional = '010101'; // Default
+    let codigoTribNacional = '010101';
 
-    // Tenta achar regra municipal
-    const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
-        where: { cnae: cnaeLimpo, codigoIbge: prestador.codigoIbge }
-    });
-    if (regraMunicipal && regraMunicipal.codigoTributacaoMunicipal !== 'A_DEFINIR') {
-        codigoTribNacional = regraMunicipal.codigoTributacaoMunicipal;
-    } else {
-        // Tenta regra global
-        const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeLimpo } });
-        if (regraGlobal?.codigoTributacaoNacional) {
-            codigoTribNacional = regraGlobal.codigoTributacaoNacional;
-            itemLc = regraGlobal.itemLc || itemLc;
-        }
+    const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeLimpo } });
+    if (regraGlobal?.codigoTributacaoNacional) {
+        codigoTribNacional = regraGlobal.codigoTributacaoNacional;
+        itemLc = regraGlobal.itemLc || itemLc;
     }
 
-    // 5. Montagem DPS
+    // 6. Montagem DPS
     const dpsId = `DPS${Date.now()}`;
     const dpsPayload = {
       "id": dpsId,
@@ -90,21 +78,20 @@ export async function POST(request: Request) {
     };
 
     await createLog({
-        level: 'INFO',
-        action: 'EMISSAO_JSON_GERADO',
-        message: 'DPS montada.',
+        level: 'INFO', action: 'EMISSAO_JSON_GERADO',
+        message: 'DPS gerada.',
         empresaId: prestador.id,
-        vendaId: venda.id, // <--- Vincula JSON à venda
+        vendaId: venda.id,
         details: dpsPayload
     });
 
-    // 6. Simulação de Envio
+    // 7. Simulação Envio
     await new Promise(r => setTimeout(r, 1000));
     
-    // 7. Salvar Nota e Atualizar Venda
+    // 8. Criar Nota e Atualizar Venda
     const novaNota = await prisma.notaFiscal.create({
       data: {
-        vendaId: venda.id, // <--- Vincula nota à venda
+        vendaId: venda.id, // VINCULO
         empresaId: prestador.id,
         clienteId: tomador.id,
         numero: Math.floor(Math.random() * 10000),
@@ -121,40 +108,34 @@ export async function POST(request: Request) {
       }
     });
 
-    // Marca Venda como Concluída
     await prisma.venda.update({
         where: { id: venda.id },
         data: { status: 'CONCLUIDA' }
     });
 
     await createLog({
-        level: 'INFO',
-        action: 'EMISSAO_SUCESSO',
+        level: 'INFO', action: 'EMISSAO_SUCESSO',
         message: `Nota ${novaNota.numero} autorizada!`,
         empresaId: prestador.id,
         vendaId: venda.id
     });
 
-    return NextResponse.json({ success: true, nota: novaNota }, { status: 201 });
+    return NextResponse.json({ success: true }, { status: 201 });
 
   } catch (error: any) {
-    // Se deu erro, marca a venda como ERRO
     if (vendaIdLog) {
         await prisma.venda.update({
             where: { id: vendaIdLog },
             data: { status: 'ERRO_EMISSAO' }
         });
     }
-
     await createLog({
-        level: 'ERRO',
-        action: 'EMISSAO_FALHA',
+        level: 'ERRO', action: 'EMISSAO_FALHA',
         message: error.message,
         empresaId: empresaIdLog || undefined,
         vendaId: vendaIdLog || undefined,
         details: error.stack
     });
-
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
