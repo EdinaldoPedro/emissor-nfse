@@ -3,18 +3,18 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "postgresql" // Ou "sqlite" se estiver usando arquivo local dev.db
   url      = env("DATABASE_URL")
 }
 
 // --- ENUMS ---
 enum Role {
-  MASTER      // Pode tudo (Dono do SaaS)
-  ADMIN       // Adm Geral
-  SUPORTE     // Atendimento N1
-  SUPORTE_TI  // Técnico
-  CONTADOR    // Financeiro/Fiscal
-  COMUM       // Cliente Final
+  MASTER
+  ADMIN
+  SUPORTE
+  SUPORTE_TI
+  CONTADOR
+  COMUM
 }
 
 enum StatusNota {
@@ -32,24 +32,24 @@ model User {
   senha     String
   nome      String
   role      Role     @default(COMUM)
-  cpf       String?  @unique // Deixei opcional (?) pois as vezes falha se não tiver
+  cpf       String?  @unique
   telefone  String?
   
   // --- PLANO ---
-  plano            String?    @default("GRATUITO") // Funciona como o ID/Slug do plano (Ex: "PRO", "ENTERPRISE")
-  planoCiclo       String     @default("MENSAL")   // "MENSAL" ou "ANUAL"
+  plano            String?    @default("GRATUITO")
+  planoCiclo       String     @default("MENSAL")
   planoStatus      String     @default("active")
   planoExpiresAt   DateTime?
-
+  
   // --- PERFIL ---
   cargo            String?
   avatarUrl        String?
-
+  
   // --- CONFIGURAÇÕES ---
   darkMode         Boolean   @default(false)
   idioma           String    @default("pt-BR")
   notificacoesEmail Boolean  @default(true)
-
+  
   // --- METADATA ---
   ipOrigem         String?
   lastLoginAt      DateTime? 
@@ -59,7 +59,6 @@ model User {
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
   
   clientes  UserCliente[]
-  // (NotaFiscal removida daqui, correto!)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -70,7 +69,7 @@ model Empresa {
   id        String   @id @default(uuid())
   documento String   @unique
   
-  email     String?
+  email        String?
   razaoSocial  String
   nomeFantasia String?
   
@@ -82,23 +81,55 @@ model Empresa {
   cidade     String?
   uf         String?
   codigoIbge String?
-
+  
   inscricaoMunicipal String?
   regimeTributario   String? @default("MEI")
   
   donoUser     User?         @relation("DonoEmpresa")
   vinculadoA   UserCliente[] 
   atividades   Cnae[]
-
-  // --- CAMPOS MOVIDOS DO USER PARA CÁ (CORRETO) ---
-  certificadoA1    String? 
+  
+  certificadoA1    String?
   senhaCertificado String?
-  notasEmitidas    NotaFiscal[] // Agora a empresa tem as notas
+  
+  // Relações com Notas Fiscais
+  notasEmitidas    NotaFiscal[] @relation("PrestadorNota")
+  notasRecebidas   NotaFiscal[] @relation("TomadorNota")
+  
+  // Relações com Vendas (Ciclo de Negócio)
+  vendasRealizadas Venda[]      @relation("VendaPrestador")
+  vendasCompradas  Venda[]      @relation("VendaTomador")
 
-  logs          SystemLog[]
-
+  logs             SystemLog[]
+  
   updatedAt    DateTime @updatedAt
-  lastApiCheck DateTime? 
+  lastApiCheck DateTime?
+}
+
+// --- VENDAS (A Transação Comercial) ---
+model Venda {
+  id              String   @id @default(uuid())
+  
+  // Quem vendeu (Prestador)
+  empresaId       String
+  empresa         Empresa  @relation("VendaPrestador", fields: [empresaId], references: [id])
+  
+  // Quem comprou (Tomador)
+  clienteId       String
+  cliente         Empresa  @relation("VendaTomador", fields: [clienteId], references: [id])
+  
+  valor           Decimal  @db.Decimal(10, 2)
+  descricao       String
+  
+  // Status da Venda (independente da nota)
+  status          String   @default("PENDENTE") // PENDENTE, CONCLUIDA, ERRO_EMISSAO, CANCELADA
+  
+  // Histórico dessa venda (Várias notas podem ser geradas para 1 venda se houver erro/correção)
+  notas           NotaFiscal[]
+  logs            SystemLog[]  // Logs específicos desta venda
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 // --- RELAÇÃO USER <-> CLIENTE ---
@@ -110,13 +141,14 @@ model UserCliente {
   
   empresaId String
   empresa   Empresa @relation(fields: [empresaId], references: [id])
-
-  apelido   String? 
+  
+  apelido   String?
   createdAt DateTime @default(now())
 
   @@unique([userId, empresaId])
 }
 
+// --- CNAES DA EMPRESA ---
 model Cnae {
   id          String @id @default(uuid())
   codigo      String 
@@ -130,6 +162,11 @@ model Cnae {
 // --- NOTAS FISCAIS ---
 model NotaFiscal {
   id              String   @id @default(uuid())
+  
+  // Vínculo opcional com a Venda (para suportar notas legadas ou avulsas)
+  vendaId         String?
+  venda           Venda?   @relation(fields: [vendaId], references: [id])
+
   numero          Int?
   valor           Decimal  @db.Decimal(10, 2)
   descricao       String
@@ -139,33 +176,28 @@ model NotaFiscal {
   
   status          StatusNota @default(RASCUNHO)
   
-  xmlBase64       String?  @db.Text
-  pdfBase64       String?  @db.Text
+  xmlBase64       String? // @db.Text (se usar Postgres, descomente)
+  pdfBase64       String? // @db.Text
   
   chaveAcesso     String?
   protocolo       String?
   
-  // === AQUI ESTAVA O ERRO, CORRIGIDO: ===
-  
-  // 1. Vinculamos à EMPRESA (quem emite)
+  // Quem emitiu
   empresaId       String
-  empresa         Empresa @relation(fields: [empresaId], references: [id])
+  empresa         Empresa @relation("PrestadorNota", fields: [empresaId], references: [id])
 
-  // 2. Mantemos apenas o ID do cliente tomador
+  // Quem recebeu
   clienteId       String
-  
-  // 3. Opcional: Se quiser saber QUAL usuário logado apertou o botão (auditoria)
-  // criadoPorId     String? 
-  
-  // Campos extras usados na API
+  cliente         Empresa @relation("TomadorNota", fields: [clienteId], references: [id])
+
   cnae            String?
   codigoServico   String?
-
+  
   dataEmissao     DateTime?
   createdAt       DateTime @default(now())
 }
 
-// --- CONFIG ---
+// --- CONFIGURAÇÕES GLOBAIS ---
 model ConfiguracaoSistema {
   id             String @id @default("config")
   modeloDpsJson  String?
@@ -174,31 +206,25 @@ model ConfiguracaoSistema {
 }
 
 model GlobalCnae {
-  id                        String   @id @default(uuid()) // <--- Corrigido (espaço)
-  codigo                    String   @unique // Ex: 6202-3/00
+  id                        String   @id @default(uuid())
+  codigo                    String   @unique
   descricao                 String
   
-  // Campos editáveis pelo Admin
-  itemLc                    String?  // <--- Corrigido (espaço)
-  codigoTributacaoNacional  String? // Código padrão nacional (Ex: 01.07.01)
+  itemLc                    String?
+  codigoTributacaoNacional  String?
   
-  aliquotaPadrao            Decimal? @db.Decimal(5,2) // Opcional: Alíquota sugerida
+  aliquotaPadrao            Decimal? @db.Decimal(5,2)
 
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 }
 
-// 2. Exceções Municipais (Substituto Tributário / De-Para)
 model TributacaoMunicipal {
   id                        String   @id @default(uuid())
-  
-  cnae                      String // O CNAE que dispara a regra
-  codigoIbge                String // O Município onde a regra se aplica
-  
-  // A informação crucial para a NFS-e naquele município
+  cnae                      String 
+  codigoIbge                String 
   codigoTributacaoMunicipal String 
-  
-  descricaoServicoMunicipal String? // Algumas prefeituras exigem descrição específica
+  descricaoServicoMunicipal String?
 
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
@@ -208,17 +234,14 @@ model TributacaoMunicipal {
 
 model Plan {
   id            String   @id @default(uuid())
-  name          String   // Ex: "Profissional"
-  slug          String   @unique // Ex: "PRO" (Isso que salvamos no User)
+  name          String   
+  slug          String   @unique
   description   String?
-  
-  priceMonthly  Decimal  @db.Decimal(10, 2) // Preço Mensal
-  priceYearly   Decimal  @db.Decimal(10, 2) // Preço Anual (geralmente com desconto)
-  
-  features      String   // Lista de benefícios (pode ser separado por vírgula ou JSON string)
-  
+  priceMonthly  Decimal  @db.Decimal(10, 2)
+  priceYearly   Decimal  @db.Decimal(10, 2)
+  features      String   
   active        Boolean  @default(true)
-  recommended   Boolean  @default(false) // Para destacar na tela de preços
+  recommended   Boolean  @default(false)
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -226,16 +249,17 @@ model Plan {
 
 model SystemLog {
   id        String   @id @default(uuid())
-  level     String   // "INFO", "ERRO", "ALERTA", "DEBUG"
-  action    String   // Ex: "EMISSAO_NFSE", "CADASTRO_EMPRESA"
-  message   String   // "Iniciando emissão...", "Erro ao validar CNPJ"
+  level     String
+  action    String
+  message   String
+  details   String?
   
-  // O "Script" (JSON com os dados técnicos para você analisar)
-  details   String?  
-  
-  // Rastreabilidade
   empresaId String?
   empresa   Empresa? @relation(fields: [empresaId], references: [id])
+  
+  // Log vinculado a uma venda específica (Novo)
+  vendaId   String?
+  venda     Venda?   @relation(fields: [vendaId], references: [id])
   
   createdAt DateTime @default(now())
 }

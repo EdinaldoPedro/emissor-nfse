@@ -6,13 +6,13 @@ interface LogParams {
   level: 'INFO' | 'ERRO' | 'ALERTA' | 'DEBUG';
   action: string;
   message: string;
-  details?: any; // Pode ser objeto, string, erro...
+  details?: any; 
   empresaId?: string;
+  vendaId?: string; // <--- NOVO CAMPO
 }
 
-export async function createLog({ level, action, message, details, empresaId }: LogParams) {
+export async function createLog({ level, action, message, details, empresaId, vendaId }: LogParams) {
   try {
-    // Converte objetos/erros para string bonita (JSON)
     let detailsStr = '';
     if (details) {
         if (details instanceof Error) {
@@ -28,11 +28,11 @@ export async function createLog({ level, action, message, details, empresaId }: 
         action,
         message,
         details: detailsStr,
-        empresaId
+        empresaId,
+        vendaId // <--- SALVA NO BANCO
       }
     });
 
-    // Também joga no console para desenvolvimento
     const cor = level === 'ERRO' ? '\x1b[31m' : '\x1b[32m';
     console.log(`${cor}[${level}] ${action}:\x1b[0m ${message}`);
 

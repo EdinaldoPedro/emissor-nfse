@@ -3,41 +3,35 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-export async function GET() {
+export async function GET(request: Request, { params }: { params: { id: string } }) {
+  const { id } = params;
+
   try {
-    // 1. Busca empresas (Certificado, Notas OU Logs de Erro)
-    const emissores = await prisma.empresa.findMany({
-      where: {
-        OR: [
-            { certificadoA1: { not: null } }, 
-            { notasEmitidas: { some: {} } },
-            { logs: { some: {} } } 
-        ]
-      },
-      include: {
-        _count: {
-          select: { notasEmitidas: true }
-        }
-      },
-      orderBy: { updatedAt: 'desc' }
+    const empresa = await prisma.empresa.findUnique({ where: { id } });
+    if (!empresa) return NextResponse.json({ error: '404' }, { status: 404 });
+
+    // Busca Logs GERAIS (sem venda ou todos)
+    const logs = await prisma.systemLog.findMany({
+        where: { empresaId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 50
     });
 
-    // 2. Conta erros das últimas 24h
-    const dataComErros = await Promise.all(emissores.map(async (emp) => {
-        const erros = await prisma.systemLog.count({
-            where: {
-                empresaId: emp.id,
-                level: 'ERRO',
-                createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-            }
-        });
-        return { ...emp, errosRecentes: erros };
-    }));
+    // Busca VENDAS (que contêm as notas e os logs específicos)
+    const vendas = await prisma.venda.findMany({
+        where: { empresaId: id },
+        include: { 
+            cliente: { select: { razaoSocial: true, documento: true } }, // Nome do cliente
+            notas: true,  // Notas geradas
+            logs: { orderBy: { createdAt: 'desc' } }  // Logs dessa venda específica
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50
+    });
 
-    return NextResponse.json(dataComErros);
+    return NextResponse.json({ empresa, logs, vendas });
 
   } catch (error) {
-    console.error("Erro API Emissões:", error);
-    return NextResponse.json({ error: 'Erro interno ao listar.' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro' }, { status: 500 });
   }
 }
