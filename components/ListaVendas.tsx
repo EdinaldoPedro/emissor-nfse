@@ -1,6 +1,7 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
-import { Search, FileText, MoreVertical, Ban, RefreshCcw, Share2, ChevronLeft, ChevronRight, Loader2, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+// IMPORT CORRIGIDO ABAIXO:
+import { Search, FileText, MoreVertical, Ban, RefreshCcw, Share2, ChevronLeft, ChevronRight, Loader2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface ListaVendasProps {
@@ -16,33 +17,28 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   
-  // Separa o texto do input (imediato) do termo de busca (com delay)
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // 1. Lógica de Debounce (Delay na digitação)
-  // Só atualiza 'debouncedSearch' quando o usuário para de digitar por 500ms
+  // Evita duplo fetch na montagem
+  const isFirstRender = useRef(true);
+
+  // Debounce do input de busca
   useEffect(() => {
     const timer = setTimeout(() => {
         setDebouncedSearch(searchTerm);
-        // Se o termo mudou, volta para a primeira página
-        if (searchTerm !== debouncedSearch) {
-            setPage(1);
-        }
+        if (searchTerm !== debouncedSearch) setPage(1);
     }, 500);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // 2. Função de Busca (Memoizada)
   const fetchVendas = useCallback(() => {
     setLoading(true);
     const userId = localStorage.getItem('userId');
     const limit = compact ? 10 : 10; 
     const typeFilter = onlyValid ? 'valid' : 'all';
 
-    // Usa 'debouncedSearch' para a requisição
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
         headers: { 'x-user-id': userId || '' }
     })
@@ -55,15 +51,39 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
     .finally(() => setLoading(false));
   }, [page, debouncedSearch, compact, onlyValid]);
 
-  // 3. Gatilho Único de Carregamento
-  // Dispara apenas quando os parâmetros reais (página ou busca confirmada) mudam
   useEffect(() => {
     fetchVendas();
-    // Nota: Removemos propositalmente o listener de 'window focus' para evitar recarregamentos constantes
   }, [fetchVendas]);
 
   const handleCorrigir = (vendaId: string) => {
       router.push(`/emitir?retry=${vendaId}`);
+  };
+
+  // --- TRADUTOR DE ERROS (PARA O CLIENTE) ---
+  const getFriendlyError = (rawMessage: string | null) => {
+      if (!rawMessage) return "Erro desconhecido. Tente novamente.";
+      
+      const msg = rawMessage.toLowerCase();
+
+      if (msg.includes('certificado') || msg.includes('pfx')) {
+          return (
+              <span>
+                  <strong>Certificado Digital ausente.</strong><br/>
+                  Vá em <em>Configurações {'>'} Minha Empresa</em> e faça o upload do seu e-CNPJ (A1).
+              </span>
+          );
+      }
+      if (msg.includes('cnpj') || msg.includes('cpf') || msg.includes('documento')) {
+          return "Dados do cliente inválidos. Verifique o CPF/CNPJ no cadastro do cliente.";
+      }
+      if (msg.includes('tributação') || msg.includes('serviço')) {
+          return "Configuração fiscal incompleta. Verifique se o CNAE e códigos estão corretos.";
+      }
+      if (msg.includes('conexão') || msg.includes('timeout')) {
+          return "Instabilidade na Sefaz. Tente novamente em alguns minutos.";
+      }
+
+      return rawMessage.length > 100 ? rawMessage.substring(0, 100) + '...' : rawMessage;
   };
 
   const handleAction = async (action: string, vendaId: string) => {
@@ -96,7 +116,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
             <input 
                 className="w-full pl-9 p-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder={onlyValid ? "Buscar nota, cliente..." : "Buscar cliente, erro..."}
-                value={searchTerm} // Liga ao estado imediato
+                value={searchTerm} 
                 onChange={e => setSearchTerm(e.target.value)}
             />
         </div>
@@ -154,9 +174,19 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                             <span className="cursor-help px-2 py-1 rounded text-[10px] font-bold uppercase border bg-red-50 text-red-700 border-red-200 flex items-center gap-1">
                                                 FALHOU <AlertCircle size={10}/>
                                             </span>
-                                            <div className="absolute bottom-full mb-2 w-64 p-2 bg-slate-800 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition pointer-events-none z-10 text-left">
-                                                <p className="font-bold mb-1 text-red-300">Motivo da Falha:</p>
-                                                {venda.motivoErro || 'Erro desconhecido. Tente novamente.'}
+                                            
+                                            {/* TOOLTIP AMIGÁVEL PARA O CLIENTE */}
+                                            <div className="absolute bottom-full mb-2 w-72 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition pointer-events-none z-20 text-left border border-slate-600">
+                                                <div className="flex items-start gap-2">
+                                                    <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5"/>
+                                                    <div>
+                                                        <p className="font-bold mb-1 text-red-200 uppercase text-[10px]">Atenção Necessária</p>
+                                                        <div className="text-slate-200 leading-relaxed">
+                                                            {getFriendlyError(venda.motivoErro)}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-800"></div>
                                             </div>
                                         </div>
                                     ) : (
@@ -209,7 +239,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
         </table>
       </div>
 
-      {/* RODAPÉ PAGINAÇÃO */}
       {!compact && (
           <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
               <span className="text-xs text-slate-500">Página {page} de {totalPages}</span>

@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { 
-    ArrowLeft, Download, FileJson, AlertTriangle, CheckCircle, 
-    Server, Building, User, FileText, DollarSign, Activity, Terminal 
+    ArrowLeft, Download, FileJson, AlertTriangle, 
+    Building, User, FileText, DollarSign, Activity 
 } from 'lucide-react';
 
 export default function DetalheVendaCompleto() {
@@ -20,15 +20,14 @@ export default function DetalheVendaCompleto() {
         .finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <div className="h-screen flex items-center justify-center text-slate-500">Carregando detalhes da transação...</div>;
+  if (loading) return <div className="h-screen flex items-center justify-center text-slate-500">Carregando detalhes...</div>;
   if (!venda) return <div className="p-8">Venda não encontrada.</div>;
 
-  // Helpers de UI
   const statusColor = venda.status === 'CONCLUIDA' ? 'bg-green-100 text-green-700 border-green-200' : 
                       venda.status === 'ERRO_EMISSAO' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-blue-100 text-blue-700';
 
   const downloadPayload = () => {
-      if(!venda.payloadJson) return alert("Nenhum payload registrado para esta venda.");
+      if(!venda.payloadJson) return alert("Nenhum payload registrado.");
       const blob = new Blob([venda.payloadJson], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -37,14 +36,25 @@ export default function DetalheVendaCompleto() {
       a.click();
   };
 
-  // Parsing seguro do Payload para exibir nos campos
+  // --- FORMATAÇÃO DO JSON PARA FICAR BONITO ---
   let dpsData: any = {};
-  try { dpsData = JSON.parse(venda.payloadJson || '{}'); } catch(e) {}
+  let prettyJson = "// Payload vazio ou inválido";
+  
+  if (venda.payloadJson) {
+      try {
+          const parsed = JSON.parse(venda.payloadJson);
+          dpsData = parsed;
+          // O "null, 2" garante a indentação de 2 espaços
+          prettyJson = JSON.stringify(parsed, null, 2); 
+      } catch(e) {
+          prettyJson = venda.payloadJson;
+      }
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       
-      {/* HEADER DE NAVEGAÇÃO */}
+      {/* HEADER */}
       <div className="bg-white border-b px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
           <div className="flex items-center gap-4">
               <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-500">
@@ -63,31 +73,27 @@ export default function DetalheVendaCompleto() {
               </div>
           </div>
           
-          <div className="flex gap-2">
-              <button onClick={downloadPayload} className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-sm font-medium transition border border-slate-200">
-                  <Download size={16}/> Baixar JSON (DPS)
-              </button>
-          </div>
+          <button onClick={downloadPayload} className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-sm font-medium transition border border-slate-200">
+              <Download size={16}/> Baixar JSON
+          </button>
       </div>
 
       <div className="flex-1 p-6 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* COLUNA ESQUERDA: BLOCOS DE DADOS */}
+          {/* COLUNA ESQUERDA */}
           <div className="lg:col-span-2 space-y-6">
               
-              {/* TABS */}
               <div className="flex border-b border-slate-200 mb-4">
                   <button onClick={() => setActiveTab('dados')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeTab === 'dados' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>
                       Dados da Nota
                   </button>
                   <button onClick={() => setActiveTab('tecnico')} className={`px-4 py-2 text-sm font-bold border-b-2 transition ${activeTab === 'tecnico' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>
-                      Payload Técnico
+                      Payload Técnico (JSON)
                   </button>
               </div>
 
               {activeTab === 'dados' ? (
                   <>
-                    {/* BLOCO 1: PRESTADOR */}
                     <section className="bg-white rounded-xl shadow-sm border p-5">
                         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2 border-b pb-2">
                             <Building size={16}/> Prestador (Emissor)
@@ -112,7 +118,6 @@ export default function DetalheVendaCompleto() {
                         </div>
                     </section>
 
-                    {/* BLOCO 2: TOMADOR */}
                     <section className="bg-white rounded-xl shadow-sm border p-5">
                         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2 border-b pb-2">
                             <User size={16}/> Tomador (Cliente)
@@ -135,7 +140,6 @@ export default function DetalheVendaCompleto() {
                         </div>
                     </section>
 
-                    {/* BLOCO 3: SERVIÇO E VALORES */}
                     <section className="bg-white rounded-xl shadow-sm border p-5">
                         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2 border-b pb-2">
                             <FileText size={16}/> Serviço e Tributação
@@ -181,22 +185,21 @@ export default function DetalheVendaCompleto() {
                     </section>
                   </>
               ) : (
-                  // ABA TÉCNICA (JSON VIEW)
+                  // ABA TÉCNICA
                   <div className="bg-slate-900 rounded-xl shadow-lg overflow-hidden border border-slate-700">
                       <div className="bg-slate-800 px-4 py-2 border-b border-slate-700 flex justify-between items-center">
                           <span className="text-xs text-slate-400 font-mono">Payload JSON (infDPS)</span>
                           <FileJson size={14} className="text-slate-500"/>
                       </div>
-                      <pre className="p-4 text-xs font-mono text-green-400 overflow-auto max-h-[600px]">
-                          {venda.payloadJson ? JSON.stringify(JSON.parse(venda.payloadJson), null, 2) : '// Nenhum payload gerado.'}
+                      <pre className="p-4 text-xs font-mono text-green-400 overflow-auto max-h-[600px] whitespace-pre-wrap">
+                          {prettyJson}
                       </pre>
                   </div>
               )}
           </div>
 
-          {/* COLUNA DIREITA: LOGS E AÇÕES */}
+          {/* COLUNA DIREITA */}
           <div className="space-y-6">
-              
               <div className="bg-white rounded-xl shadow-sm border p-0 overflow-hidden flex flex-col max-h-[600px]">
                   <div className="p-4 border-b bg-slate-50 font-bold text-slate-700 flex items-center gap-2">
                       <Activity size={16}/> Linha do Tempo
@@ -205,15 +208,14 @@ export default function DetalheVendaCompleto() {
                       {venda.logs.map((log: any) => (
                           <div key={log.id} className="relative pl-4 border-l-2 border-slate-200 pb-2 last:pb-0">
                               <div className={`absolute -left-[5px] top-0 w-2.5 h-2.5 rounded-full ${
-                                  log.level === 'ERRO' ? 'bg-red-500' : 
-                                  log.level === 'INFO' ? 'bg-blue-500' : 'bg-gray-400'
+                                  log.level === 'ERRO' ? 'bg-red-500' : 'bg-blue-500'
                               }`}></div>
                               
                               <p className="text-xs text-slate-400 font-mono mb-1">
                                   {new Date(log.createdAt).toLocaleTimeString()}
                               </p>
                               <p className="text-xs font-bold text-slate-700">{log.action}</p>
-                              <p className="text-xs text-slate-600 mt-1">{log.message}</p>
+                              <p className="text-xs text-slate-600 mt-1 break-words">{log.message}</p>
                               
                               {log.details && log.level === 'ERRO' && (
                                   <div className="mt-2 bg-red-50 p-2 rounded text-[10px] font-mono text-red-700 border border-red-100 break-words">
@@ -225,23 +227,20 @@ export default function DetalheVendaCompleto() {
                   </div>
               </div>
 
-              {/* AÇÃO RÁPIDA */}
               {venda.status === 'ERRO_EMISSAO' && (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
                       <AlertTriangle className="mx-auto text-red-500 mb-2" size={32}/>
                       <h4 className="font-bold text-red-800">Emissão Falhou</h4>
                       <p className="text-xs text-red-600 mb-4">Verifique os logs, corrija o cadastro e tente novamente.</p>
                       
-                      {/* Por enquanto, redireciona para a tela de emissão do cliente (mas poderíamos fazer um botão de reprocessar aqui) */}
                       <button 
-                        onClick={() => router.push(`/cliente/dashboard`)} // Ou rota de admin específica
+                        onClick={() => router.push(`/cliente/dashboard`)} 
                         className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded shadow-sm transition"
                       >
                           Ir para Correção
                       </button>
                   </div>
               )}
-
           </div>
 
       </div>

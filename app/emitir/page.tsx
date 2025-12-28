@@ -19,12 +19,12 @@ interface CnaeDB {
 
 export default function EmitirNotaPage() {
   const router = useRouter();
-  const searchParams = useSearchParams(); // Hook para ler parâmetros
+  const searchParams = useSearchParams(); 
   const retryId = searchParams.get('retry');
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [loadingRetry, setLoadingRetry] = useState(false); // Loading específico da correção
+  const [loadingRetry, setLoadingRetry] = useState(false);
   
   // Feedback Visual
   const [feedback, setFeedback] = useState<{ show: boolean; type: 'success' | 'error'; title: string; msg: string }>({
@@ -60,7 +60,7 @@ export default function EmitirNotaPage() {
       .then(data => {
          if (data.atividades && Array.isArray(data.atividades)) {
              setMeusCnaes(data.atividades);
-             if (!retryId) { // Só define default se não for correção
+             if (!retryId) { 
                  const principal = data.atividades.find((c: CnaeDB) => c.principal);
                  if (principal) setNfData(prev => ({ ...prev, codigoCnae: principal.codigo }));
                  else if (data.atividades.length > 0) setNfData(prev => ({ ...prev, codigoCnae: data.atividades[0].codigo }));
@@ -69,7 +69,7 @@ export default function EmitirNotaPage() {
       })
       .catch(console.error);
 
-    // 3. SE FOR MODO CORREÇÃO, CARREGA OS DADOS DA VENDA FALHA
+    // 3. SE FOR MODO CORREÇÃO
     if (retryId) {
         setLoadingRetry(true);
         fetch(`/api/vendas/${retryId}`, { headers: { 'x-user-id': userId } })
@@ -82,10 +82,8 @@ export default function EmitirNotaPage() {
                         clienteNome: venda.cliente?.razaoSocial || "Cliente",
                         valor: venda.valor,
                         servicoDescricao: venda.descricao,
-                        // Tenta recuperar CNAE da nota se existir, senão mantém vazio pra user escolher
                         codigoCnae: venda.notas?.[0]?.cnae || prev.codigoCnae 
                     }));
-                    // Pula direto para passo 2 para revisar valores
                     setStep(2);
                 }
             })
@@ -129,6 +127,19 @@ export default function EmitirNotaPage() {
 
   const handleBack = () => setStep(step - 1);
 
+  // --- TRADUTOR DE ERRO PARA O MODAL ---
+  const getFriendlyFeedback = (errorMsg: string) => {
+      const msg = errorMsg.toLowerCase();
+      
+      if (msg.includes('certificado')) {
+          return "Certificado Digital não encontrado. Para emitir notas, vá em 'Configurações' e faça o upload do seu e-CNPJ.";
+      }
+      if (msg.includes('cnpj') || msg.includes('cpf')) {
+          return "CPF/CNPJ do cliente inválido ou não informado. Verifique o cadastro.";
+      }
+      return errorMsg; // Retorna original se não for conhecido
+  }
+
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { alert("Selecione uma Atividade (CNAE)."); return; }
 
@@ -151,13 +162,16 @@ export default function EmitirNotaPage() {
 
       if (res.ok) {
         setFeedback({ 
-            show: true, type: 'success', title: 'Solicitação Enviada!', 
-            msg: 'A nota está sendo processada pelo Portal Nacional.' 
+            show: true, type: 'success', title: 'Sucesso!', 
+            msg: 'A nota foi enviada para processamento.' 
         });
       } else {
+        // AQUI ESTÁ A MUDANÇA: Usamos a função de tradução
         setFeedback({ 
-            show: true, type: 'error', title: 'Houve uma falha', 
-            msg: resposta.error || 'Não foi possível completar a emissão. Verifique o histórico.' 
+            show: true, 
+            type: 'error', 
+            title: 'Não foi possível emitir', 
+            msg: getFriendlyFeedback(resposta.error || 'Erro desconhecido.') 
         });
       }
 
@@ -165,30 +179,37 @@ export default function EmitirNotaPage() {
       setFeedback({ show: true, type: 'error', title: 'Erro de Conexão', msg: 'Verifique sua internet.' });
     } finally {
       setLoading(false);
-      setTimeout(() => { router.push('/cliente/dashboard'); }, 3000); 
+      setTimeout(() => { router.push('/cliente/dashboard'); }, 3500); // 3.5s para ler
     }
   };
 
   const valorNumerico = parseFloat(nfData.valor) || 0;
 
-  if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados da venda...</div>;
+  if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados...</div>;
 
   return (
     <div className="max-w-4xl mx-auto py-10 relative">
       
-      {/* MODAL FEEDBACK */}
+      {/* MODAL DE FEEDBACK (Visual do Cliente) */}
       {feedback.show && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in duration-300">
-            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center transform transition-all scale-100 animate-in zoom-in-95 duration-300">
-                <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6 ${feedback.type === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center transform transition-all scale-100 animate-in zoom-in-95 duration-300 border border-slate-100">
+                <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6 ${feedback.type === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-50 text-red-500'}`}>
                     {feedback.type === 'success' ? <CheckCircle size={48} /> : <XCircle size={48} />}
                 </div>
-                <h3 className={`text-2xl font-bold mb-2 ${feedback.type === 'success' ? 'text-slate-800' : 'text-red-700'}`}>
+                
+                <h3 className={`text-2xl font-bold mb-3 ${feedback.type === 'success' ? 'text-slate-800' : 'text-red-700'}`}>
                     {feedback.title}
                 </h3>
-                <p className="text-slate-500 mb-6">{feedback.msg}</p>
-                <div className="flex items-center justify-center gap-2 text-sm text-blue-600 font-medium animate-pulse">
-                    <Loader2 size={16} className="animate-spin"/> Redirecionando em 3s...
+                
+                {/* MENSAGEM AMIGÁVEL */}
+                <p className="text-slate-600 mb-8 text-base leading-relaxed px-4">
+                    {feedback.msg}
+                </p>
+                
+                <div className="flex items-center justify-center gap-2 text-xs text-blue-600 font-bold uppercase tracking-wide animate-pulse">
+                    <Loader2 size={14} className="animate-spin"/>
+                    Redirecionando para o histórico...
                 </div>
             </div>
         </div>
@@ -196,7 +217,7 @@ export default function EmitirNotaPage() {
 
       <div className="flex justify-between items-center mb-8">
           <h2 className="text-2xl font-bold text-slate-800">
-              {retryId ? `Corrigir Venda Falha` : 'Emitir Nova NFS-e'}
+              {retryId ? `Corrigir Venda` : 'Emitir Nova NFS-e'}
           </h2>
           {retryId && <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold">MODO CORREÇÃO</span>}
       </div>
@@ -220,7 +241,7 @@ export default function EmitirNotaPage() {
 
       <div className="bg-white p-8 rounded-xl shadow-lg border border-slate-200">
         
-        {/* PASSO 1: TOMADOR */}
+        {/* PASSO 1 */}
         {step === 1 && (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Quem é o cliente?</h3>
@@ -280,7 +301,7 @@ export default function EmitirNotaPage() {
           </div>
         )}
 
-        {/* PASSO 2: SERVIÇO E VALORES */}
+        {/* PASSO 2 */}
         {step === 2 && (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Detalhes do Serviço</h3>
@@ -318,7 +339,7 @@ export default function EmitirNotaPage() {
           </div>
         )}
 
-        {/* PASSO 3: REVISÃO */}
+        {/* PASSO 3 */}
         {step === 3 && (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Revisão</h3>
@@ -340,7 +361,6 @@ export default function EmitirNotaPage() {
           </div>
         )}
 
-        {/* BOTÕES */}
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-100">
           {step > 1 ? (
             <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded">
