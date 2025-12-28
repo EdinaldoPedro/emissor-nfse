@@ -14,7 +14,7 @@ const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
 
 // --- FUNÇÃO DE COMUNICAÇÃO REAL COM SEFAZ (mTLS) ---
 async function enviarParaPortalNacional(dps: any, empresa: any) {
-    // 1. Preparar o Agente HTTPS com o Certificado (mTLS)
+    // A validação do certificado acontece AQUI DENTRO agora, ou logo antes de chamar
     let pfxBuffer;
     
     try {
@@ -27,7 +27,7 @@ async function enviarParaPortalNacional(dps: any, empresa: any) {
             pfxBuffer = fs.readFileSync(empresa.certificadoA1);
         }
     } catch (e) {
-        throw new Error("Falha ao ler o arquivo do certificado digital.");
+        throw new Error("Falha ao ler o arquivo do certificado digital. Verifique as configurações da empresa.");
     }
 
     const httpsAgent = new https.Agent({
@@ -112,10 +112,7 @@ export async function POST(request: Request) {
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!tomador) throw new Error('Cliente tomador não encontrado.');
 
-    // =================================================================================
-    // 3. CRIAR A VENDA AGORA (ANTES DE VALIDAR CERTIFICADO)
-    // Assim, se der erro de certificado, a venda existe no banco com status 'ERRO_EMISSAO'
-    // =================================================================================
+    // 3. CRIAR A VENDA (Status: PROCESSANDO)
     const venda = await prisma.venda.create({
         data: {
             empresaId: prestador.id,
@@ -125,16 +122,10 @@ export async function POST(request: Request) {
             status: "PROCESSANDO"
         }
     });
-    vendaIdLog = venda.id; // ID salvo para usar no catch
+    vendaIdLog = venda.id; 
 
-    // 4. Validação de Certificado (AGORA A VENDA JÁ EXISTE)
-    if (!prestador.certificadoA1) {
-        throw new Error("Certificado Digital não cadastrado. Cadastre-o em 'Minha Empresa' para emitir.");
-    }
-
+    // === MUDANÇA: Prepara os dados ANTES de validar o certificado ===
     const ambienteEmissao = prestador.ambiente || 'HOMOLOGACAO';
-
-    // 5. Preparar Dados Fiscais
     const isMEI = prestador.regimeTributario === 'MEI';
     const cnaeLimpo = cleanString(codigoCnae);
     
@@ -147,7 +138,7 @@ export async function POST(request: Request) {
         itemLc = regraGlobal.itemLc || itemLc;
     }
 
-    // 6. Montagem do JSON (DPS)
+    // 4. Montagem do JSON (DPS) - AGORA ACONTECE CEDO
     const infDPS = {
         versao: "1.00",
         ambiente: ambienteEmissao === 'PRODUCAO' ? '1' : '2',
@@ -194,13 +185,19 @@ export async function POST(request: Request) {
         }
     };
 
+    // 5. SALVA O LOG DO JSON (AQUI GARANTIMOS QUE ELE APAREÇA NA TELA DE DETALHES)
     await createLog({
         level: 'INFO', action: 'DPS_GERADA',
-        message: `Iniciando transmissão REAL para ${ambienteEmissao}...`,
+        message: `Ambiente: ${ambienteEmissao}. DPS montada.`,
         empresaId: prestador.id,
         vendaId: venda.id,
         details: JSON.stringify(infDPS, null, 2)
     });
+
+    // 6. AGORA SIM: Validação de Certificado (Bloqueia envio se falhar)
+    if (!prestador.certificadoA1) {
+        throw new Error("Certificado Digital não cadastrado. O JSON foi gerado (veja logs), mas o envio foi bloqueado.");
+    }
 
     // 7. Envio Real
     const respostaPortal = await enviarParaPortalNacional(infDPS, prestador);
@@ -209,13 +206,11 @@ export async function POST(request: Request) {
     if (!respostaPortal.sucesso) {
         const listaErrosTexto = respostaPortal.listaErros?.map((e: any) => `[${e.codigo}] ${e.mensagem}`).join('\n');
         
-        // Atualiza para ERRO
         await prisma.venda.update({
             where: { id: venda.id },
             data: { status: 'ERRO_EMISSAO' }
         });
 
-        // Log detalhado do erro
         await createLog({
             level: 'ERRO', action: 'REJEICAO_SEFAZ',
             message: `Falha na emissão: ${respostaPortal.motivo}`,
@@ -263,13 +258,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, nota: novaNota }, { status: 201 });
 
   } catch (error: any) {
-    // CATCH GLOBAL: PEGA QUALQUER ERRO E GRAVA NA VENDA
     if (vendaIdLog) {
         try {
-            await prisma.venda.update({ 
-                where: { id: vendaIdLog }, 
-                data: { status: 'ERRO_EMISSAO' } 
-            });
+            // Se falhou (mesmo que seja falta de certificado), marca como ERRO
+            const v = await prisma.venda.findUnique({ where: { id: vendaIdLog } });
+            if (v?.status !== 'CONCLUIDA') {
+                 await prisma.venda.update({ where: { id: vendaIdLog }, data: { status: 'ERRO_EMISSAO' } });
+            }
         } catch (e) {
             console.error("Erro ao atualizar status da venda:", e);
         }
@@ -287,15 +282,15 @@ export async function POST(request: Request) {
   }
 }
 
-// --- MÉTODO DE LISTAGEM (GET) ---
+// --- MÉTODO DE LISTAGEM (GET) - MANTIDO ---
 export async function GET(request: Request) {
+  // ... (MANTENHA O CÓDIGO DO GET IGUAL AO ANTERIOR, POIS JÁ ESTAVA CORRETO)
   const userId = request.headers.get('x-user-id');
   const { searchParams } = new URL(request.url);
-  
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
   const search = searchParams.get('search') || '';
-  const type = searchParams.get('type') || 'all'; // <--- NOVO PARÂMETRO
+  const type = searchParams.get('type') || 'all';
 
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
@@ -309,7 +304,6 @@ export async function GET(request: Request) {
 
     const skip = (page - 1) * limit;
 
-    // Filtros de Busca
     const whereClause: any = {
         empresaId: user.empresa.id,
         ...(search && {
@@ -321,15 +315,10 @@ export async function GET(request: Request) {
         })
     };
 
-    // --- FILTRO DE TIPO (Minhas Notas vs Dashboard) ---
     if (type === 'valid') {
-        // Mostra apenas o que virou nota (Autorizada) ou foi Cancelada
-        // Esconde erros e processamento
         whereClause.status = { in: ['CONCLUIDA', 'CANCELADA'] };
     }
-    // Se type === 'all' (Dashboard), não aplica filtro de status, mostra tudo.
 
-    // 1. Busca Vendas
     const [vendas, total] = await prisma.$transaction([
         prisma.venda.findMany({
             where: whereClause,
@@ -350,7 +339,6 @@ export async function GET(request: Request) {
         prisma.venda.count({ where: whereClause })
     ]);
 
-    // 2. Enriquecimento
     const cnaesEncontrados = Array.from(new Set(
         vendas.flatMap(v => v.notas.map(n => n.cnae)).filter(Boolean)
     ));
@@ -387,7 +375,6 @@ export async function GET(request: Request) {
     });
 
   } catch (error) {
-    console.error(error);
     return NextResponse.json({ error: 'Erro ao buscar notas' }, { status: 500 });
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation'; // Added useRouter
 import { 
     Terminal, AlertTriangle, CheckCircle, 
     ChevronDown, ChevronRight, Activity, Loader2, 
@@ -9,9 +9,12 @@ import {
 
 export default function DetalheEmissor() {
   const { id } = useParams();
+  const router = useRouter(); // Initialized router
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  
+  // Controle de qual venda está aberta
   const [expandedVenda, setExpandedVenda] = useState<string | null>(null);
 
   // Estado local para o ambiente (para atualizar a UI instantaneamente)
@@ -58,9 +61,12 @@ export default function DetalheEmissor() {
       }
   };
 
-  // ... (handleAction mantido igual) ...
+  // === AÇÃO DOS BOTÕES CONECTADA À API ===
   const handleAction = async (action: string, vendaId: string) => {
-      const confirmacao = action === 'CANCELAR' ? "Tem certeza que deseja CANCELAR?" : "Deseja liberar para correção?";
+      const confirmacao = action === 'CANCELAR' 
+        ? "Tem certeza que deseja CANCELAR esta nota fiscal? Essa ação é irreversível." 
+        : "Deseja liberar esta venda para correção?";
+
       if (!confirm(confirmacao)) return;
 
       try {
@@ -69,14 +75,30 @@ export default function DetalheEmissor() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ acao: action, vendaId })
           });
+
           const resposta = await res.json();
-          if (res.ok) { alert("✅ " + resposta.message); carregarDados(); } 
-          else { alert("❌ Erro: " + resposta.error); }
-      } catch (e) { alert("Erro de conexão."); }
+
+          if (res.ok) {
+              alert("✅ " + resposta.message);
+              carregarDados(); // Recarrega a tela para ver o novo status
+          } else {
+              alert("❌ Erro: " + resposta.error);
+          }
+      } catch (e) {
+          alert("Erro de conexão ao processar ação.");
+      }
   }
 
   if (loading && !data) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={40}/></div>;
-  if (error) return <div className="p-10 text-center text-red-500">{error}</div>;
+  
+  if (error) return (
+      <div className="flex h-screen items-center justify-center flex-col gap-4">
+          <AlertTriangle className="text-red-500" size={50}/>
+          <h2 className="text-xl font-bold text-slate-700">Erro ao carregar dados</h2>
+          <p className="text-red-600 bg-red-50 p-4 rounded border border-red-200 font-mono text-sm">{error}</p>
+      </div>
+  );
+
   if (!data?.empresa) return null;
 
   const { empresa, vendas } = data;
@@ -131,7 +153,7 @@ export default function DetalheEmissor() {
          </div>
       </div>
 
-      {/* LISTA DE VENDAS (MANTIDA IGUAL) */}
+      {/* LISTA DE VENDAS */}
       <div className="flex-1 overflow-y-auto p-6">
             <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2">
                 <Activity size={16}/> Histórico de Transações
@@ -146,71 +168,50 @@ export default function DetalheEmissor() {
             <div className="space-y-4">
                 {vendas?.map((venda: any) => (
                     <div key={venda.id} className={`bg-white rounded-xl shadow-sm border transition-all ${expandedVenda === venda.id ? 'ring-2 ring-blue-500 border-transparent' : 'border-slate-200 hover:border-blue-300'}`}>
-                        <div onClick={() => toggleVenda(venda.id)} className="p-4 flex items-center justify-between cursor-pointer">
+                        
+                        {/* BARRA DE RESUMO - COM REDIRECIONAMENTO */}
+                        <div 
+                            onClick={() => router.push(`/admin/vendas/${venda.id}`)}
+                            className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition"
+                        >
                             <div className="flex items-center gap-4">
-                                <div className={`p-2 rounded-full transition-colors ${expandedVenda === venda.id ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'}`}>
-                                    {expandedVenda === venda.id ? <ChevronDown size={20}/> : <ChevronRight size={20}/>}
+                                <div className={`p-2 rounded-full transition-colors bg-slate-100 text-slate-400`}>
+                                    <ChevronRight size={20}/>
                                 </div>
+                                
                                 <div>
                                     <div className="flex items-center gap-3">
-                                        <span className="font-bold text-slate-800 text-lg">{venda.cliente?.razaoSocial || 'Consumidor Final'}</span>
+                                        <span className="font-bold text-slate-800 text-lg">
+                                            {venda.cliente?.razaoSocial || 'Consumidor Final'}
+                                        </span>
                                         {venda.status === 'CONCLUIDA' && <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded border border-green-200">AUTORIZADA</span>}
                                         {venda.status === 'ERRO_EMISSAO' && <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded border border-red-200">FALHOU</span>}
                                         {venda.status === 'PROCESSANDO' && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200 animate-pulse">PROCESSANDO</span>}
                                         {venda.status === 'CANCELADA' && <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded border border-gray-200 line-through">CANCELADA</span>}
+                                        {venda.status === 'PENDENTE' && <span className="bg-yellow-50 text-yellow-700 text-[10px] font-bold px-2 py-0.5 rounded border border-yellow-200">PENDENTE</span>}
                                     </div>
-                                    <div className="text-xs text-slate-500 mt-0.5 font-mono">{new Date(venda.createdAt).toLocaleString()} • ID: {venda.id.split('-')[0]}</div>
+                                    <div className="text-xs text-slate-500 mt-0.5 font-mono">
+                                        {new Date(venda.createdAt).toLocaleString()} • ID: {venda.id.split('-')[0]}
+                                    </div>
                                 </div>
                             </div>
+
                             <div className="text-right">
                                 <p className="text-lg font-bold text-slate-800">R$ {Number(venda.valor).toFixed(2)}</p>
-                                {venda.notas?.[0]?.numero && <p className="text-xs text-green-600 font-bold mt-1">Nota #{venda.notas[0].numero}</p>}
+                                {venda.notas && venda.notas.length > 0 && venda.notas[0].numero && (
+                                    <p className="text-xs text-green-600 font-bold bg-green-50 px-2 py-0.5 rounded mt-1">
+                                        Nota #{venda.notas[0].numero}
+                                    </p>
+                                )}
                             </div>
                         </div>
 
-                        {expandedVenda === venda.id && (
-                            <div className="border-t border-slate-100 bg-slate-50 p-6 flex gap-6 animate-in slide-in-from-top-2">
-                                <div className="flex-1">
-                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2"><Terminal size={14}/> Logs da Transação</h4>
-                                    <div className="space-y-2 max-h-80 overflow-y-auto pr-2 custom-scrollbar">
-                                        {venda.logs?.map((log: any) => (
-                                            <div key={log.id} className="flex gap-3 items-start p-3 bg-white rounded-lg border border-slate-200 shadow-sm">
-                                                <div className="mt-0.5">
-                                                    {log.level === 'ERRO' && <AlertTriangle size={14} className="text-red-500"/>}
-                                                    {log.level === 'INFO' && <CheckCircle size={14} className="text-green-500"/>}
-                                                    {log.level === 'ALERTA' && <AlertTriangle size={14} className="text-yellow-500"/>}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex justify-between items-center mb-1">
-                                                        <span className="text-xs font-bold text-slate-700">{log.action}</span>
-                                                        <span className="text-[10px] text-slate-400 font-mono">{new Date(log.createdAt).toLocaleTimeString()}</span>
-                                                    </div>
-                                                    <p className="text-xs text-slate-600 leading-relaxed break-words">{log.message}</p>
-                                                    {log.details && (
-                                                        <details className="mt-2 group">
-                                                            <summary className="text-[10px] text-blue-500 cursor-pointer hover:underline list-none select-none">Ver JSON Técnico ▾</summary>
-                                                            <pre className="mt-2 bg-slate-900 text-green-400 p-3 rounded text-[10px] overflow-x-auto font-mono max-h-60 border border-slate-700">{log.details}</pre>
-                                                        </details>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="w-64 space-y-3">
-                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2"><FileText size={14}/> Ações de Suporte</h4>
-                                    {venda.status === 'ERRO_EMISSAO' && (
-                                        <button onClick={() => handleAction('CORRIGIR', venda.id)} className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded flex items-center justify-center gap-2 transition shadow-sm"><RefreshCcw size={14}/> Corrigir e Reemitir</button>
-                                    )}
-                                    {venda.status === 'CONCLUIDA' && (
-                                        <>
-                                            <button className="w-full bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold py-2 rounded flex items-center justify-center gap-2 transition"><FileText size={14}/> Ver XML / PDF</button>
-                                            <div className="grid grid-cols-2 gap-2 mt-2">
-                                                <button className="bg-white hover:bg-blue-50 text-blue-600 border border-blue-200 text-[10px] font-bold py-2 rounded flex flex-col items-center gap-1 transition"><Send size={14}/> Carta Correção</button>
-                                                <button onClick={() => handleAction('CANCELAR', venda.id)} className="bg-white hover:bg-red-50 text-red-600 border border-red-200 text-[10px] font-bold py-2 rounded flex flex-col items-center gap-1 transition"><Ban size={14}/> Cancelar Nota</button>
-                                            </div>
-                                        </>
-                                    )}
+                        {/* DETALHES RÁPIDOS SE NECESSÁRIO (OPCIONAL) */}
+                        {venda.status === 'ERRO_EMISSAO' && (
+                            <div className="bg-red-50 p-3 border-t border-red-100 flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-2 text-red-700 font-medium">
+                                    <AlertTriangle size={14}/>
+                                    Falha na emissão. Clique para ver detalhes e corrigir.
                                 </div>
                             </div>
                         )}
