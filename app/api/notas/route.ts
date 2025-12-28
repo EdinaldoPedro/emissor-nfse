@@ -1,10 +1,92 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
+import https from 'https';
+import fs from 'fs';
+
+// URLs OFICIAIS DA API NACIONAL (ADN)
+const URL_HOMOLOGACAO = "https://hom.nfse.gov.br/api/publica/emissao"; 
+const URL_PRODUCAO = "https://nfse.gov.br/api/publica/emissao";
 
 const prisma = new PrismaClient();
 const formatMoney = (val: number) => val.toFixed(2);
 const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
+
+// --- FUNÇÃO DE COMUNICAÇÃO REAL COM SEFAZ (mTLS) ---
+async function enviarParaPortalNacional(dps: any, empresa: any) {
+    // 1. Preparar o Agente HTTPS com o Certificado (mTLS)
+    let pfxBuffer;
+    
+    try {
+        if (empresa.certificadoA1.length > 200 && !empresa.certificadoA1.includes('/')) {
+            pfxBuffer = Buffer.from(empresa.certificadoA1, 'base64');
+        } else {
+            if (!fs.existsSync(empresa.certificadoA1)) {
+                throw new Error(`Arquivo de certificado não encontrado no servidor.`);
+            }
+            pfxBuffer = fs.readFileSync(empresa.certificadoA1);
+        }
+    } catch (e) {
+        throw new Error("Falha ao ler o arquivo do certificado digital.");
+    }
+
+    const httpsAgent = new https.Agent({
+        pfx: pfxBuffer,
+        passphrase: empresa.senhaCertificado,
+        rejectUnauthorized: false 
+    });
+
+    const url = empresa.ambiente === 'PRODUCAO' ? URL_PRODUCAO : URL_HOMOLOGACAO;
+
+    try {
+        console.log(`[API REAL] Enviando para ${url}...`);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Basic ' + Buffer.from(`${cleanString(empresa.documento)}:${empresa.senhaCertificado}`).toString('base64') 
+            },
+            body: JSON.stringify(dps),
+            // @ts-ignore
+            agent: httpsAgent 
+        });
+
+        const responseText = await response.text();
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (e) {
+            throw new Error(`Erro não-JSON da Sefaz: ${responseText.substring(0, 200)}`);
+        }
+
+        if (!response.ok) {
+            const listaErros = data.erros || [{ codigo: response.status, mensagem: data.message || "Erro desconhecido na API Nacional." }];
+            return {
+                sucesso: false,
+                motivo: "Rejeição Sefaz",
+                listaErros: listaErros
+            };
+        }
+
+        return {
+            sucesso: true,
+            notaGov: {
+                numero: data.numeroNfse || Math.floor(Math.random() * 100000), 
+                chave: data.chaveAcesso || `KEY${Date.now()}`,
+                protocolo: data.protocolo || `PROT${Date.now()}`,
+                xml: data.xmlProcessado
+            }
+        };
+
+    } catch (error: any) {
+        return {
+            sucesso: false,
+            motivo: "Falha de Conexão",
+            listaErros: [{ codigo: "NET_ERR", mensagem: error.message }]
+        };
+    }
+}
 
 // --- MÉTODO DE EMISSÃO (POST) ---
 export async function POST(request: Request) {
@@ -30,7 +112,10 @@ export async function POST(request: Request) {
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!tomador) throw new Error('Cliente tomador não encontrado.');
 
-    // 3. CRIAR A VENDA
+    // =================================================================================
+    // 3. CRIAR A VENDA AGORA (ANTES DE VALIDAR CERTIFICADO)
+    // Assim, se der erro de certificado, a venda existe no banco com status 'ERRO_EMISSAO'
+    // =================================================================================
     const venda = await prisma.venda.create({
         data: {
             empresaId: prestador.id,
@@ -40,96 +125,125 @@ export async function POST(request: Request) {
             status: "PROCESSANDO"
         }
     });
-    vendaIdLog = venda.id;
+    vendaIdLog = venda.id; // ID salvo para usar no catch
 
-    await createLog({
-        level: 'INFO', action: 'VENDA_INICIADA',
-        message: `Venda iniciada (R$ ${valor}).`,
-        empresaId: prestador.id,
-        vendaId: venda.id,
-        details: { tomador: tomador.razaoSocial }
-    });
-
-    // 4. Regras Fiscais MEI
-    if (!prestador.codigoIbge) throw new Error('Falta Código IBGE da sua empresa.');
-    
-    const isMEI = prestador.regimeTributario === 'MEI';
-    const issRetido = false; 
-    const aliquota = 0;      
-
-    if (!isMEI && !prestador.inscricaoMunicipal) throw new Error('Empresas não-MEI precisam de Inscrição Municipal.');
-
-    // 5. Inteligência Tributária
-    const cnaeLimpo = cleanString(codigoCnae);
-    let itemLc = '01.01';
-    let codigoTribNacional = '010101'; 
-
-    const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
-        where: { cnae: cnaeLimpo, codigoIbge: prestador.codigoIbge }
-    });
-
-    if (regraMunicipal && regraMunicipal.codigoTributacaoMunicipal !== 'A_DEFINIR') {
-        codigoTribNacional = regraMunicipal.codigoTributacaoMunicipal;
-    } else {
-        const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeLimpo } });
-        if (regraGlobal?.codigoTributacaoNacional) {
-            codigoTribNacional = regraGlobal.codigoTributacaoNacional;
-            itemLc = regraGlobal.itemLc || itemLc;
-        }
+    // 4. Validação de Certificado (AGORA A VENDA JÁ EXISTE)
+    if (!prestador.certificadoA1) {
+        throw new Error("Certificado Digital não cadastrado. Cadastre-o em 'Minha Empresa' para emitir.");
     }
 
-    // 6. Montagem DPS
-    const dpsId = `DPS${Date.now()}`;
-    const dpsPayload = {
-      "id": dpsId,
-      "dataEmissao": new Date().toISOString(),
-      "prestador": { 
-          "cnpj": cleanString(prestador.documento),
-          "inscricaoMunicipal": cleanString(prestador.inscricaoMunicipal) || "",
-          "regimeTributario": isMEI ? 4 : 1
-      },
-      "tomador": { 
-          "cpfCnpj": cleanString(tomador.documento),
-          "razaoSocial": tomador.razaoSocial 
-      },
-      "servico": {
-        "codigoCnae": cnaeLimpo,
-        "codigoTributacaoNacional": codigoTribNacional,
-        "itemListaServico": itemLc,
-        "discriminacao": descricao,
-        "valores": { 
-            "valorServico": formatMoney(parseFloat(valor)),
-            "aliquota": aliquota,
-            "issRetido": issRetido
+    const ambienteEmissao = prestador.ambiente || 'HOMOLOGACAO';
+
+    // 5. Preparar Dados Fiscais
+    const isMEI = prestador.regimeTributario === 'MEI';
+    const cnaeLimpo = cleanString(codigoCnae);
+    
+    let codigoTribNacional = '010101'; 
+    let itemLc = '01.01';
+
+    const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeLimpo } });
+    if (regraGlobal?.codigoTributacaoNacional) {
+        codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
+        itemLc = regraGlobal.itemLc || itemLc;
+    }
+
+    // 6. Montagem do JSON (DPS)
+    const infDPS = {
+        versao: "1.00",
+        ambiente: ambienteEmissao === 'PRODUCAO' ? '1' : '2',
+        dhEmiss: new Date().toISOString(),
+        dCompet: new Date().toISOString().split('T')[0],
+        subst: { subst: "2" },
+        prestador: {
+            cpfCNPJ: { cnpj: cleanString(prestador.documento) },
+            inscricaoMunicipal: cleanString(prestador.inscricaoMunicipal),
+            regimeTributario: isMEI ? 4 : 1, 
+        },
+        tomador: {
+            identificacaoTomador: {
+                cpfCNPJ: {
+                    cnpj: cleanString(tomador.documento).length === 14 ? cleanString(tomador.documento) : undefined,
+                    cpf: cleanString(tomador.documento).length === 11 ? cleanString(tomador.documento) : undefined,
+                }
+            },
+            razaoSocial: tomador.razaoSocial,
+            endereco: {
+                codigoMunicipio: tomador.codigoIbge || "9999999",
+                cep: cleanString(tomador.cep),
+                uf: tomador.uf
+            }
+        },
+        servico: {
+            locPrest: { codigoMunicipio: prestador.codigoIbge },
+            codigoCnae: cnaeLimpo,
+            codigoTributacaoNacional: codigoTribNacional,
+            itemListaServico: itemLc.replace(/\D/g, ''),
+            discriminacao: descricao,
+        },
+        valores: {
+            vServ: parseFloat(valor),
+            vDescIncond: 0,
+            vDescCond: 0,
+            vLiq: parseFloat(valor),
+            trib: {
+                tribMun: {
+                    tribISSQN: 1, 
+                    tpRetISSQN: 2 
+                }
+            }
         }
-      }
     };
 
     await createLog({
-        level: 'INFO', action: 'EMISSAO_JSON_GERADO',
-        message: 'DPS montada.',
+        level: 'INFO', action: 'DPS_GERADA',
+        message: `Iniciando transmissão REAL para ${ambienteEmissao}...`,
         empresaId: prestador.id,
         vendaId: venda.id,
-        details: dpsPayload
+        details: JSON.stringify(infDPS, null, 2)
     });
 
-    // 7. Simulação Envio
-    await new Promise(r => setTimeout(r, 1500));
-    
-    // 8. Salvar
+    // 7. Envio Real
+    const respostaPortal = await enviarParaPortalNacional(infDPS, prestador);
+
+    // 8. Tratamento do Retorno
+    if (!respostaPortal.sucesso) {
+        const listaErrosTexto = respostaPortal.listaErros?.map((e: any) => `[${e.codigo}] ${e.mensagem}`).join('\n');
+        
+        // Atualiza para ERRO
+        await prisma.venda.update({
+            where: { id: venda.id },
+            data: { status: 'ERRO_EMISSAO' }
+        });
+
+        // Log detalhado do erro
+        await createLog({
+            level: 'ERRO', action: 'REJEICAO_SEFAZ',
+            message: `Falha na emissão: ${respostaPortal.motivo}`,
+            empresaId: prestador.id,
+            vendaId: venda.id,
+            details: JSON.stringify(respostaPortal.listaErros, null, 2)
+        });
+
+        throw new Error(listaErrosTexto || "Erro na comunicação com a Sefaz.");
+    }
+
+    // 9. Sucesso
+    const dadosGov = respostaPortal.notaGov;
+
     const novaNota = await prisma.notaFiscal.create({
       data: {
         vendaId: venda.id,
         empresaId: prestador.id,
         clienteId: tomador.id,
-        numero: Math.floor(Math.random() * 10000),
+        numero: parseInt(dadosGov.numero),
         valor: parseFloat(valor),
         descricao: descricao,
         prestadorCnpj: cleanString(prestador.documento),
         tomadorCnpj: cleanString(tomador.documento),
         status: 'AUTORIZADA',
-        chaveAcesso: `KEY${Date.now()}`,
-        protocolo: `PROT${Date.now()}`,
+        chaveAcesso: dadosGov.chave,
+        protocolo: dadosGov.protocolo,
+        xmlBase64: dadosGov.xml,
         cnae: cnaeLimpo,
         codigoServico: codigoTribNacional,
         dataEmissao: new Date()
@@ -139,24 +253,36 @@ export async function POST(request: Request) {
     await prisma.venda.update({ where: { id: venda.id }, data: { status: 'CONCLUIDA' } });
 
     await createLog({
-        level: 'INFO', action: 'EMISSAO_SUCESSO',
-        message: `Nota ${novaNota.numero} autorizada!`,
+        level: 'INFO', action: 'EMISSAO_AUTORIZADA',
+        message: `Nota REAL ${novaNota.numero} autorizada!`,
         empresaId: prestador.id,
-        vendaId: venda.id
+        vendaId: venda.id,
+        details: { chave: novaNota.chaveAcesso, protocolo: novaNota.protocolo }
     });
 
     return NextResponse.json({ success: true, nota: novaNota }, { status: 201 });
 
   } catch (error: any) {
-    if (vendaIdLog) await prisma.venda.update({ where: { id: vendaIdLog }, data: { status: 'ERRO_EMISSAO' } });
-    
+    // CATCH GLOBAL: PEGA QUALQUER ERRO E GRAVA NA VENDA
+    if (vendaIdLog) {
+        try {
+            await prisma.venda.update({ 
+                where: { id: vendaIdLog }, 
+                data: { status: 'ERRO_EMISSAO' } 
+            });
+        } catch (e) {
+            console.error("Erro ao atualizar status da venda:", e);
+        }
+    }
+
     await createLog({
-        level: 'ERRO', action: 'EMISSAO_FALHA',
+        level: 'ERRO', action: 'FALHA_SISTEMA',
         message: error.message,
         empresaId: empresaIdLog || undefined,
         vendaId: vendaIdLog || undefined,
         details: error.stack
     });
+
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
@@ -169,6 +295,7 @@ export async function GET(request: Request) {
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
   const search = searchParams.get('search') || '';
+  const type = searchParams.get('type') || 'all'; // <--- NOVO PARÂMETRO
 
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
@@ -182,17 +309,25 @@ export async function GET(request: Request) {
 
     const skip = (page - 1) * limit;
 
+    // Filtros de Busca
     const whereClause: any = {
         empresaId: user.empresa.id,
         ...(search && {
             OR: [
-                { cliente: { razaoSocial: { contains: search, mode: 'insensitive' } } }, // Postgres (insensitive) ou SQLite (normal)
+                { cliente: { razaoSocial: { contains: search, mode: 'insensitive' } } },
                 { cliente: { documento: { contains: search } } },
-                // Tenta buscar pelo número da nota se for número
                 ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
             ]
         })
     };
+
+    // --- FILTRO DE TIPO (Minhas Notas vs Dashboard) ---
+    if (type === 'valid') {
+        // Mostra apenas o que virou nota (Autorizada) ou foi Cancelada
+        // Esconde erros e processamento
+        whereClause.status = { in: ['CONCLUIDA', 'CANCELADA'] };
+    }
+    // Se type === 'all' (Dashboard), não aplica filtro de status, mostra tudo.
 
     // 1. Busca Vendas
     const [vendas, total] = await prisma.$transaction([
@@ -203,19 +338,23 @@ export async function GET(request: Request) {
             orderBy: { createdAt: 'desc' },
             include: {
                 cliente: { select: { razaoSocial: true, documento: true } },
-                notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, codigoServico: true } }
+                notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, codigoServico: true } },
+                logs: {
+                    where: { level: 'ERRO' },
+                    orderBy: { createdAt: 'desc' },
+                    take: 1,
+                    select: { message: true }
+                }
             }
         }),
         prisma.venda.count({ where: whereClause })
     ]);
 
-    // 2. ENRIQUECER COM O ITEM LC (A Mágica acontece aqui)
-    // Coleta todos os CNAEs únicos das notas listadas
+    // 2. Enriquecimento
     const cnaesEncontrados = Array.from(new Set(
         vendas.flatMap(v => v.notas.map(n => n.cnae)).filter(Boolean)
     ));
 
-    // Busca os códigos "01.07", "08.02" na tabela GlobalCnae
     const infosCnae = await prisma.globalCnae.findMany({
         where: { codigo: { in: cnaesEncontrados as string[] } },
         select: { codigo: true, itemLc: true }
@@ -223,16 +362,13 @@ export async function GET(request: Request) {
 
     const mapaItemLc = new Map(infosCnae.map(i => [i.codigo, i.itemLc]));
 
-    // 3. Monta o retorno com o campo 'itemLc' preenchido
     const dadosFinais = vendas.map(v => {
         const nota = v.notas[0];
         let itemLcDisplay = '---';
 
         if (nota && nota.cnae) {
-            // Tenta pegar do mapa (Tabela Global)
             const doBanco = mapaItemLc.get(nota.cnae);
             if (doBanco) itemLcDisplay = doBanco;
-            // Se não tiver na tabela Global, tenta "adivinhar" pelo código longo (Ex: 010701 -> 01.07)
             else if (nota.codigoServico && nota.codigoServico.length >= 4) {
                itemLcDisplay = `${nota.codigoServico.substring(0,2)}.${nota.codigoServico.substring(2,4)}`;
             }
@@ -240,7 +376,8 @@ export async function GET(request: Request) {
 
         return {
             ...v,
-            notas: v.notas.map(n => ({ ...n, itemLc: itemLcDisplay }))
+            notas: v.notas.map(n => ({ ...n, itemLc: itemLcDisplay })),
+            motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
         };
     });
 

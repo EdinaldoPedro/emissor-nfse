@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, MapPin, Briefcase } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, MapPin, Briefcase, XCircle, Loader2 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 interface ClienteDB {
   id: string;
@@ -19,109 +19,96 @@ interface CnaeDB {
 
 export default function EmitirNotaPage() {
   const router = useRouter();
+  const searchParams = useSearchParams(); // Hook para ler parâmetros
+  const retryId = searchParams.get('retry');
+
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadingRetry, setLoadingRetry] = useState(false); // Loading específico da correção
   
-  // Listas de Dados
+  // Feedback Visual
+  const [feedback, setFeedback] = useState<{ show: boolean; type: 'success' | 'error'; title: string; msg: string }>({
+    show: false, type: 'success', title: '', msg: ''
+  });
+
   const [clientes, setClientes] = useState<ClienteDB[]>([]);
   const [meusCnaes, setMeusCnaes] = useState<CnaeDB[]>([]);
-  
-  // Controle de Abas no Passo 1
   const [modoCliente, setModoCliente] = useState<'existente' | 'novo'>('existente');
   const [buscandoCliente, setBuscandoCliente] = useState(false);
 
-  // Estado do Novo Cliente
   const [novoCliente, setNovoCliente] = useState({ 
-    nome: '', 
-    email: '', 
-    documento: '',
-    cep: '',
-    logradouro: '',
-    numero: '',
-    bairro: '',
-    cidade: '',
-    uf: '',
-    codigoIbge: ''
+    nome: '', email: '', documento: '', cep: '', logradouro: '', numero: '', bairro: '', cidade: '', uf: '', codigoIbge: ''
   });
 
-  // DADOS DA NOTA (Agora com CNAE)
   const [nfData, setNfData] = useState({
-    clienteId: "",
-    clienteNome: "",
-    servicoDescricao: "",
-    valor: "",
-    retencoes: false,
-    codigoCnae: "" // <--- NOVO CAMPO OBRIGATÓRIO
+    clienteId: "", clienteNome: "", servicoDescricao: "", valor: "", retencoes: false, codigoCnae: "" 
   });
 
-  // Carrega Clientes e CNAEs do Usuário ao abrir
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    if(!userId) {
-        router.push('/login');
-        return;
-    }
+    if(!userId) { router.push('/login'); return; }
 
-    // 1. Busca Clientes
+    // 1. Carregar Clientes
     fetch('/api/clientes', { headers: { 'x-user-id': userId } })
       .then(res => res.json())
       .then(data => setClientes(data))
-      .catch(err => console.error("Erro clientes", err));
+      .catch(console.error);
 
-    // 2. Busca Perfil para pegar os CNAEs
+    // 2. Carregar Perfil (CNAEs)
     fetch('/api/perfil', { headers: { 'x-user-id': userId } })
       .then(res => res.json())
       .then(data => {
          if (data.atividades && Array.isArray(data.atividades)) {
              setMeusCnaes(data.atividades);
-             // Seleciona o CNAE Principal automaticamente se houver
-             const principal = data.atividades.find((c: CnaeDB) => c.principal);
-             if (principal) {
-                 setNfData(prev => ({ ...prev, codigoCnae: principal.codigo }));
-             } else if (data.atividades.length > 0) {
-                 setNfData(prev => ({ ...prev, codigoCnae: data.atividades[0].codigo }));
+             if (!retryId) { // Só define default se não for correção
+                 const principal = data.atividades.find((c: CnaeDB) => c.principal);
+                 if (principal) setNfData(prev => ({ ...prev, codigoCnae: principal.codigo }));
+                 else if (data.atividades.length > 0) setNfData(prev => ({ ...prev, codigoCnae: data.atividades[0].codigo }));
              }
          }
       })
-      .catch(err => console.error("Erro perfil", err));
+      .catch(console.error);
 
-  }, [router]);
+    // 3. SE FOR MODO CORREÇÃO, CARREGA OS DADOS DA VENDA FALHA
+    if (retryId) {
+        setLoadingRetry(true);
+        fetch(`/api/vendas/${retryId}`, { headers: { 'x-user-id': userId } })
+            .then(async res => {
+                if (res.ok) {
+                    const venda = await res.json();
+                    setNfData(prev => ({
+                        ...prev,
+                        clienteId: venda.clienteId,
+                        clienteNome: venda.cliente?.razaoSocial || "Cliente",
+                        valor: venda.valor,
+                        servicoDescricao: venda.descricao,
+                        // Tenta recuperar CNAE da nota se existir, senão mantém vazio pra user escolher
+                        codigoCnae: venda.notas?.[0]?.cnae || prev.codigoCnae 
+                    }));
+                    // Pula direto para passo 2 para revisar valores
+                    setStep(2);
+                }
+            })
+            .catch(() => alert("Erro ao recuperar dados da venda."))
+            .finally(() => setLoadingRetry(false));
+    }
 
-  // --- BUSCA CLIENTE (BRASIL API) ---
+  }, [router, retryId]);
+
   const buscarClienteCNPJ = async () => {
     const docLimpo = novoCliente.documento.replace(/\D/g, '');
-    if(docLimpo.length !== 14) {
-      alert("Digite um CNPJ válido para buscar.");
-      return;
-    }
+    if(docLimpo.length !== 14) { alert("Digite um CNPJ válido."); return; }
     setBuscandoCliente(true);
     try {
-      const res = await fetch('/api/external/cnpj', {
-        method: 'POST',
-        body: JSON.stringify({ cnpj: docLimpo })
-      });
+      const res = await fetch('/api/external/cnpj', { method: 'POST', body: JSON.stringify({ cnpj: docLimpo }) });
       const dados = await res.json();
       if(res.ok) {
-        setNovoCliente(prev => ({
-          ...prev,
-          nome: dados.razaoSocial,
-          email: dados.email || prev.email,
-          cep: dados.cep,
-          logradouro: dados.logradouro,
-          numero: dados.numero,
-          bairro: dados.bairro,
-          cidade: dados.cidade,
-          uf: dados.uf,
-          codigoIbge: dados.codigoIbge
-        }));
-      } else {
-        alert("CNPJ não encontrado.");
-      }
+        setNovoCliente(prev => ({ ...prev, ...dados, nome: dados.razaoSocial }));
+      } else { alert("CNPJ não encontrado."); }
     } catch (e) { alert("Erro de conexão."); }
     finally { setBuscandoCliente(false); }
   }
 
-  // --- AVANÇAR ---
   const handleNext = async () => {
     if (step === 1 && modoCliente === 'novo') {
         const userId = localStorage.getItem('userId');
@@ -135,24 +122,15 @@ export default function EmitirNotaPage() {
                 const criado = await res.json();
                 setNfData({ ...nfData, clienteId: criado.id, clienteNome: criado.nome });
                 setStep(step + 1);
-            } else {
-                alert("Erro ao cadastrar cliente.");
-            }
+            } else { alert("Erro ao cadastrar cliente."); }
         } catch (e) { alert("Erro de conexão."); }
-    } else {
-        setStep(step + 1);
-    }
+    } else { setStep(step + 1); }
   };
 
   const handleBack = () => setStep(step - 1);
 
-  // --- EMISSÃO FINAL ---
   const handleEmitir = async () => {
-    if (!nfData.codigoCnae) {
-        alert("Selecione uma Atividade (CNAE) para emitir a nota.");
-        setStep(2); // Volta para o passo 2 se estiver no 3
-        return;
-    }
+    if (!nfData.codigoCnae) { alert("Selecione uma Atividade (CNAE)."); return; }
 
     setLoading(true);
     const userId = localStorage.getItem('userId');
@@ -160,40 +138,68 @@ export default function EmitirNotaPage() {
     try {
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-id': userId || ''
-        },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
         body: JSON.stringify({
           clienteId: nfData.clienteId,
           valor: nfData.valor,
           descricao: nfData.servicoDescricao,
-          codigoCnae: nfData.codigoCnae // Envia o CNAE escolhido
+          codigoCnae: nfData.codigoCnae
         })
       });
 
       const resposta = await res.json();
 
       if (res.ok) {
-        alert(`✅ ${resposta.mensagem || "Nota emitida com sucesso!"}`);
-        router.push('/cliente/dashboard');
+        setFeedback({ 
+            show: true, type: 'success', title: 'Solicitação Enviada!', 
+            msg: 'A nota está sendo processada pelo Portal Nacional.' 
+        });
       } else {
-        alert(`❌ Erro: ${resposta.error}`);
+        setFeedback({ 
+            show: true, type: 'error', title: 'Houve uma falha', 
+            msg: resposta.error || 'Não foi possível completar a emissão. Verifique o histórico.' 
+        });
       }
+
     } catch (error) {
-      alert("Erro de conexão.");
+      setFeedback({ show: true, type: 'error', title: 'Erro de Conexão', msg: 'Verifique sua internet.' });
     } finally {
       setLoading(false);
+      setTimeout(() => { router.push('/cliente/dashboard'); }, 3000); 
     }
   };
 
   const valorNumerico = parseFloat(nfData.valor) || 0;
-  const impostoEstimado = valorNumerico * 0.06;
-  const valorLiquido = nfData.retencoes ? valorNumerico - impostoEstimado : valorNumerico;
+
+  if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados da venda...</div>;
 
   return (
-    <div className="max-w-4xl mx-auto py-10">
-      <h2 className="text-2xl font-bold text-slate-800 mb-8">Emitir Nova NFS-e</h2>
+    <div className="max-w-4xl mx-auto py-10 relative">
+      
+      {/* MODAL FEEDBACK */}
+      {feedback.show && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in duration-300">
+            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full text-center transform transition-all scale-100 animate-in zoom-in-95 duration-300">
+                <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6 ${feedback.type === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                    {feedback.type === 'success' ? <CheckCircle size={48} /> : <XCircle size={48} />}
+                </div>
+                <h3 className={`text-2xl font-bold mb-2 ${feedback.type === 'success' ? 'text-slate-800' : 'text-red-700'}`}>
+                    {feedback.title}
+                </h3>
+                <p className="text-slate-500 mb-6">{feedback.msg}</p>
+                <div className="flex items-center justify-center gap-2 text-sm text-blue-600 font-medium animate-pulse">
+                    <Loader2 size={16} className="animate-spin"/> Redirecionando em 3s...
+                </div>
+            </div>
+        </div>
+      )}
+
+      <div className="flex justify-between items-center mb-8">
+          <h2 className="text-2xl font-bold text-slate-800">
+              {retryId ? `Corrigir Venda Falha` : 'Emitir Nova NFS-e'}
+          </h2>
+          {retryId && <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold">MODO CORREÇÃO</span>}
+      </div>
 
       {/* Steps */}
       <div className="flex justify-between mb-8 relative">
@@ -250,12 +256,7 @@ export default function EmitirNotaPage() {
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">CPF / CNPJ</label>
                             <div className="flex gap-2">
-                                <input 
-                                    className="w-full p-2 border rounded bg-white"
-                                    placeholder="000.000.000-00"
-                                    value={novoCliente.documento}
-                                    onChange={e => setNovoCliente({...novoCliente, documento: e.target.value})}
-                                />
+                                <input className="w-full p-2 border rounded bg-white" placeholder="000.000.000-00" value={novoCliente.documento} onChange={e => setNovoCliente({...novoCliente, documento: e.target.value})}/>
                                 <button onClick={buscarClienteCNPJ} disabled={buscandoCliente} className="bg-blue-600 text-white px-4 rounded hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50">
                                     {buscandoCliente ? '...' : <Search size={18} />}
                                 </button>
@@ -284,15 +285,12 @@ export default function EmitirNotaPage() {
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Detalhes do Serviço</h3>
             
-            {/* SELETOR DE CNAE */}
             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
                 <label className="block text-sm font-bold text-yellow-800 mb-2 flex items-center gap-2">
                     <Briefcase size={18} /> Atividade Econômica (CNAE)
                 </label>
                 {meusCnaes.length === 0 ? (
-                    <div className="text-sm text-red-600">
-                        ⚠️ Você não tem atividades cadastradas. Vá em "Minha Empresa" e complete seu cadastro para emitir.
-                    </div>
+                    <div className="text-sm text-red-600">⚠️ Sem atividades cadastradas. Configure sua empresa.</div>
                 ) : (
                     <select 
                         className="w-full p-3 border rounded-lg bg-white outline-blue-500 text-slate-700"
@@ -310,22 +308,12 @@ export default function EmitirNotaPage() {
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Valor do Serviço (R$)</label>
-              <input 
-                type="number" placeholder="0,00"
-                className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold"
-                value={nfData.valor}
-                onChange={(e) => setNfData({...nfData, valor: e.target.value})}
-              />
+              <input type="number" placeholder="0,00" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={nfData.valor} onChange={(e) => setNfData({...nfData, valor: e.target.value})}/>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação</label>
-              <textarea 
-                rows={4} placeholder="Descrição detalhada do serviço..."
-                className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700"
-                value={nfData.servicoDescricao}
-                onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}
-              ></textarea>
+              <textarea rows={4} placeholder="Descrição detalhada..." className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700" value={nfData.servicoDescricao} onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}></textarea>
             </div>
           </div>
         )}
@@ -348,7 +336,7 @@ export default function EmitirNotaPage() {
                 <span className="font-bold text-slate-900">R$ {valorNumerico.toFixed(2)}</span>
               </div>
             </div>
-            <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será enviada para o ambiente nacional.</p>
+            <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será processada no ambiente nacional.</p>
           </div>
         )}
 
@@ -369,8 +357,12 @@ export default function EmitirNotaPage() {
                 {step === 1 && modoCliente === 'novo' ? 'Salvar e Avançar' : 'Próximo'} <ArrowRight size={18} />
             </button>
           ) : (
-            <button onClick={handleEmitir} disabled={loading} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold">
-                {loading ? 'Processando...' : <><CheckCircle size={20} /> EMITIR NOTA</>}
+            <button 
+                onClick={handleEmitir} 
+                disabled={loading} 
+                className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold"
+            >
+                {loading ? 'Enviando...' : <><CheckCircle size={20} /> EMITIR NOTA</>}
             </button>
           )}
         </div>

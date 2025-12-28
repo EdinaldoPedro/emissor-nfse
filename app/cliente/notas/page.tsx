@@ -24,11 +24,11 @@ export default function PaginaNotas() {
       <div className="p-6 max-w-6xl mx-auto">
         <div className="mb-6">
             <h2 className="text-2xl font-bold text-slate-800">Gerenciamento Fiscal</h2>
-            <p className="text-slate-500">Visualize todas as suas notas, status e realize cancelamentos.</p>
+            <p className="text-slate-500">Visualize todas as suas notas autorizadas, baixe XML/PDF e realize cancelamentos.</p>
         </div>
 
-        {/* Componente Reutilizável COMPLETO (sem compact=true) */}
-        <ListaVendas />
+        {/* --- AQUI ESTÁ A MUDANÇA: onlyValid={true} --- */}
+        <ListaVendas onlyValid={true} />
         
       </div>
     </div>

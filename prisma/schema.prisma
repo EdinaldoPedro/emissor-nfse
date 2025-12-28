@@ -63,6 +63,7 @@ model User {
 model Empresa {
   id        String   @id @default(uuid())
   documento String   @unique
+  ambiente  String   @default("PRODUCAO")
   
   email        String?
   razaoSocial  String

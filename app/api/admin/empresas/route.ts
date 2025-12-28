@@ -3,13 +3,11 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// GET: Lista todas as empresas (para o CRUD de manutenção)
+// GET: Lista todas
 export async function GET() {
   try {
     const empresas = await prisma.empresa.findMany({
-      include: {
-        donoUser: { select: { nome: true, email: true } } // Traz o dono para exibir na tabela
-      },
+      include: { donoUser: { select: { nome: true, email: true } } },
       orderBy: { updatedAt: 'desc' }
     });
     return NextResponse.json(empresas);
@@ -18,7 +16,7 @@ export async function GET() {
   }
 }
 
-// PUT: Atualiza dados cadastrais (A funcionalidade que você quer de volta)
+// PUT: Atualiza dados (INCLUINDO AMBIENTE)
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
@@ -33,7 +31,8 @@ export async function PUT(request: Request) {
         cep: body.cep,
         cidade: body.cidade,
         uf: body.uf,
-        codigoIbge: body.codigoIbge
+        codigoIbge: body.codigoIbge,
+        ambiente: body.ambiente // <--- GARANTA QUE ESTA LINHA EXISTA
       }
     });
     return NextResponse.json(updated);
