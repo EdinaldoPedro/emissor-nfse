@@ -1,99 +1,242 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Server, AlertTriangle, CheckCircle, ArrowRight, Loader2 } from 'lucide-react';
-import Link from 'next/link';
+import { Building2, Search, User, Loader2, Edit, Save, X, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
 
-export default function ListaEmissores() {
-  const [emissores, setEmissores] = useState<any[]>([]);
+export default function BaseEmpresas() {
+  const [empresas, setEmpresas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  
+  // Estados de Controle
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [termo, setTermo] = useState('');
+  
+  // Estado para Edição
+  const [editingEmpresa, setEditingEmpresa] = useState<any>(null);
 
+  // Debounce na busca para não chamar a API a cada letra
   useEffect(() => {
-    fetch('/api/admin/emissoes')
-      .then(async (r) => {
-        if (!r.ok) throw new Error('Falha ao buscar emissores');
-        return r.json();
-      })
-      .then(data => {
-        setEmissores(Array.isArray(data) ? data : []);
+    const delayDebounce = setTimeout(() => {
+      carregarEmpresas(page, termo);
+    }, 500);
+
+    return () => clearTimeout(delayDebounce);
+  }, [page, termo]);
+
+  const carregarEmpresas = (pagina: number, busca: string) => {
+    setLoading(true);
+    // Chama a API com paginação
+    fetch(`/api/admin/empresas?page=${pagina}&limit=10&search=${busca}`)
+      .then(r => r.json())
+      .then(res => {
+        setEmpresas(res.data || []);
+        setTotalPages(res.meta?.totalPages || 1);
+        setTotalItems(res.meta?.total || 0);
         setLoading(false);
       })
-      .catch((err) => {
-        console.error(err);
-        setError('Não foi possível carregar a lista.');
-        setLoading(false);
-      });
-  }, []);
+      .catch(() => setLoading(false));
+  };
 
-  if(loading) return (
-    <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-        <Loader2 className="animate-spin mb-2" size={32}/>
-        <p>Carregando painel...</p>
-    </div>
-  );
-
-  if(error) return (
-      <div className="p-8 text-center text-red-500 bg-red-50 rounded-lg m-6 border border-red-200">
-          <AlertTriangle className="mx-auto mb-2" size={32}/>
-          <p>{error}</p>
-      </div>
-  );
+  const handleSave = async () => {
+      try {
+          const res = await fetch('/api/admin/empresas', {
+              method: 'PUT',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(editingEmpresa)
+          });
+          
+          if(res.ok) {
+              alert("Cadastro atualizado!");
+              setEditingEmpresa(null);
+              carregarEmpresas(page, termo); // Recarrega a página atual
+          } else {
+              alert("Erro ao salvar.");
+          }
+      } catch (e) { alert("Erro de conexão."); }
+  };
 
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex justify-between items-center mb-6">
         <div>
-            <h1 className="text-2xl font-bold text-slate-800">Central de Emissões</h1>
-            <p className="text-sm text-slate-500">Monitoramento técnico de empresas emissoras.</p>
+            <h1 className="text-2xl font-bold text-slate-800">Base de Empresas</h1>
+            <p className="text-sm text-slate-500">
+                {totalItems} registros encontrados. Gerencie dados cadastrais de Tomadores e Prestadores.
+            </p>
+        </div>
+        <div className="relative">
+            <Search className="absolute left-3 top-3 text-slate-400" size={18}/>
+            <input 
+                className="pl-10 p-2 border rounded-lg w-80 focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="Buscar Razão ou CNPJ..."
+                value={termo}
+                onChange={e => {
+                    setTermo(e.target.value);
+                    setPage(1); // Volta pra pág 1 ao pesquisar
+                }}
+            />
         </div>
       </div>
 
-      <div className="grid gap-4">
-        {emissores.length === 0 ? (
-            <div className="p-12 bg-white rounded-xl shadow-sm text-center border border-dashed border-gray-300">
-                <Server className="mx-auto text-gray-300 mb-4" size={48}/>
-                <h3 className="text-lg font-bold text-gray-600">Nenhuma empresa ativa</h3>
-            </div>
-        ) : (
-            emissores.map(emp => (
-                <Link key={emp.id} href={`/admin/emissoes/${emp.id}`}>
-                    <div className="bg-white p-6 rounded-xl shadow-sm border hover:border-blue-400 transition cursor-pointer group relative overflow-hidden">
-                        <div className={`absolute left-0 top-0 bottom-0 w-1 ${emp.errosRecentes > 0 ? 'bg-red-500' : 'bg-green-500'}`}></div>
+      {/* MODAL DE EDIÇÃO */}
+      {editingEmpresa && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between mb-6 border-b pb-4">
+                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                        <Edit size={20}/> Editar Cadastro
+                    </h3>
+                    <button onClick={() => setEditingEmpresa(null)}><X size={24}/></button>
+                </div>
 
-                        <div className="flex justify-between items-start pl-4">
-                            <div className="flex items-center gap-4">
-                                <div className={`p-3 rounded-lg ${emp.certificadoA1 ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
-                                    <Server size={24} />
-                                </div>
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <h3 className="font-bold text-lg text-slate-800 group-hover:text-blue-600 transition">{emp.razaoSocial}</h3>
-                                        
-                                        {/* APENAS VISUAL AGORA */}
-                                        <span className={`text-[10px] px-2 py-0.5 rounded border uppercase font-bold tracking-wide ${
-                                            emp.ambiente === 'PRODUCAO' 
-                                            ? 'bg-red-50 text-red-700 border-red-200' 
-                                            : 'bg-blue-50 text-blue-700 border-blue-200'
-                                        }`}>
-                                            {emp.ambiente || 'HOMOLOGACAO'}
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-slate-500 font-mono mt-1">CNPJ: {emp.documento}</p>
-                                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div className="md:col-span-2">
+                        <label className="block font-bold text-slate-500 mb-1">Razão Social</label>
+                        <input className="w-full p-2 border rounded" value={editingEmpresa.razaoSocial} onChange={e => setEditingEmpresa({...editingEmpresa, razaoSocial: e.target.value})} />
+                    </div>
+                    <div className="md:col-span-2">
+                        <label className="block font-bold text-slate-500 mb-1">Nome Fantasia</label>
+                        <input className="w-full p-2 border rounded" value={editingEmpresa.nomeFantasia || ''} onChange={e => setEditingEmpresa({...editingEmpresa, nomeFantasia: e.target.value})} />
+                    </div>
+                    
+                    <div>
+                        <label className="block font-bold text-slate-500 mb-1">CNPJ (Somente Leitura)</label>
+                        <input className="w-full p-2 border rounded bg-gray-100 text-gray-500 cursor-not-allowed" value={editingEmpresa.documento} disabled />
+                    </div>
+                    <div>
+                        <label className="block font-bold text-slate-500 mb-1">Inscrição Municipal</label>
+                        <input className="w-full p-2 border rounded" value={editingEmpresa.inscricaoMunicipal || ''} onChange={e => setEditingEmpresa({...editingEmpresa, inscricaoMunicipal: e.target.value})} />
+                    </div>
+
+                    {/* REMOVIDO AMBIENTE - MANTIDO REGIME */}
+                    <div className="md:col-span-2">
+                        <label className="block font-bold text-slate-500 mb-1">Regime Tributário</label>
+                        <select className="w-full p-2 border rounded" value={editingEmpresa.regimeTributario || 'MEI'} onChange={e => setEditingEmpresa({...editingEmpresa, regimeTributario: e.target.value})}>
+                            <option value="MEI">MEI</option>
+                            <option value="SIMPLES">Simples Nacional</option>
+                            <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
+                        </select>
+                    </div>
+
+                    <div className="md:col-span-2 mt-4 pt-4 border-t">
+                        <h4 className="font-bold text-blue-600 mb-3 flex items-center gap-2"><MapPin size={16}/> Endereço / Localização</h4>
+                        <div className="grid grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-xs text-gray-400">CEP</label>
+                                <input className="w-full p-2 border rounded" value={editingEmpresa.cep || ''} onChange={e => setEditingEmpresa({...editingEmpresa, cep: e.target.value})} />
                             </div>
-                            
-                            <div className="text-right flex items-center gap-6">
-                                <div className="text-center">
-                                    <p className="font-bold text-slate-800 text-xl">{emp._count?.notasEmitidas || 0}</p>
-                                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Notas</p>
-                                </div>
-                                <ArrowRight className="text-gray-300 group-hover:text-blue-500" />
+                            <div className="col-span-2">
+                                <label className="block text-xs text-gray-400">Logradouro</label>
+                                <input className="w-full p-2 border rounded" value={editingEmpresa.logradouro || ''} onChange={e => setEditingEmpresa({...editingEmpresa, logradouro: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400">Cidade</label>
+                                <input className="w-full p-2 border rounded" value={editingEmpresa.cidade || ''} onChange={e => setEditingEmpresa({...editingEmpresa, cidade: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400">UF</label>
+                                <input className="w-full p-2 border rounded" maxLength={2} value={editingEmpresa.uf || ''} onChange={e => setEditingEmpresa({...editingEmpresa, uf: e.target.value})} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-blue-600 font-bold">Código IBGE</label>
+                                <input className="w-full p-2 border rounded bg-blue-50 border-blue-200" value={editingEmpresa.codigoIbge || ''} onChange={e => setEditingEmpresa({...editingEmpresa, codigoIbge: e.target.value})} />
                             </div>
                         </div>
                     </div>
-                </Link>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-2">
+                    <button onClick={handleSave} className="bg-green-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-green-700 font-bold shadow-lg shadow-green-100">
+                        <Save size={18}/> Salvar Alterações
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* LISTAGEM */}
+      <div className="grid gap-3 min-h-[400px] content-start">
+        {loading ? (
+             <div className="flex h-64 items-center justify-center text-slate-500">
+                <Loader2 className="animate-spin mr-2"/> Carregando...
+            </div>
+        ) : empresas.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 bg-white rounded-xl border border-dashed">
+                Nenhum CNPJ encontrado na base.
+            </div>
+        ) : (
+            empresas.map(emp => (
+                <div key={emp.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 hover:border-blue-300 transition group">
+                    
+                    {/* INFO EMPRESA */}
+                    <div className="flex items-center gap-4 flex-1 w-full md:w-auto">
+                        <div className="p-3 bg-slate-50 border rounded-lg text-slate-500">
+                            <Building2 size={24}/>
+                        </div>
+                        <div className="min-w-0">
+                            <h3 className="font-bold text-slate-800 truncate">{emp.razaoSocial}</h3>
+                            <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 mt-1 font-mono uppercase">
+                                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">CNPJ: {emp.documento}</span>
+                                {emp.codigoIbge && <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">IBGE: {emp.codigoIbge}</span>}
+                                {emp.inscricaoMunicipal && <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">IM: {emp.inscricaoMunicipal}</span>}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* RESPONSÁVEL */}
+                    <div className="flex items-center gap-3 w-full md:w-1/4 md:border-l md:pl-4 border-slate-100">
+                        <div className={`p-2 rounded-full ${emp.donos && emp.donos.length > 0 ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <User size={16}/>
+                        </div>
+                        <div className="overflow-hidden">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Vinculado a</p>
+                            {emp.donos && emp.donos.length > 0 ? (
+                                <>
+                                    <p className="text-xs text-slate-800 font-bold truncate">{emp.donos[0].nome}</p>
+                                    <p className="text-[10px] text-slate-500 truncate">{emp.donos[0].email}</p>
+                                    {emp.donos.length > 1 && <p className="text-[9px] text-blue-500">+ {emp.donos.length - 1} outros</p>}
+                                </>
+                            ) : (
+                                <p className="text-xs text-red-400 italic">Nenhum Usuário</p>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* AÇÃO: APENAS EDITAR */}
+                    <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+                        <button 
+                            onClick={() => setEditingEmpresa(emp)}
+                            className="text-xs font-bold text-slate-600 hover:text-blue-600 flex items-center gap-1 hover:bg-slate-50 px-3 py-2 rounded transition border border-transparent hover:border-slate-200"
+                        >
+                            <Edit size={16}/> Editar Dados
+                        </button>
+                    </div>
+
+                </div>
             ))
         )}
+      </div>
+
+      {/* PAGINAÇÃO */}
+      <div className="mt-6 flex justify-between items-center border-t pt-4">
+          <span className="text-xs text-slate-500">Página {page} de {totalPages}</span>
+          <div className="flex gap-2">
+              <button 
+                onClick={() => setPage(p => Math.max(1, p - 1))} 
+                disabled={page === 1}
+                className="p-2 border rounded hover:bg-white disabled:opacity-50 bg-slate-50"
+              >
+                  <ChevronLeft size={16}/>
+              </button>
+              <button 
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+                disabled={page === totalPages}
+                className="p-2 border rounded hover:bg-white disabled:opacity-50 bg-slate-50"
+              >
+                  <ChevronRight size={16}/>
+              </button>
+          </div>
       </div>
     </div>
   );

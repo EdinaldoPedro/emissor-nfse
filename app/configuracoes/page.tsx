@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
-  Lock, CheckCircle, Trash2, ShieldAlert, RefreshCw, Upload, FileKey, Edit 
+  Lock, CheckCircle, Trash2, ShieldAlert, RefreshCw, Upload, FileKey, Edit, Info 
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -13,9 +13,8 @@ export default function ConfiguracoesEmpresa() {
   const [buscando, setBuscando] = useState(false);
   const [msg, setMsg] = useState<{texto: string, tipo: 'sucesso' | 'erro'} | null>(null);
   
-  // Controle de Bloqueio (Apenas para CNPJ)
+  // Controle de Bloqueio (CNPJ sempre bloqueado se já existir)
   const [isLocked, setIsLocked] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   
   const [atividades, setAtividades] = useState<any[]>([]); 
 
@@ -23,7 +22,7 @@ export default function ConfiguracoesEmpresa() {
   const [certFile, setCertFile] = useState<string | null>(null);
   const [certSenha, setCertSenha] = useState('');
   const [dadosCertificado, setDadosCertificado] = useState<{ativo: boolean, vencimento: string | null}>({ ativo: false, vencimento: null });
-  const [modoEdicaoCertificado, setModoEdicaoCertificado] = useState(false); // Novo estado para exibir o input
+  const [modoEdicaoCertificado, setModoEdicaoCertificado] = useState(false);
 
   const [empresa, setEmpresa] = useState({
     documento: '',
@@ -65,12 +64,9 @@ export default function ConfiguracoesEmpresa() {
               vencimento: dados.vencimentoCertificado
           });
 
-          // Se não tem certificado, já abre o modo de edição/upload por padrão
           if (!dados.temCertificado) setModoEdicaoCertificado(true);
 
-          const admin = ['ADMIN', 'MASTER', 'SUPORTE'].includes(dados.role);
-          setIsAdmin(admin);
-          if (dados.cadastroCompleto && !admin) setIsLocked(true);
+          if (dados.cadastroCompleto) setIsLocked(true);
         }
       } catch (error) { console.error("Erro ao carregar perfil"); }
     }
@@ -79,6 +75,7 @@ export default function ConfiguracoesEmpresa() {
 
   const consultarCNPJ = async (forcarAtualizacao = false) => {
     const docLimpo = empresa.documento.replace(/\D/g, '');
+    
     if (isLocked && !forcarAtualizacao) return; 
     if (docLimpo.length !== 14) { alert("CNPJ inválido."); return; }
 
@@ -176,36 +173,71 @@ export default function ConfiguracoesEmpresa() {
           </div>
         </div>
 
-        {isLocked && (
-            <div className="bg-orange-50 border-l-4 border-orange-500 p-4 mb-6 rounded shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div className="flex items-start gap-3">
-                    <ShieldAlert className="text-orange-600 shrink-0 mt-1" size={24} />
+        {/* --- ÁREA DE ALERTAS (LAYOUT UNIFICADO) --- */}
+        {isLocked ? (
+            // ALERTA LARANJA: CADASTRO JÁ EXISTENTE
+            <div className="bg-orange-50 border-l-4 border-orange-400 p-4 mb-8 rounded-r shadow-sm flex flex-col md:flex-row items-start gap-4">
+                <div className="flex items-start gap-3 flex-1">
+                    <div className="text-orange-500 mt-1">
+                        <Info size={24} />
+                    </div>
                     <div>
-                        <h3 className="font-bold text-orange-800">Cadastro Vinculado</h3>
-                        <p className="text-sm text-orange-700">O CNPJ está protegido. Você pode atualizar o endereço ou certificado.</p>
+                        <h3 className="font-bold text-orange-900">Cadastro Vinculado</h3>
+                        <p className="text-sm text-orange-800 mt-1 leading-relaxed">
+                            Este cadastro está associado ao CNPJ informado. Para garantir a segurança fiscal, a alteração do documento não é permitida manualmente.
+                            <br/>
+                            **Precisa trocar o CNPJ?** Entre em contato com nosso <a href="#" className="underline font-bold hover:text-orange-950">Suporte</a>.
+                        </p>
                     </div>
                 </div>
-                <button onClick={() => consultarCNPJ(true)} disabled={buscando} className="flex items-center gap-2 bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm w-full md:w-auto justify-center">
-                    <RefreshCw size={16} className={buscando ? 'animate-spin' : ''} />
-                    {buscando ? 'Buscando...' : 'Atualizar Dados da Receita'}
+                <button 
+                    onClick={() => consultarCNPJ(true)} 
+                    disabled={buscando} 
+                    className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm"
+                >
+                    {buscando ? 'Buscando...' : '↻ Atualizar Dados da Receita'}
                 </button>
+            </div>
+        ) : (
+            // ALERTA AZUL: NOVO CADASTRO (Para manter o layout parecido)
+            <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8 rounded-r shadow-sm flex items-start gap-4">
+                <div className="text-blue-500 mt-1">
+                    <Briefcase size={24} />
+                </div>
+                <div>
+                    <h3 className="font-bold text-blue-900">Configuração Inicial</h3>
+                    <p className="text-sm text-blue-800 mt-1">
+                        Informe o <strong>CNPJ</strong> abaixo e clique em buscar para carregar os dados da Receita Federal automaticamente.
+                    </p>
+                </div>
             </div>
         )}
 
         <form onSubmit={handleSalvar} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           
-          {/* SEÇÃO 1: DADOS */}
+          {/* SEÇÃO 1: DADOS CADASTRAIS */}
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2">
               <Briefcase size={20} /> Dados Cadastrais
             </h3>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* CNPJ (Travado se locked, Busca se unlocked) */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">CNPJ</label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Building2 className="absolute left-3 top-3 text-gray-400" size={20} />
-                    <input type="text" className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} placeholder="00000000000191" value={empresa.documento || ''} onChange={e => setEmpresa({...empresa, documento: e.target.value})} maxLength={18} disabled={isLocked} />
+                    <input 
+                        type="text" 
+                        className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} 
+                        placeholder="00000000000191" 
+                        value={empresa.documento || ''} 
+                        onChange={e => setEmpresa({...empresa, documento: e.target.value})} 
+                        maxLength={18} 
+                        disabled={isLocked} 
+                    />
                   </div>
                   {!isLocked && (
                       <button type="button" onClick={() => consultarCNPJ(false)} disabled={buscando} className="bg-blue-100 text-blue-700 px-6 py-2 rounded-lg font-medium hover:bg-blue-200 transition flex items-center gap-2 disabled:opacity-50">
@@ -214,13 +246,70 @@ export default function ConfiguracoesEmpresa() {
                   )}
                 </div>
               </div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" value={empresa.razaoSocial || ''} onChange={e => setEmpresa({...empresa, razaoSocial: e.target.value})} readOnly={isLocked}/></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" value={empresa.nomeFantasia || ''} onChange={e => setEmpresa({...empresa, nomeFantasia: e.target.value})} readOnly={isLocked}/></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal</label><input type="text" className="w-full p-3 border rounded-lg" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário</label><select className="w-full p-3 border rounded-lg" value={empresa.regimeTributario || 'MEI'} onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}><option value="MEI">Microempreendedor Individual (MEI)</option><option value="SIMPLES">Simples Nacional</option><option value="LUCRO_PRESUMIDO">Lucro Presumido</option></select></div>
-              <div className="md:col-span-2 bg-blue-50 p-4 rounded-lg border border-blue-100">
-                <div className="flex justify-between items-center mb-2"><h4 className="text-sm font-bold text-blue-700 flex items-center gap-2">📋 Atividades Econômicas (CNAEs)</h4><span className="text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded-full">{atividades.length} atividades</span></div>
-                {atividades.length === 0 ? <p className="text-xs text-gray-500 italic p-2">Nenhuma atividade carregada.</p> : <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">{atividades.map((cnae, idx) => <div key={idx} className="flex items-start gap-2 text-xs bg-white p-3 rounded border border-blue-100 shadow-sm"><span className={`font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wide ${cnae.principal ? 'bg-green-100 text-green-700 ring-1 ring-green-200' : 'bg-gray-100 text-gray-600'}`}>{cnae.principal ? 'Principal' : 'Secundário'}</span><div><span className="font-mono font-bold text-gray-800 text-sm block">{cnae.codigo}</span><span className="text-gray-600 leading-tight">{cnae.descricao}</span></div></div>)}</div>}
+
+              {/* Razão Social e Nome Fantasia (Sempre travados, vêm da API) */}
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly />
+              </div>
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly />
+              </div>
+
+              {/* LINHA DUPLA: Inscrição e Regime (Ambos Editáveis) */}
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
+                  {/* Inscrição Municipal - EDITÁVEL */}
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
+                      <input 
+                          type="text" 
+                          className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" 
+                          placeholder="Ex: 12345" 
+                          value={empresa.inscricaoMunicipal || ''} 
+                          onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}
+                      />
+                  </div>
+
+                  {/* Regime Tributário - EDITÁVEL */}
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-blue-600 text-xs">(Editável)</span></label>
+                      <select 
+                        className="w-full p-3 border rounded-lg bg-white text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none" 
+                        value={empresa.regimeTributario || 'MEI'} 
+                        onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}
+                      >
+                          <option value="MEI">Microempreendedor Individual (MEI)</option>
+                          <option value="SIMPLES">Simples Nacional</option>
+                          <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
+                      </select>
+                  </div>
+              </div>
+
+              {/* CNAEs (Travado - Automático) */}
+              <div className="md:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-200 mt-2 opacity-80">
+                <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-bold text-gray-600 flex items-center gap-2">📋 Atividades (CNAEs) - Automático</h4>
+                    <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">{atividades.length} atividades</span>
+                </div>
+                {atividades.length === 0 ? (
+                    <p className="text-xs text-gray-500 italic p-2">Nenhuma atividade carregada.</p>
+                ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                        {atividades.map((cnae, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-xs bg-white p-3 rounded border border-gray-200 shadow-sm">
+                                <span className={`font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wide ${cnae.principal ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                    {cnae.principal ? 'Principal' : 'Secundário'}
+                                </span>
+                                <div>
+                                    <span className="font-mono font-bold text-gray-800 text-sm block">{cnae.codigo}</span>
+                                    <span className="text-gray-600 leading-tight">{cnae.descricao}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
               </div>
             </div>
           </div>
@@ -229,12 +318,50 @@ export default function ConfiguracoesEmpresa() {
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">CEP</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" value={empresa.cep || ''} onChange={e => setEmpresa({...empresa, cep: e.target.value})} readOnly={isLocked}/></div>
-              <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-700 mb-2">Logradouro</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" value={empresa.logradouro || ''} onChange={e => setEmpresa({...empresa, logradouro: e.target.value})} readOnly={isLocked}/></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Número</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" value={empresa.numero || ''} onChange={e => setEmpresa({...empresa, numero: e.target.value})} readOnly={isLocked}/></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Bairro</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" value={empresa.bairro || ''} onChange={e => setEmpresa({...empresa, bairro: e.target.value})} readOnly={isLocked}/></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">Cidade</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" value={empresa.cidade || ''} onChange={e => setEmpresa({...empresa, cidade: e.target.value})} readOnly={isLocked}/></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-2">UF</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-50" maxLength={2} value={empresa.uf || ''} onChange={e => setEmpresa({...empresa, uf: e.target.value})} readOnly={isLocked}/></div>
+              
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">CEP</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.cep || ''} readOnly/>
+              </div>
+              
+              <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Logradouro</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.logradouro || ''} readOnly/>
+              </div>
+              
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Número</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.numero || ''} readOnly/>
+              </div>
+              
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Bairro</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.bairro || ''} readOnly/>
+              </div>
+              
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Cidade</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.cidade || ''} readOnly/>
+              </div>
+              
+              {/* LINHA FINAL: UF e IBGE */}
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">UF</label>
+                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" maxLength={2} value={empresa.uf || ''} readOnly/>
+              </div>
+
+              {/* IBGE NO FIM DO ENDEREÇO (Conforme solicitado) */}
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Código IBGE</label>
+                  <input 
+                      type="text" 
+                      className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" 
+                      placeholder="Ex: 3550308" 
+                      value={empresa.codigoIbge || ''} 
+                      readOnly
+                  />
+              </div>
+            
             </div>
           </div>
 
@@ -244,8 +371,7 @@ export default function ConfiguracoesEmpresa() {
                 <Lock size={20} /> Certificado Digital A1
             </h3>
 
-            {/* STATUS DO CERTIFICADO (Se existir) */}
-            {dadosCertificado.ativo && (
+            {dadosCertificado.ativo ? (
                 <div className="bg-white border-l-4 border-green-500 p-6 rounded shadow-sm mb-6 flex justify-between items-center">
                     <div>
                         <h4 className="font-bold text-green-700 flex items-center gap-2 text-lg">
@@ -255,7 +381,7 @@ export default function ConfiguracoesEmpresa() {
                             Expira em: <span className="font-mono font-bold text-gray-800">{dadosCertificado.vencimento ? new Date(dadosCertificado.vencimento).toLocaleDateString() : 'Data não identificada'}</span>
                         </p>
                     </div>
-                    {/* BOTÕES DE AÇÃO: EDITAR E EXCLUIR */}
+                    {/* BOTÕES DE AÇÃO */}
                     <div className="flex gap-2">
                         <button 
                             type="button" 
@@ -275,10 +401,10 @@ export default function ConfiguracoesEmpresa() {
                         </button>
                     </div>
                 </div>
-            )}
+            ) : null}
 
-            {/* FORMULÁRIO DE UPLOAD (Visível se não tiver cert ou se clicar no lápis) */}
-            {modoEdicaoCertificado && (
+            {/* FORMULÁRIO DE UPLOAD */}
+            {(modoEdicaoCertificado || !dadosCertificado.ativo) && (
                 <div className="bg-white p-6 rounded-xl border border-dashed border-slate-300 hover:border-blue-400 transition group animate-in fade-in slide-in-from-top-2">
                     <label className="block text-sm font-bold text-slate-700 mb-4 group-hover:text-blue-600 transition flex items-center gap-2">
                         <FileKey size={18}/> {dadosCertificado.ativo ? 'Substituir Certificado Atual' : 'Configurar Novo Certificado'}

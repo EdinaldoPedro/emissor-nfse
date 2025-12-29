@@ -37,6 +37,40 @@ export default function Sidebar() {
     router.push('/login');
   };
 
+  // --- LÓGICA DE STATUS DO CERTIFICADO (MANTIDA) ---
+  const getStatusCertificado = () => {
+    // 1. Sem certificado
+    if (!userData?.temCertificado) {
+        return { label: 'Pendente', classes: 'text-red-500' };
+    }
+
+    // 2. Com certificado, mas sem data (caso raro, assume ativo)
+    if (!userData.vencimentoCertificado) {
+        return { label: 'Ativo', classes: 'text-green-600' };
+    }
+
+    // 3. Cálculo de datas
+    const hoje = new Date();
+    const vencimento = new Date(userData.vencimentoCertificado);
+    const diffTime = vencimento.getTime() - hoje.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    // Vencido
+    if (diffDays < 0) {
+        return { label: 'Vencido', classes: 'text-red-600 font-bold' };
+    }
+    
+    // Perto de vencer (30 dias) - Usei Amber para ficar legível no fundo branco
+    if (diffDays <= 30) {
+        return { label: 'A Vencer', classes: 'text-amber-600 font-bold' };
+    }
+
+    // Válido
+    return { label: 'Válido', classes: 'text-green-600' };
+  };
+
+  const statusCert = getStatusCertificado();
+
   return (
     <>
       <button 
@@ -53,13 +87,9 @@ export default function Sidebar() {
         />
       )}
 
-      {/* ESTRUTURA DO MENU (Flex Column)
-          - h-full: Ocupa toda altura
-          - flex flex-col: Organiza verticalmente
-      */}
       <div className={`fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
         
-        {/* CABEÇALHO (Fixo no topo) */}
+        {/* CABEÇALHO */}
         <div className="p-6 border-b flex justify-between items-center bg-blue-600 text-white shrink-0">
           <h2 className="font-bold text-lg">Configurações</h2>
           <button onClick={() => setIsOpen(false)} className="hover:bg-blue-700 p-1 rounded">
@@ -67,10 +97,7 @@ export default function Sidebar() {
           </button>
         </div>
 
-        {/* CORPO (Rolagem Aqui) 
-            - flex-1: Ocupa o espaço restante
-            - overflow-y-auto: Permite rolar apenas esta área
-        */}
+        {/* CORPO */}
         <div className="p-6 space-y-8 flex-1 overflow-y-auto">
           
           <section>
@@ -92,12 +119,26 @@ export default function Sidebar() {
 
           <section>
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
-              <Briefcase size={14} /> Minha Empresa (MEI)
+              <Briefcase size={14} /> Minha Empresa
             </h3>
             <div className="space-y-3 text-sm">
-              <p><span className="font-medium text-gray-700">Razão Social:</span> {userData?.razaoSocial || '...'}</p>
-              <p><span className="font-medium text-gray-700">CNPJ:</span> {userData?.documento || 'Não informado'}</p>
-              <p><span className="font-medium text-gray-700">Certificado:</span> <span className="text-red-500">Pendente</span></p>
+              <p>
+                  <span className="font-medium text-gray-700 block mb-1">Razão Social:</span> 
+                  <span className="text-gray-500 leading-tight">{userData?.razaoSocial || '...'}</span>
+              </p>
+              <p>
+                  <span className="font-medium text-gray-700">CNPJ:</span> 
+                  <span className="text-gray-500 ml-1">{userData?.documento || 'Não informado'}</span>
+              </p>
+              
+              {/* STATUS VOLTOU AO PADRÃO DE TEXTO SIMPLES */}
+              <p>
+                  <span className="font-medium text-gray-700">Certificado:</span>{' '}
+                  <span className={statusCert.classes}>
+                      {statusCert.label}
+                  </span>
+              </p>
+
               <Link href="/configuracoes" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
                 Completar Cadastro PJ
               </Link>
@@ -139,7 +180,7 @@ export default function Sidebar() {
 
         </div>
 
-        {/* RODAPÉ (Fixo no fundo) */}
+        {/* RODAPÉ */}
         <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0">
             <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 w-full p-2 text-sm">
                 <Phone size={16} /> Suporte

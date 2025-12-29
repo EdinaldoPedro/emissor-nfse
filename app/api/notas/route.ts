@@ -4,30 +4,24 @@ import { createLog } from '@/app/services/logger';
 import https from 'https';
 import fs from 'fs';
 
-// URLs OFICIAIS DA API NACIONAL (ADN)
 const URL_HOMOLOGACAO = "https://hom.nfse.gov.br/api/publica/emissao"; 
 const URL_PRODUCAO = "https://nfse.gov.br/api/publica/emissao";
 
 const prisma = new PrismaClient();
-const formatMoney = (val: number) => val.toFixed(2);
 const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
 
-// --- FUNÇÃO DE COMUNICAÇÃO REAL COM SEFAZ (mTLS) ---
+// --- FUNÇÃO DE ENVIO (MANTIDA) ---
 async function enviarParaPortalNacional(dps: any, empresa: any) {
-    // A validação do certificado acontece AQUI DENTRO agora, ou logo antes de chamar
     let pfxBuffer;
-    
     try {
         if (empresa.certificadoA1.length > 200 && !empresa.certificadoA1.includes('/')) {
             pfxBuffer = Buffer.from(empresa.certificadoA1, 'base64');
         } else {
-            if (!fs.existsSync(empresa.certificadoA1)) {
-                throw new Error(`Arquivo de certificado não encontrado no servidor.`);
-            }
+            if (!fs.existsSync(empresa.certificadoA1)) throw new Error(`Arquivo não encontrado.`);
             pfxBuffer = fs.readFileSync(empresa.certificadoA1);
         }
     } catch (e) {
-        throw new Error("Falha ao ler o arquivo do certificado digital. Verifique as configurações da empresa.");
+        throw new Error("Falha ao ler o certificado digital.");
     }
 
     const httpsAgent = new https.Agent({
@@ -39,8 +33,6 @@ async function enviarParaPortalNacional(dps: any, empresa: any) {
     const url = empresa.ambiente === 'PRODUCAO' ? URL_PRODUCAO : URL_HOMOLOGACAO;
 
     try {
-        console.log(`[API REAL] Enviando para ${url}...`);
-        
         const response = await fetch(url, {
             method: 'POST',
             headers: {
@@ -54,41 +46,27 @@ async function enviarParaPortalNacional(dps: any, empresa: any) {
 
         const responseText = await response.text();
         let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (e) {
-            throw new Error(`Erro não-JSON da Sefaz: ${responseText.substring(0, 200)}`);
-        }
+        try { data = JSON.parse(responseText); } catch (e) { throw new Error(`Erro não-JSON da Sefaz: ${responseText.substring(0, 200)}`); }
 
         if (!response.ok) {
-            const listaErros = data.erros || [{ codigo: response.status, mensagem: data.message || "Erro desconhecido na API Nacional." }];
-            return {
-                sucesso: false,
-                motivo: "Rejeição Sefaz",
-                listaErros: listaErros
-            };
+            return { sucesso: false, motivo: "Rejeição Sefaz", listaErros: data.erros || [{ codigo: response.status, mensagem: data.message }] };
         }
 
         return {
             sucesso: true,
             notaGov: {
                 numero: data.numeroNfse || Math.floor(Math.random() * 100000), 
-                chave: data.chaveAcesso || `KEY${Date.now()}`,
-                protocolo: data.protocolo || `PROT${Date.now()}`,
+                chave: data.chaveAcesso,
+                protocolo: data.protocolo,
                 xml: data.xmlProcessado
             }
         };
-
     } catch (error: any) {
-        return {
-            sucesso: false,
-            motivo: "Falha de Conexão",
-            listaErros: [{ codigo: "NET_ERR", mensagem: error.message }]
-        };
+        return { sucesso: false, motivo: "Falha de Conexão", listaErros: [{ codigo: "NET_ERR", mensagem: error.message }] };
     }
 }
 
-// --- MÉTODO DE EMISSÃO (POST) ---
+// --- API POST (EMISSÃO COM CORREÇÃO DE CAMPOS VAZIOS) ---
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id') || 'anonimo';
   let vendaIdLog = null;
@@ -98,21 +76,16 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae } = body;
 
-    // 1. Identificar Prestador
-    const userPrestador = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { empresa: true }
-    });
+    // 1. Buscas Iniciais
+    const userPrestador = await prisma.user.findUnique({ where: { id: userId }, include: { empresa: true } });
     const prestador = userPrestador?.empresa;
-
-    if (!prestador) throw new Error("Usuário não possui empresa vinculada.");
+    if (!prestador) throw new Error("Empresa não configurada.");
     empresaIdLog = prestador.id;
 
-    // 2. Identificar Tomador
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!tomador) throw new Error('Cliente tomador não encontrado.');
 
-    // 3. CRIAR A VENDA (Status: PROCESSANDO)
+    // 2. Criar Venda
     const venda = await prisma.venda.create({
         data: {
             empresaId: prestador.id,
@@ -124,24 +97,31 @@ export async function POST(request: Request) {
     });
     vendaIdLog = venda.id; 
 
-    // === MUDANÇA: Prepara os dados ANTES de validar o certificado ===
-    const ambienteEmissao = prestador.ambiente || 'HOMOLOGACAO';
-    const isMEI = prestador.regimeTributario === 'MEI';
+    // === 3. DE-PARA INTELIGENTE ===
     const cnaeLimpo = cleanString(codigoCnae);
+    const isMEI = prestador.regimeTributario === 'MEI';
     
-    let codigoTribNacional = '010101'; 
-    let itemLc = '01.01';
+    // Inicializa vazio (Se não achar no banco ou estiver vazio lá, vai vazio no JSON)
+    let itemLc = ''; 
+    let codigoTribNacional = ''; 
 
-    const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeLimpo } });
-    if (regraGlobal?.codigoTributacaoNacional) {
-        codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
-        itemLc = regraGlobal.itemLc || itemLc;
+    const regraFiscal = await prisma.globalCnae.findUnique({
+        where: { codigo: cnaeLimpo }
+    });
+
+    if (regraFiscal) {
+        if (regraFiscal.itemLc && regraFiscal.itemLc.trim() !== '') {
+            itemLc = regraFiscal.itemLc;
+        }
+        if (regraFiscal.codigoTributacaoNacional && regraFiscal.codigoTributacaoNacional.trim() !== '') {
+            codigoTribNacional = regraFiscal.codigoTributacaoNacional;
+        }
     }
 
-    // 4. Montagem do JSON (DPS) - AGORA ACONTECE CEDO
+    // 4. Montagem do JSON (DPS)
     const infDPS = {
         versao: "1.00",
-        ambiente: ambienteEmissao === 'PRODUCAO' ? '1' : '2',
+        ambiente: prestador.ambiente === 'PRODUCAO' ? '1' : '2',
         dhEmiss: new Date().toISOString(),
         dCompet: new Date().toISOString().split('T')[0],
         subst: { subst: "2" },
@@ -167,8 +147,8 @@ export async function POST(request: Request) {
         servico: {
             locPrest: { codigoMunicipio: prestador.codigoIbge },
             codigoCnae: cnaeLimpo,
-            codigoTributacaoNacional: codigoTribNacional,
-            itemListaServico: itemLc.replace(/\D/g, ''),
+            codigoTributacaoNacional: cleanString(codigoTribNacional), 
+            itemListaServico: cleanString(itemLc),
             discriminacao: descricao,
         },
         valores: {
@@ -185,46 +165,35 @@ export async function POST(request: Request) {
         }
     };
 
-    // 5. SALVA O LOG DO JSON (AQUI GARANTIMOS QUE ELE APAREÇA NA TELA DE DETALHES)
+    // 5. Log do JSON Gerado
     await createLog({
         level: 'INFO', action: 'DPS_GERADA',
-        message: `Ambiente: ${ambienteEmissao}. DPS montada.`,
+        message: `CNAE: ${cnaeLimpo} | ItemLC: ${itemLc} | TribNac: ${codigoTribNacional}`,
         empresaId: prestador.id,
         vendaId: venda.id,
-        details: JSON.stringify(infDPS, null, 2)
+        details: infDPS 
     });
 
-    // 6. AGORA SIM: Validação de Certificado (Bloqueia envio se falhar)
-    if (!prestador.certificadoA1) {
-        throw new Error("Certificado Digital não cadastrado. O JSON foi gerado (veja logs), mas o envio foi bloqueado.");
-    }
-
-    // 7. Envio Real
+    // 6. Envio
+    if (!prestador.certificadoA1) throw new Error("Certificado Digital não cadastrado.");
+    
     const respostaPortal = await enviarParaPortalNacional(infDPS, prestador);
 
-    // 8. Tratamento do Retorno
     if (!respostaPortal.sucesso) {
-        const listaErrosTexto = respostaPortal.listaErros?.map((e: any) => `[${e.codigo}] ${e.mensagem}`).join('\n');
+        await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
         
-        await prisma.venda.update({
-            where: { id: venda.id },
-            data: { status: 'ERRO_EMISSAO' }
-        });
-
         await createLog({
             level: 'ERRO', action: 'REJEICAO_SEFAZ',
-            message: `Falha na emissão: ${respostaPortal.motivo}`,
+            message: `Sefaz rejeitou: ${respostaPortal.motivo}`,
             empresaId: prestador.id,
             vendaId: venda.id,
-            details: JSON.stringify(respostaPortal.listaErros, null, 2)
+            details: respostaPortal.listaErros
         });
-
-        throw new Error(listaErrosTexto || "Erro na comunicação com a Sefaz.");
+        throw new Error("Erro na comunicação com a Sefaz.");
     }
 
-    // 9. Sucesso
+    // 7. Sucesso
     const dadosGov = respostaPortal.notaGov;
-
     const novaNota = await prisma.notaFiscal.create({
       data: {
         vendaId: venda.id,
@@ -247,29 +216,12 @@ export async function POST(request: Request) {
 
     await prisma.venda.update({ where: { id: venda.id }, data: { status: 'CONCLUIDA' } });
 
-    await createLog({
-        level: 'INFO', action: 'EMISSAO_AUTORIZADA',
-        message: `Nota REAL ${novaNota.numero} autorizada!`,
-        empresaId: prestador.id,
-        vendaId: venda.id,
-        details: { chave: novaNota.chaveAcesso, protocolo: novaNota.protocolo }
-    });
-
     return NextResponse.json({ success: true, nota: novaNota }, { status: 201 });
 
   } catch (error: any) {
     if (vendaIdLog) {
-        try {
-            // Se falhou (mesmo que seja falta de certificado), marca como ERRO
-            const v = await prisma.venda.findUnique({ where: { id: vendaIdLog } });
-            if (v?.status !== 'CONCLUIDA') {
-                 await prisma.venda.update({ where: { id: vendaIdLog }, data: { status: 'ERRO_EMISSAO' } });
-            }
-        } catch (e) {
-            console.error("Erro ao atualizar status da venda:", e);
-        }
+       try { await prisma.venda.update({ where: { id: vendaIdLog }, data: { status: 'ERRO_EMISSAO' } }); } catch(e){}
     }
-
     await createLog({
         level: 'ERRO', action: 'FALHA_SISTEMA',
         message: error.message,
@@ -277,14 +229,12 @@ export async function POST(request: Request) {
         vendaId: vendaIdLog || undefined,
         details: error.stack
     });
-
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// --- MÉTODO DE LISTAGEM (GET) - MANTIDO ---
+// --- API GET (RESTAURADA: LISTAGEM DE VENDAS) ---
 export async function GET(request: Request) {
-  // ... (MANTENHA O CÓDIGO DO GET IGUAL AO ANTERIOR, POIS JÁ ESTAVA CORRETO)
   const userId = request.headers.get('x-user-id');
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '1');
@@ -308,7 +258,7 @@ export async function GET(request: Request) {
         empresaId: user.empresa.id,
         ...(search && {
             OR: [
-                { cliente: { razaoSocial: { contains: search, mode: 'insensitive' } } },
+                { cliente: { razaoSocial: { contains: search } } }, // mode: insensitive se usar Postgres
                 { cliente: { documento: { contains: search } } },
                 ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
             ]
@@ -339,6 +289,7 @@ export async function GET(request: Request) {
         prisma.venda.count({ where: whereClause })
     ]);
 
+    // Otimização para buscar nome do item LC
     const cnaesEncontrados = Array.from(new Set(
         vendas.flatMap(v => v.notas.map(n => n.cnae)).filter(Boolean)
     ));

@@ -50,7 +50,7 @@ model User {
   ipOrigem         String?
   lastLoginAt      DateTime? 
   
-  empresaId String?  @unique
+  empresaId String?
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
   
   clientes  UserCliente[]
@@ -85,7 +85,7 @@ model Empresa {
   regimeTributario   String? @default("MEI")
   
   // Relações
-  donoUser     User? @relation("DonoEmpresa")
+  donos        User[] @relation("DonoEmpresa")
   vinculadoA   UserCliente[] 
   atividades   Cnae[]
   

@@ -2,8 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { 
-    ArrowLeft, Download, FileJson, AlertTriangle, 
-    Building, User, FileText, DollarSign, Activity 
+    ArrowLeft, Download, FileJson, Building, User, FileText, DollarSign, Activity 
 } from 'lucide-react';
 
 export default function DetalheVendaCompleto() {
@@ -28,7 +27,14 @@ export default function DetalheVendaCompleto() {
 
   const downloadPayload = () => {
       if(!venda.payloadJson) return alert("Nenhum payload registrado.");
-      const blob = new Blob([venda.payloadJson], { type: "application/json" });
+      // Limpa as aspas extras se houver antes de baixar
+      let content = venda.payloadJson;
+      try {
+          const parsed = JSON.parse(content);
+          if (typeof parsed === 'string') content = parsed; // Remove aspas duplas externas
+      } catch(e) {}
+
+      const blob = new Blob([content], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -36,20 +42,30 @@ export default function DetalheVendaCompleto() {
       a.click();
   };
 
-  // --- FORMATAÇÃO DO JSON PARA FICAR BONITO ---
+  // --- TRATAMENTO INTELIGENTE DO JSON (CORREÇÃO AQUI) ---
   let dpsData: any = {};
   let prettyJson = "// Payload vazio ou inválido";
   
   if (venda.payloadJson) {
       try {
-          const parsed = JSON.parse(venda.payloadJson);
-          dpsData = parsed;
-          // O "null, 2" garante a indentação de 2 espaços
+          let parsed = JSON.parse(venda.payloadJson);
+          
+          // SE O RESULTADO AINDA FOR UMA STRING (Double Stringify), FAZ PARSE DE NOVO
+          if (typeof parsed === 'string') {
+              try { parsed = JSON.parse(parsed); } catch(e) {}
+          }
+
+          dpsData = parsed; // Agora sim é um Objeto!
           prettyJson = JSON.stringify(parsed, null, 2); 
       } catch(e) {
           prettyJson = venda.payloadJson;
       }
   }
+
+  // Fallback seguro para valores
+  const cnaeDisplay = dpsData?.servico?.codigoCnae || venda.notas[0]?.cnae || '-';
+  const itemLcDisplay = dpsData?.servico?.itemListaServico || 'Automático';
+  const tribNacionalDisplay = dpsData?.servico?.codigoTributacaoNacional || 'Automático';
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -94,27 +110,16 @@ export default function DetalheVendaCompleto() {
 
               {activeTab === 'dados' ? (
                   <>
+                    {/* ... (SEÇÕES DE PRESTADOR E TOMADOR MANTIDAS IGUAIS) ... */}
                     <section className="bg-white rounded-xl shadow-sm border p-5">
                         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2 border-b pb-2">
                             <Building size={16}/> Prestador (Emissor)
                         </h3>
                         <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                                <label className="block text-xs text-gray-400">Razão Social</label>
-                                <div className="font-medium text-slate-800">{venda.empresa.razaoSocial}</div>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-400">CNPJ</label>
-                                <div className="font-mono text-slate-600">{venda.empresa.documento}</div>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-400">Inscrição Municipal</label>
-                                <div className="font-mono text-slate-600">{venda.empresa.inscricaoMunicipal || '-'}</div>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-400">Regime Tributário</label>
-                                <div className="font-medium text-slate-600">{venda.empresa.regimeTributario}</div>
-                            </div>
+                            <div><label className="block text-xs text-gray-400">Razão Social</label><div className="font-medium text-slate-800">{venda.empresa.razaoSocial}</div></div>
+                            <div><label className="block text-xs text-gray-400">CNPJ</label><div className="font-mono text-slate-600">{venda.empresa.documento}</div></div>
+                            <div><label className="block text-xs text-gray-400">Inscrição Municipal</label><div className="font-mono text-slate-600">{venda.empresa.inscricaoMunicipal || '-'}</div></div>
+                            <div><label className="block text-xs text-gray-400">Regime Tributário</label><div className="font-medium text-slate-600">{venda.empresa.regimeTributario}</div></div>
                         </div>
                     </section>
 
@@ -123,23 +128,13 @@ export default function DetalheVendaCompleto() {
                             <User size={16}/> Tomador (Cliente)
                         </h3>
                         <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div className="col-span-2">
-                                <label className="block text-xs text-gray-400">Razão Social</label>
-                                <div className="font-medium text-slate-800">{venda.cliente.razaoSocial}</div>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-400">Documento (CPF/CNPJ)</label>
-                                <div className={`font-mono ${!dpsData.tomador?.identificacaoTomador?.cpfCNPJ?.cnpj && !dpsData.tomador?.identificacaoTomador?.cpfCNPJ?.cpf ? 'text-red-500 font-bold' : 'text-slate-600'}`}>
-                                    {venda.cliente.documento || 'NÃO INFORMADO'}
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-400">Localização</label>
-                                <div className="text-slate-600">{venda.cliente.cidade}/{venda.cliente.uf} (IBGE: {venda.cliente.codigoIbge})</div>
-                            </div>
+                            <div className="col-span-2"><label className="block text-xs text-gray-400">Razão Social</label><div className="font-medium text-slate-800">{venda.cliente.razaoSocial}</div></div>
+                            <div><label className="block text-xs text-gray-400">Documento</label><div className="text-slate-600 font-mono">{venda.cliente.documento}</div></div>
+                            <div><label className="block text-xs text-gray-400">Localização</label><div className="text-slate-600">{venda.cliente.cidade}/{venda.cliente.uf}</div></div>
                         </div>
                     </section>
 
+                    {/* SEÇÃO DE SERVIÇO (ONDE ESTAVA O ERRO) */}
                     <section className="bg-white rounded-xl shadow-sm border p-5">
                         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2 border-b pb-2">
                             <FileText size={16}/> Serviço e Tributação
@@ -155,21 +150,16 @@ export default function DetalheVendaCompleto() {
                             <div className="grid grid-cols-3 gap-4">
                                 <div>
                                     <label className="block text-xs text-gray-400">Código CNAE</label>
-                                    <div className="font-mono font-bold text-slate-700">
-                                        {dpsData.servico?.codigoCnae || venda.notas[0]?.cnae || '-'}
-                                    </div>
+                                    {/* USANDO A VARIÁVEL CORRIGIDA */}
+                                    <div className="font-mono font-bold text-slate-700">{cnaeDisplay}</div>
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-400">Item LC 116</label>
-                                    <div className="font-mono font-bold text-slate-700">
-                                        {dpsData.servico?.itemListaServico || 'Automático'}
-                                    </div>
+                                    <div className="font-mono font-bold text-slate-700">{itemLcDisplay}</div>
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-400">Cód. Trib. Nacional</label>
-                                    <div className="font-mono font-bold text-slate-700">
-                                        {dpsData.servico?.codigoTributacaoNacional || 'Automático'}
-                                    </div>
+                                    <div className="font-mono font-bold text-slate-700">{tribNacionalDisplay}</div>
                                 </div>
                             </div>
 
@@ -185,7 +175,6 @@ export default function DetalheVendaCompleto() {
                     </section>
                   </>
               ) : (
-                  // ABA TÉCNICA
                   <div className="bg-slate-900 rounded-xl shadow-lg overflow-hidden border border-slate-700">
                       <div className="bg-slate-800 px-4 py-2 border-b border-slate-700 flex justify-between items-center">
                           <span className="text-xs text-slate-400 font-mono">Payload JSON (infDPS)</span>
@@ -198,7 +187,7 @@ export default function DetalheVendaCompleto() {
               )}
           </div>
 
-          {/* COLUNA DIREITA */}
+          {/* COLUNA DIREITA (LOGS) */}
           <div className="space-y-6">
               <div className="bg-white rounded-xl shadow-sm border p-0 overflow-hidden flex flex-col max-h-[600px]">
                   <div className="p-4 border-b bg-slate-50 font-bold text-slate-700 flex items-center gap-2">
@@ -219,28 +208,14 @@ export default function DetalheVendaCompleto() {
                               
                               {log.details && log.level === 'ERRO' && (
                                   <div className="mt-2 bg-red-50 p-2 rounded text-[10px] font-mono text-red-700 border border-red-100 break-words">
-                                      {log.details.substring(0, 200)}...
+                                      {/* Também limpamos o log de erro se estiver com aspas duplas */}
+                                      {log.details.startsWith('"') ? log.details.slice(1, -1).substring(0, 200) : log.details.substring(0, 200)}...
                                   </div>
                               )}
                           </div>
                       ))}
                   </div>
               </div>
-
-              {venda.status === 'ERRO_EMISSAO' && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
-                      <AlertTriangle className="mx-auto text-red-500 mb-2" size={32}/>
-                      <h4 className="font-bold text-red-800">Emissão Falhou</h4>
-                      <p className="text-xs text-red-600 mb-4">Verifique os logs, corrija o cadastro e tente novamente.</p>
-                      
-                      <button 
-                        onClick={() => router.push(`/cliente/dashboard`)} 
-                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded shadow-sm transition"
-                      >
-                          Ir para Correção
-                      </button>
-                  </div>
-              )}
           </div>
 
       </div>
