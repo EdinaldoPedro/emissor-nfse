@@ -65,6 +65,9 @@ model Empresa {
   documento String   @unique
   ambiente  String   @default("PRODUCAO")
   
+  // Flag de travamento
+  cadastroCompleto Boolean @default(false)
+
   email        String?
   razaoSocial  String
   nomeFantasia String?
@@ -81,18 +84,19 @@ model Empresa {
   inscricaoMunicipal String?
   regimeTributario   String? @default("MEI")
   
-  donoUser     User?         @relation("DonoEmpresa")
+  // Relações
+  donoUser     User? @relation("DonoEmpresa")
   vinculadoA   UserCliente[] 
   atividades   Cnae[]
   
-  certificadoA1    String?
-  senhaCertificado String?
+  // Certificado
+  certificadoA1        String?   
+  senhaCertificado     String?   
+  certificadoVencimento DateTime? 
   
-  // Relações
   notasEmitidas    NotaFiscal[] @relation("PrestadorNota")
   notasRecebidas   NotaFiscal[] @relation("TomadorNota")
   
-  // Relações de Venda
   vendasRealizadas Venda[]      @relation("VendaPrestador")
   vendasCompradas  Venda[]      @relation("VendaTomador")
 
@@ -101,6 +105,7 @@ model Empresa {
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime?
 }
+
 
 // --- VENDAS (A Transação) ---
 model Venda {
