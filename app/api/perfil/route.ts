@@ -8,33 +8,75 @@ const prisma = new PrismaClient();
 // GET
 export async function GET(request: Request) {
   const userId = request.headers.get('x-user-id');
+  const contextEmpresaId = request.headers.get('x-empresa-id'); // <--- NOVO HEADER
+
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
+  let empresaAlvoId = null;
+
+  // 1. Busca o usuário logado
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { empresa: { include: { atividades: true } } }
+    include: { empresa: true }
   });
 
   if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
-  const empresa = user.empresa || {};
+  // 2. Lógica de Contexto (Se for Contador acessando Cliente)
+  if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
+      // Verifica segurança: Existe vinculo APROVADO entre esse contador e a empresa alvo?
+      const vinculo = await prisma.contadorVinculo.findUnique({
+          where: {
+              contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId }
+          }
+      });
+
+      if (vinculo && vinculo.status === 'APROVADO') {
+          empresaAlvoId = contextEmpresaId; // Permissão concedida!
+      } else {
+          // Se tentar burlar, ignora e carrega o próprio perfil (ou poderia dar erro 403)
+          console.warn("Tentativa de acesso não autorizado a contexto:", contextEmpresaId);
+      }
+  }
+
+  // Se não tem contexto (ou falhou), usa a empresa do próprio usuário
+  if (!empresaAlvoId) {
+      empresaAlvoId = user.empresaId;
+  }
+
+  // 3. Busca os dados da empresa ALVO (pode ser a do cliente ou a do próprio user)
+  let dadosEmpresa: any = {};
+  
+  if (empresaAlvoId) {
+      const emp = await prisma.empresa.findUnique({
+          where: { id: empresaAlvoId },
+          include: { atividades: true }
+      });
+      if (emp) dadosEmpresa = emp;
+  }
+
+  // Remove dados sensíveis do retorno
   // @ts-ignore
-  const { certificadoA1, senhaCertificado, email: emailEmpresa, ...rest } = empresa;
+  const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
 
   return NextResponse.json({
-    ...rest,
+    // Dados da Empresa (Do contexto ou própria)
+    ...restEmpresa,
     emailComercial: emailEmpresa,
-    
     temCertificado: !!certificadoA1,
-    vencimentoCertificado: empresa.certificadoVencimento,
-    cadastroCompleto: empresa.cadastroCompleto || false,
-    role: user.role,
+    vencimentoCertificado: dadosEmpresa.certificadoVencimento,
+    cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
+    atividades: dadosEmpresa.atividades || [],
 
+    // Dados do Usuário (Sempre quem está logado)
+    role: user.role,
     nome: user.nome,
     email: user.email,
     cpf: user.cpf,
     telefone: user.telefone,
-    atividades: empresa.atividades || []
+    
+    // Flag para o front saber que é visualização
+    isContextMode: empresaAlvoId !== user.empresaId
   });
 }
 

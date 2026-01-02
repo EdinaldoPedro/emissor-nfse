@@ -39,6 +39,8 @@ export default function Login() {
 
       if (dados.role === 'ADMIN' || dados.role === 'MASTER' || dados.role === 'SUPORTE') {
         router.push('/admin/dashboard');
+      } else if (dados.role === 'CONTADOR') {
+        router.push('/contador'); // <--- NOVA ROTA
       } else {
         router.push('/cliente/dashboard');
       }

@@ -10,14 +10,39 @@ const URL_PRODUCAO = "https://nfse.gov.br/api/publica/emissao";
 const prisma = new PrismaClient();
 const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
 
-// --- FUNÇÃO DE ENVIO (MANTIDA) ---
+// --- HELPER: SEGURANÇA E CONTEXTO (NOVO) ---
+async function getEmpresaContexto(userId: string, contextId: string | null) {
+    // 1. Busca o usuário logado para saber quem é
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return null;
+
+    // 2. Se não tem contexto (é o próprio dono acessando), retorna a empresa dele
+    if (!contextId || contextId === 'null' || contextId === 'undefined') {
+        return user.empresaId;
+    }
+
+    // 3. Se tem contexto (Contador acessando), verifica se existe vínculo APROVADO
+    const vinculo = await prisma.contadorVinculo.findUnique({
+        where: {
+            contadorId_empresaId: { contadorId: userId, empresaId: contextId }
+        }
+    });
+
+    if (vinculo && vinculo.status === 'APROVADO') {
+        return contextId; // Permissão concedida! Retorna o ID da empresa do cliente.
+    }
+
+    return null; // Tentativa de acesso sem permissão
+}
+
+// --- FUNÇÃO DE ENVIO PARA A SEFAZ (MANTIDA IGUAL) ---
 async function enviarParaPortalNacional(dps: any, empresa: any) {
     let pfxBuffer;
     try {
-        if (empresa.certificadoA1.length > 200 && !empresa.certificadoA1.includes('/')) {
+        if (empresa.certificadoA1 && empresa.certificadoA1.length > 200 && !empresa.certificadoA1.includes('/')) {
             pfxBuffer = Buffer.from(empresa.certificadoA1, 'base64');
         } else {
-            if (!fs.existsSync(empresa.certificadoA1)) throw new Error(`Arquivo não encontrado.`);
+            if (!empresa.certificadoA1 || !fs.existsSync(empresa.certificadoA1)) throw new Error(`Certificado não encontrado.`);
             pfxBuffer = fs.readFileSync(empresa.certificadoA1);
         }
     } catch (e) {
@@ -66,9 +91,11 @@ async function enviarParaPortalNacional(dps: any, empresa: any) {
     }
 }
 
-// --- API POST (EMISSÃO COM CORREÇÃO DE CAMPOS VAZIOS) ---
+// --- API POST (EMISSÃO COM CONTEXTO) ---
 export async function POST(request: Request) {
-  const userId = request.headers.get('x-user-id') || 'anonimo';
+  const userId = request.headers.get('x-user-id');
+  const contextId = request.headers.get('x-empresa-id'); // Header do contador
+  
   let vendaIdLog = null;
   let empresaIdLog = null;
 
@@ -76,19 +103,26 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae } = body;
 
-    // 1. Buscas Iniciais
-    const userPrestador = await prisma.user.findUnique({ where: { id: userId }, include: { empresa: true } });
-    const prestador = userPrestador?.empresa;
-    if (!prestador) throw new Error("Empresa não configurada.");
-    empresaIdLog = prestador.id;
+    if (!userId) throw new Error("Usuário não identificado.");
 
+    // 1. Resolve a Empresa Emissora (Prestador) usando o Contexto
+    const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
+    if (!empresaIdAlvo) throw new Error("Acesso negado ou empresa não identificada.");
+
+    empresaIdLog = empresaIdAlvo;
+
+    // Busca dados completos do Prestador (Empresa do Cliente)
+    const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
+    if (!prestador) throw new Error("Dados da empresa emissora não encontrados.");
+
+    // Busca o Tomador (Cliente do Cliente)
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!tomador) throw new Error('Cliente tomador não encontrado.');
 
-    // 2. Criar Venda
+    // 2. Criar Venda (Vinculada à Empresa do Contexto)
     const venda = await prisma.venda.create({
         data: {
-            empresaId: prestador.id,
+            empresaId: prestador.id, // <--- Importante: Venda fica na empresa certa
             clienteId: tomador.id,
             valor: parseFloat(valor),
             descricao: descricao,
@@ -101,7 +135,6 @@ export async function POST(request: Request) {
     const cnaeLimpo = cleanString(codigoCnae);
     const isMEI = prestador.regimeTributario === 'MEI';
     
-    // Inicializa vazio (Se não achar no banco ou estiver vazio lá, vai vazio no JSON)
     let itemLc = ''; 
     let codigoTribNacional = ''; 
 
@@ -165,17 +198,17 @@ export async function POST(request: Request) {
         }
     };
 
-    // 5. Log do JSON Gerado
+    // 5. Log
     await createLog({
         level: 'INFO', action: 'DPS_GERADA',
-        message: `CNAE: ${cnaeLimpo} | ItemLC: ${itemLc} | TribNac: ${codigoTribNacional}`,
+        message: `Emissão por ${userId} (Contexto: ${empresaIdAlvo})`,
         empresaId: prestador.id,
         vendaId: venda.id,
         details: infDPS 
     });
 
     // 6. Envio
-    if (!prestador.certificadoA1) throw new Error("Certificado Digital não cadastrado.");
+    if (!prestador.certificadoA1) throw new Error("Certificado Digital não cadastrado nesta empresa.");
     
     const respostaPortal = await enviarParaPortalNacional(infDPS, prestador);
 
@@ -192,12 +225,12 @@ export async function POST(request: Request) {
         throw new Error("Erro na comunicação com a Sefaz.");
     }
 
-    // 7. Sucesso
+    // 7. Sucesso - Salva Nota
     const dadosGov = respostaPortal.notaGov;
     const novaNota = await prisma.notaFiscal.create({
       data: {
         vendaId: venda.id,
-        empresaId: prestador.id,
+        empresaId: prestador.id, // Vínculo correto
         clienteId: tomador.id,
         numero: parseInt(dadosGov.numero),
         valor: parseFloat(valor),
@@ -233,9 +266,11 @@ export async function POST(request: Request) {
   }
 }
 
-// --- API GET (RESTAURADA: LISTAGEM DE VENDAS) ---
+// --- API GET (LISTAGEM COM CONTEXTO) ---
 export async function GET(request: Request) {
   const userId = request.headers.get('x-user-id');
+  const contextId = request.headers.get('x-empresa-id'); // Header do contador
+
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
@@ -245,20 +280,19 @@ export async function GET(request: Request) {
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
   try {
-    const user = await prisma.user.findUnique({ 
-        where: { id: userId },
-        include: { empresa: true }
-    });
+    // 1. Resolve qual empresa estamos vendo (Contexto ou Própria)
+    const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
 
-    if (!user?.empresa) return NextResponse.json([], { status: 200 });
+    // Se não encontrou empresa ou não tem permissão, retorna vazio
+    if (!empresaIdAlvo) return NextResponse.json([], { status: 200 });
 
     const skip = (page - 1) * limit;
 
     const whereClause: any = {
-        empresaId: user.empresa.id,
+        empresaId: empresaIdAlvo, // <--- Filtra pela empresa correta
         ...(search && {
             OR: [
-                { cliente: { razaoSocial: { contains: search } } }, // mode: insensitive se usar Postgres
+                { cliente: { razaoSocial: { contains: search } } },
                 { cliente: { documento: { contains: search } } },
                 ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
             ]
