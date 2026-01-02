@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, UserCog } from 'lucide-react';
+import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function GestaoClientes() {
@@ -19,8 +19,8 @@ export default function GestaoClientes() {
 
   const carregarUsuarios = () => {
     fetch('/api/admin/users').then(r => r.json()).then(data => {
-        // Mostra todos que não são ADMIN/MASTER para gestão
-        const listaClientes = data.filter((u: any) => u.role !== 'MASTER' && u.role !== 'ADMIN');
+        // Filtra apenas COMUM (Clientes) e outros cargos baixos
+        const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
         setClientes(listaClientes);
     });
   };
@@ -34,21 +34,20 @@ export default function GestaoClientes() {
           body: JSON.stringify({ 
               id: editingUser.id, 
               plano: slug,
-              planoCiclo: ciclo,
-              role: editingUser.role // Envia o novo papel (Comum, Parceiro, Contador)
+              planoCiclo: ciclo
           })
       });
       if(res.ok) {
           setEditingUser(null);
           carregarUsuarios();
-          alert("Dados atualizados com sucesso!");
+          alert("Dados salvos!");
       } else {
           alert("Erro ao salvar.");
       }
   };
 
   const handleUnlinkCompany = async () => {
-      if(!confirm("Ao desvincular, o usuário ficará sem empresa e poderá cadastrar uma nova. Confirmar?")) return;
+      if(!confirm("Tem certeza? O usuário perderá o acesso à empresa.")) return;
 
       const res = await fetch('/api/admin/users', {
           method: 'PUT',
@@ -80,8 +79,8 @@ export default function GestaoClientes() {
 
       const data = await res.json();
       if(res.ok) {
-          alert(data.message); // Mensagem dinâmica (Atualizado ou Vinculado)
-          setEditingUser(null); // Fecha para recarregar dados corretos
+          alert(data.message);
+          setEditingUser(null);
           carregarUsuarios();
       } else {
           alert(data.error || "Erro ao processar.");
@@ -121,10 +120,10 @@ export default function GestaoClientes() {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-slate-800">Gestão de Usuários</h1>
+        <h1 className="text-2xl font-bold text-slate-800">Clientes (SaaS)</h1>
         <div className="relative">
             <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-            <input placeholder="Buscar usuário..." className="pl-10 p-2 border rounded-lg w-64" onChange={e => setTerm(e.target.value)} />
+            <input placeholder="Buscar cliente..." className="pl-10 p-2 border rounded-lg w-64" onChange={e => setTerm(e.target.value)} />
         </div>
       </div>
 
@@ -133,29 +132,14 @@ export default function GestaoClientes() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between mb-4">
-                    <h3 className="font-bold text-lg text-slate-800">Gerenciar Usuário</h3>
+                    <h3 className="font-bold text-lg text-slate-800">Gerenciar Cliente</h3>
                     <button onClick={() => setEditingUser(null)}><X size={20}/></button>
                 </div>
                 
                 <div className="space-y-6">
-                    {/* TIPO DE USUÁRIO (ROLE) */}
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-2">
-                            <UserCog size={16}/> Tipo de Acesso
-                        </label>
-                        <select 
-                            className="w-full p-2 border rounded bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 text-sm"
-                            value={editingUser.role}
-                            onChange={e => setEditingUser({...editingUser, role: e.target.value})}
-                        >
-                            <option value="COMUM">Cliente Comum (Padrão)</option>
-                            <option value="PARCEIRO">Parceiro (Revenda)</option>
-                            <option value="CONTADOR">Contador</option>
-                            <option value="SUPORTE">Suporte Nível 1</option>
-                        </select>
-                    </div>
-
+                    {/* DADOS PESSOAIS (SIMPLIFICADO - SEM CARGO) */}
                     <div className="bg-gray-50 p-3 rounded border">
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Dados Pessoais</label>
                         <p className="font-bold text-slate-700">{editingUser.nome}</p>
                         <p className="text-xs text-slate-500">{editingUser.email}</p>
                     </div>
@@ -174,7 +158,7 @@ export default function GestaoClientes() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-[10px] text-gray-500 mb-1">Trocar CNPJ (Vincula se existir)</label>
+                                    <label className="block text-[10px] text-gray-500 mb-1">Trocar CNPJ (Apenas se livre)</label>
                                     <div className="flex gap-2">
                                         <input 
                                             className="flex-1 p-2 border rounded text-sm font-mono"
@@ -182,7 +166,7 @@ export default function GestaoClientes() {
                                             onChange={e => setNovoCnpj(e.target.value)}
                                             placeholder="Novo CNPJ..."
                                         />
-                                        <button onClick={handleUpdateCnpj} className="bg-slate-800 text-white px-3 rounded hover:bg-slate-700">
+                                        <button onClick={handleUpdateCnpj} className="bg-slate-800 text-white px-3 rounded hover:bg-slate-700" title="Salvar Novo CNPJ">
                                             <RefreshCw size={16}/>
                                         </button>
                                     </div>
@@ -237,7 +221,6 @@ export default function GestaoClientes() {
             <thead className="bg-slate-50 border-b">
                 <tr>
                     <th className="p-4">Cliente</th>
-                    <th className="p-4">Tipo</th>
                     <th className="p-4">Empresa</th>
                     <th className="p-4">Plano</th>
                     <th className="p-4 text-right">Ações</th>
@@ -249,11 +232,6 @@ export default function GestaoClientes() {
                         <td className="p-4">
                             <p className="font-bold text-slate-800">{cli.nome}</p>
                             <p className="text-xs text-slate-500">{cli.email}</p>
-                        </td>
-                        <td className="p-4">
-                            <span className="text-[10px] font-bold bg-gray-100 px-2 py-1 rounded border border-gray-300">
-                                {cli.role}
-                            </span>
                         </td>
                         <td className="p-4">
                             {cli.empresa ? (

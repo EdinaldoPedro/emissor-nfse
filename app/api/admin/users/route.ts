@@ -14,12 +14,12 @@ export async function GET() {
   return NextResponse.json(safeUsers);
 }
 
-// PUT
+// PUT: Edição Simples e Segura
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
     
-    // --- 1. DESVINCULAR ---
+    // --- 1. DESVINCULAR EMPRESA ---
     if (body.unlinkCompany) {
         await prisma.user.update({
             where: { id: body.id },
@@ -28,60 +28,44 @@ export async function PUT(request: Request) {
         return NextResponse.json({ success: true, message: "Empresa desvinculada." });
     }
 
-    // --- 2. GERENCIAR CNPJ ---
+    // --- 2. TROCAR/CORRIGIR CNPJ ---
     if (body.newCnpj) {
         const cnpjLimpo = body.newCnpj.replace(/\D/g, '');
         if(cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ Inválido' }, { status: 400 });
 
-        // Busca empresa e seus donos
-        let empresaAlvo = await prisma.empresa.findUnique({ 
+        // Verifica se a empresa já existe no banco
+        const empresaExistente = await prisma.empresa.findUnique({ 
             where: { documento: cnpjLimpo },
-            // MUDANÇA AQUI: de 'donoUser' para 'donos'
-            include: { donos: true } 
+            include: { donoUser: true } // Volta a ser donoUser (singular)
         });
 
-        if (empresaAlvo) {
-            // === REGRA DE NEGÓCIO ===
-            const usuarioEditado = await prisma.user.findUnique({ where: { id: body.id } });
-            const roleUsuario = usuarioEditado?.role || 'COMUM';
-
-            // Conta quantos donos a empresa já tem (excluindo o usuário atual se ele já for um)
-            const outrosDonos = await prisma.user.count({
-                where: { 
-                    empresaId: empresaAlvo.id,
-                    id: { not: body.id }
-                }
-            });
-
-            // Regra: Comum não pode compartilhar. Contador pode.
-            if (roleUsuario === 'COMUM' && outrosDonos > 0) {
+        if (empresaExistente) {
+            // Se já tem dono e não é o usuário atual -> ERRO (Bloqueio Total)
+            if (empresaExistente.donoUser && empresaExistente.donoUser.id !== body.id) {
                 return NextResponse.json({ 
-                    error: `Este CNPJ já pertence a outro usuário Comum. Apenas Contadores podem compartilhar acesso.` 
+                    error: `Este CNPJ já pertence ao cliente ${empresaExistente.donoUser.nome}. Não é possível duplicar.` 
                 }, { status: 409 });
             }
 
+            // Se a empresa existe mas está órfã (sem dono), vincula a este usuário
             await prisma.user.update({
                 where: { id: body.id },
-                data: { empresaId: empresaAlvo.id }
+                data: { empresaId: empresaExistente.id }
             });
 
-            return NextResponse.json({ 
-                success: true, 
-                message: roleUsuario === 'CONTADOR' 
-                    ? "Vínculo de Contador realizado com sucesso." 
-                    : "Usuário vinculado à empresa existente." 
-            });
+            return NextResponse.json({ success: true, message: "Usuário vinculado à empresa existente." });
 
         } else {
-            // CNPJ Novo - Atualiza cadastro existente
+            // CENÁRIO: CNPJ Novo (Não existe na base)
+            // Se o usuário já tem uma empresa ID, atualizamos o número dela.
             if (body.empresaId) {
                 await prisma.empresa.update({
                     where: { id: body.empresaId },
                     data: { documento: cnpjLimpo }
                 });
-                return NextResponse.json({ success: true, message: "CNPJ atualizado." });
+                return NextResponse.json({ success: true, message: "CNPJ atualizado com sucesso." });
             } else {
-                return NextResponse.json({ error: "Empresa não encontrada. Crie uma nova." }, { status: 400 });
+                return NextResponse.json({ error: "Empresa não encontrada. O cliente precisa completar o cadastro." }, { status: 400 });
             }
         }
     }
@@ -101,7 +85,10 @@ export async function PUT(request: Request) {
 
   } catch (e: any) {
     console.error(e);
-    if (e.code === 'P2002') return NextResponse.json({ error: "Conflito de dados." }, { status: 409 });
+    // Tratamento para erro de duplicidade do Prisma
+    if (e.code === 'P2002') {
+        return NextResponse.json({ error: "Conflito: Este dado já está em uso (Email, CPF ou Empresa)." }, { status: 409 });
+    }
     return NextResponse.json({ error: e.message || 'Erro ao atualizar' }, { status: 500 });
   }
 }

@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// GET: Lista paginada de TODAS as empresas
+// GET
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '1');
@@ -12,25 +12,23 @@ export async function GET(request: Request) {
 
   const skip = (page - 1) * limit;
 
-  // Filtro de busca (Razão Social ou CNPJ)
   const whereClause = search ? {
     OR: [
-      { razaoSocial: { contains: search, mode: 'insensitive' } }, // mode: insensitive (se usar Postgres)
+      { razaoSocial: { contains: search, mode: 'insensitive' } }, 
       { documento: { contains: search } }
     ]
   } : {};
 
   try {
-    // Transação para buscar dados + contagem total
     const [empresas, total] = await prisma.$transaction([
       prisma.empresa.findMany({
-        where: whereClause, // <--- Aplica o filtro
+        where: whereClause,
         skip: skip,
         take: limit,
         include: { 
-            donos: { 
-                select: { nome: true, email: true },
-                take: 1 
+            // VOLTA AO ORIGINAL (Singular)
+            donoUser: { 
+                select: { nome: true, email: true }
             } 
         },
         orderBy: { updatedAt: 'desc' }
@@ -38,8 +36,14 @@ export async function GET(request: Request) {
       prisma.empresa.count({ where: whereClause })
     ]);
 
+    // Pequeno ajuste para o frontend ler como lista (compatibilidade)
+    const dadosFormatados = empresas.map(emp => ({
+        ...emp,
+        donos: emp.donoUser ? [emp.donoUser] : [] // Envia como array de 1 item pro front não quebrar
+    }));
+
     return NextResponse.json({
-      data: empresas,
+      data: dadosFormatados,
       meta: {
         total,
         page,
@@ -49,17 +53,15 @@ export async function GET(request: Request) {
     });
 
   } catch (error) {
-    // console.error(error); // Bom para debug
     return NextResponse.json({ error: 'Erro ao buscar empresas' }, { status: 500 });
   }
 }
 
-// PUT: Atualiza cadastro (Mantido igual, serve para correção)
+// PUT (Mantém igual)
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    // Removemos campos que não devem ser salvos diretamente na tabela empresa via edição simples
-    const { id, donos, ...dadosParaAtualizar } = body;
+    const { id, donos, donoUser, ...dadosParaAtualizar } = body; // Remove campos de relação
 
     const updated = await prisma.empresa.update({
       where: { id: id },

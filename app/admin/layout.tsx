@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-// Novos ícones: Activity (Emissões), Building (Empresas), Users (Clientes)
-import { LayoutDashboard, Users, Building, Shield, Activity, LogOut, MapPin, List } from 'lucide-react'; 
+import { 
+  LayoutDashboard, Users, Building, Shield, Activity, 
+  LogOut, MapPin, List, LifeBuoy 
+} from 'lucide-react'; 
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
 
@@ -25,18 +27,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
     
-    // Focados no SaaS
+    // Gestão do Negócio
     { icon: Users, label: 'Clientes (Usuários)', href: '/admin/usuarios' },
-    
-    // === O CORAÇÃO DO SISTEMA ===
     { icon: Activity, label: 'Central de Emissões', href: '/admin/emissoes' }, 
     
-    // Cadastros Auxiliares
+    // Cadastros Técnicos
     { icon: Building, label: 'Base de Empresas', href: '/admin/empresas' }, 
     { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' },
     { icon: MapPin, label: 'Trib. Municipal', href: '/admin/tributacao-municipal' },
     
-    // Gestão Interna
+    // --- NOVO: SUPORTE ---
+    { icon: LifeBuoy, label: 'Helpdesk / Suporte', href: '/admin/suporte' }, // 
+    // Time
     { icon: Shield, label: 'Colaboradores', href: '/admin/colaboradores' }, 
   ];
 
@@ -53,7 +55,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </div>
             </div>
 
-            <nav className="flex-1 p-4 space-y-2">
+            <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
                 {menuItems.map((item) => (
                     <Link 
                     key={item.href} 
