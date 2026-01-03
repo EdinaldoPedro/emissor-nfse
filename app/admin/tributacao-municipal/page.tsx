@@ -55,32 +55,34 @@ export default function TributacaoMunicipalPage() {
 
 const carregarAuxiliares = async () => {
     // 1. Carrega CNAEs
-    // Nota: Pedimos limit=1000 para trazer todos para o dropdown (ou a maioria)
     fetch('/api/admin/cnaes?limit=1000') 
         .then(r => r.json())
         .then(res => {
-            // CORREÇÃO AQUI: Se vier paginado, pegamos .data. Se vier array direto, usamos ele.
             const lista = Array.isArray(res) ? res : (res.data || []);
             setListaCnaes(lista);
         })
-        .catch(() => setListaCnaes([])); // Segurança contra erro
+        .catch(() => setListaCnaes([]));
 
     // 2. Carrega Cidades (Empresas)
-    fetch('/api/admin/empresas').then(r => r.json()).then((empresas: any[]) => {
-        // Proteção caso empresas venha nulo ou errado
-        if (!Array.isArray(empresas)) return;
+    // CORREÇÃO AQUI: Adicionado limit=1000 e tratamento da resposta { data: [] }
+    fetch('/api/admin/empresas?limit=1000')
+        .then(r => r.json())
+        .then((res: any) => {
+            // A API retorna { data: [...], meta: ... }, então pegamos .data
+            const listaEmpresas = res.data || (Array.isArray(res) ? res : []);
 
-        const cidadesMap = new Map();
-        empresas.forEach(emp => {
-            if (emp.codigoIbge && emp.cidade) {
-                cidadesMap.set(emp.codigoIbge, {
-                    ibge: emp.codigoIbge,
-                    nome: `${emp.cidade}/${emp.uf}`
-                });
-            }
-        });
-        setListaCidades(Array.from(cidadesMap.values()));
-    });
+            const cidadesMap = new Map();
+            listaEmpresas.forEach((emp: any) => {
+                if (emp.codigoIbge && emp.cidade) {
+                    cidadesMap.set(emp.codigoIbge, {
+                        ibge: emp.codigoIbge,
+                        nome: `${emp.cidade}/${emp.uf}`
+                    });
+                }
+            });
+            setListaCidades(Array.from(cidadesMap.values()));
+        })
+        .catch(err => console.error("Erro ao carregar cidades", err));
   };
 
   const handleSave = async () => {
@@ -237,7 +239,6 @@ const carregarAuxiliares = async () => {
                         <tr key={item.id} className="border-b hover:bg-slate-50">
                             <td className="p-4 font-mono font-bold">{item.cnae}</td>
                             
-                            {/* --- AQUI ESTÁ A ALTERAÇÃO --- */}
                             <td className="p-4">
                                 <div className="flex flex-col">
                                     <span className="flex items-center gap-1 font-medium text-slate-700">
@@ -249,7 +250,6 @@ const carregarAuxiliares = async () => {
                                     </span>
                                 </div>
                             </td>
-                            {/* ----------------------------- */}
 
                             <td className="p-4"><span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-bold">{item.codigoTributacaoMunicipal}</span></td>
                             <td className="p-4 text-right flex justify-end gap-2">
