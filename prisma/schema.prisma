@@ -1,9 +1,10 @@
+// Configuração do Banco
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql" // Ou "sqlite" se estiver usando dev.db
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -39,7 +40,6 @@ model User {
   planoCiclo       String     @default("MENSAL")
   planoStatus      String     @default("active")
   planoExpiresAt   DateTime?
-  
   cargo            String?
   avatarUrl        String?
   
@@ -58,8 +58,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  ticketsCriados    Ticket[] @relation("Solicitante")
-  ticketsAtendidos  Ticket[] @relation("Atendente")
+  // === CORREÇÃO AQUI: Nomes das relações iguais ao modelo Ticket ===
+  ticketsCriados    Ticket[] @relation("SolicitanteTicket")
+  ticketsAtendidos  Ticket[] @relation("AtendenteTicket")
+  
   mensagensTicket   TicketMensagem[]
 
   empresasContabeis ContadorVinculo[] @relation("ContadorUser")
@@ -91,12 +93,12 @@ model Empresa {
   regimeTributario   String? @default("MEI")
   
   // Relações
-  donoUser     User? @relation("DonoEmpresa")
+  donoUser     User?         @relation("DonoEmpresa")
   vinculadoA   UserCliente[] 
   atividades   Cnae[]
   
   // Certificado
-  certificadoA1        String?   
+  certificadoA1        String?
   senhaCertificado     String?   
   certificadoVencimento DateTime? 
   
@@ -110,7 +112,6 @@ model Empresa {
   
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime?
-
   contadoresLink    ContadorVinculo[] @relation("EmpresaContabil")
 }
 
@@ -243,7 +244,6 @@ model SystemLog {
   action    String
   message   String
   details   String?
-  
   empresaId String?
   empresa   Empresa? @relation(fields: [empresaId], references: [id])
   
@@ -263,14 +263,15 @@ model Ticket {
   descricao     String
   status        String   @default("ABERTO")
   
-  // --- NOVOS CAMPOS DE ANEXO ---
-  anexoBase64   String? 
+  // Campos de Anexo
+  anexoBase64   String?
   anexoNome     String?
 
-  // --- RELAÇÃO COM O CATÁLOGO (CORREÇÃO DO ERRO) ---
+  // Relação com Catálogo
   catalogId     String?
   catalogItem   TicketCatalog? @relation(fields: [catalogId], references: [id])
 
+  // Relações com Usuário (CORRIGIDO PARA BATAR COM MODELO USER)
   solicitanteId String
   solicitante   User     @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
   
@@ -283,13 +284,12 @@ model Ticket {
   updatedAt     DateTime @updatedAt
 }
 
-
 model TicketMensagem {
   id        String   @id @default(uuid())
-  mensagem  String   // Texto ou HTML
-  anexos    String?  // Link ou Base64 (opcional)
+  mensagem  String   
+  anexos    String?
   
-  interno   Boolean  @default(false) // Se true, o cliente NÃO vê (nota interna da equipe)
+  interno   Boolean  @default(false)
 
   anexoBase64 String?
   anexoNome   String?
@@ -303,24 +303,9 @@ model TicketMensagem {
   createdAt DateTime @default(now())
 }
 
-enum TicketStatus {
-  ABERTO
-  EM_ANDAMENTO
-  AGUARDANDO_CLIENTE
-  RESOLVIDO
-  FECHADO
-}
-
-enum TicketPriority {
-  BAIXA
-  MEDIA
-  ALTA
-  CRITICA
-}
-
 model ContadorVinculo {
   id        String   @id @default(uuid())
-  status    String   @default("PENDENTE") // PENDENTE, APROVADO, REJEITADO
+  status    String   @default("PENDENTE") 
   
   contadorId String
   contador   User     @relation("ContadorUser", fields: [contadorId], references: [id])
@@ -331,17 +316,18 @@ model ContadorVinculo {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([contadorId, empresaId]) // Evita duplicidade
+  @@unique([contadorId, empresaId])
 }
 
-odel TicketCatalog {
+// Novo Modelo de Catálogo
+model TicketCatalog {
   id          String   @id @default(uuid())
-  titulo      String   // Ex: "Erro na Sefaz"
+  titulo      String   
   prioridade  String   @default("MEDIA")
-  instrucoes  String?  // Texto para o atendente
+  instrucoes  String?
   ativo       Boolean  @default(true)
   
-  tickets     Ticket[] // Essa linha exige que o Ticket tenha o 'catalogItem' acima
+  tickets     Ticket[] 
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
