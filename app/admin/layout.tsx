@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, Users, Building, Shield, Activity, 
-  LogOut, MapPin, List, LifeBuoy 
+  LogOut, MapPin, List, LifeBuoy, CreditCard // Adicionado CreditCard
 } from 'lucide-react'; 
 import Link from 'next/link';
-import { checkIsStaff } from '@/app/utils/permissions';
+import { checkIsStaff } from '@/app/utils/permissions'; //
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -29,6 +29,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     
     // Gestão do Negócio
     { icon: Users, label: 'Clientes (Usuários)', href: '/admin/usuarios' },
+    { icon: CreditCard, label: 'Planos', href: '/admin/planos' }, // Item Restaurado
     { icon: Activity, label: 'Central de Emissões', href: '/admin/emissoes' }, 
     
     // Cadastros Técnicos
@@ -36,8 +37,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' },
     { icon: MapPin, label: 'Trib. Municipal', href: '/admin/tributacao-municipal' },
     
-    // --- NOVO: SUPORTE ---
-    { icon: LifeBuoy, label: 'Helpdesk / Suporte', href: '/admin/suporte' }, // 
+    // Suporte
+    { icon: LifeBuoy, label: 'Helpdesk / Suporte', href: '/admin/suporte' }, //
+
     // Time
     { icon: Shield, label: 'Colaboradores', href: '/admin/colaboradores' }, 
   ];
