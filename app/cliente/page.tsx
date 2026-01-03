@@ -46,10 +46,18 @@ export default function MeusClientes() {
   // Carregar lista
   const carregarClientes = async () => {
     const userId = localStorage.getItem('userId');
+    // --- CORREÇÃO: PEGAR O CONTEXTO DO CONTADOR ---
+    const contextId = localStorage.getItem('empresaContextId');
+    
     if (!userId) return;
 
     try {
-      const res = await fetch('/api/clientes', { headers: { 'x-user-id': userId } });
+      const res = await fetch('/api/clientes', { 
+          headers: { 
+              'x-user-id': userId,
+              'x-empresa-id': contextId || '' // <--- Envia o ID da empresa que o contador acessou
+          } 
+      });
       const dados = await res.json();
       setClientes(dados);
     } catch (erro) {
@@ -63,7 +71,7 @@ export default function MeusClientes() {
     carregarClientes();
   }, []);
 
-  // --- FUNÇÃO DE BUSCA CNPJ (Igual à da emissão) ---
+  // --- FUNÇÃO DE BUSCA CNPJ ---
   const buscarCNPJ = async () => {
     // Remove pontuação
     const docLimpo = clienteAtual.documento.replace(/\D/g, '');
@@ -125,13 +133,19 @@ export default function MeusClientes() {
     e.preventDefault();
     setSalvando(true);
     const userId = localStorage.getItem('userId');
+    // --- CORREÇÃO TAMBÉM NO SALVAR ---
+    const contextId = localStorage.getItem('empresaContextId');
 
     try {
       const metodo = clienteAtual.id ? 'PUT' : 'POST';
       
       const res = await fetch('/api/clientes', {
         method: metodo,
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+        headers: { 
+            'Content-Type': 'application/json', 
+            'x-user-id': userId || '',
+            'x-empresa-id': contextId || '' // <--- Garante que salve na empresa certa
+        },
         body: JSON.stringify(clienteAtual)
       });
 
@@ -152,10 +166,15 @@ export default function MeusClientes() {
   const handleExcluir = async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir este cliente?")) return;
     const userId = localStorage.getItem('userId');
+    const contextId = localStorage.getItem('empresaContextId');
+
     try {
       const res = await fetch(`/api/clientes?id=${id}`, {
         method: 'DELETE',
-        headers: { 'x-user-id': userId || '' }
+        headers: { 
+            'x-user-id': userId || '',
+            'x-empresa-id': contextId || '' 
+        }
       });
       if (res.ok) carregarClientes();
       else alert("Erro ao excluir.");

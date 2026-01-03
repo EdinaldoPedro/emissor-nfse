@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
-  Lock, CheckCircle, Trash2, ShieldAlert, RefreshCw, Upload, FileKey, Edit, Info 
+  Lock, CheckCircle, Trash2, Info, Upload, FileKey
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -15,6 +15,7 @@ export default function ConfiguracoesEmpresa() {
   
   // Controle de Bloqueio (CNPJ sempre bloqueado se já existir)
   const [isLocked, setIsLocked] = useState(false);
+  const [isContador, setIsContador] = useState(false); // Para saber se é visualização
   
   const [atividades, setAtividades] = useState<any[]>([]); 
 
@@ -51,12 +52,23 @@ export default function ConfiguracoesEmpresa() {
     const userId = localStorage.getItem('userId');
     if (!userId) { router.push('/login'); return; }
 
+    // --- CORREÇÃO DO CONTEXTO DO CONTADOR ---
     async function carregarDados() {
       try {
-        const res = await fetch('/api/perfil', { headers: { 'x-user-id': userId } });
+        const contextId = localStorage.getItem('empresaContextId');
+        if (contextId) setIsContador(true);
+
+        const res = await fetch('/api/perfil', { 
+            headers: { 
+                'x-user-id': userId,
+                'x-empresa-id': contextId || '' // <--- O PULO DO GATO
+            } 
+        });
+
         if (res.ok) {
           const dados = await res.json();
           setEmpresa(prev => ({ ...prev, ...dados }));
+          
           if (dados.atividades) setAtividades(dados.atividades);
           
           setDadosCertificado({
@@ -133,11 +145,16 @@ export default function ConfiguracoesEmpresa() {
     if (e) e.preventDefault();
     setLoading(true);
     const userId = localStorage.getItem('userId');
+    const contextId = localStorage.getItem('empresaContextId'); // <--- Contexto no Salvar também
 
     try {
       const res = await fetch('/api/perfil', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+        headers: { 
+            'Content-Type': 'application/json', 
+            'x-user-id': userId || '',
+            'x-empresa-id': contextId || '' // <--- HEADER IMPORTANTE
+        },
         body: JSON.stringify({ 
             ...empresa, 
             cnaes: atividades,
@@ -168,14 +185,15 @@ export default function ConfiguracoesEmpresa() {
             <ArrowLeft className="text-gray-600" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold text-gray-800">Cadastro da Empresa</h1>
+            <h1 className="text-3xl font-bold text-gray-800">
+                {isContador ? 'Dados da Empresa (Cliente)' : 'Cadastro da Empresa'}
+            </h1>
             <p className="text-gray-500">Dados obrigatórios para emissão de Nota Fiscal (NFS-e).</p>
           </div>
         </div>
 
-        {/* --- ÁREA DE ALERTAS (LAYOUT UNIFICADO) --- */}
+        {/* ALERTA: CADASTRO JÁ EXISTENTE */}
         {isLocked ? (
-            // ALERTA LARANJA: CADASTRO JÁ EXISTENTE
             <div className="bg-orange-50 border-l-4 border-orange-400 p-4 mb-8 rounded-r shadow-sm flex flex-col md:flex-row items-start gap-4">
                 <div className="flex items-start gap-3 flex-1">
                     <div className="text-orange-500 mt-1">
@@ -185,21 +203,20 @@ export default function ConfiguracoesEmpresa() {
                         <h3 className="font-bold text-orange-900">Cadastro Vinculado</h3>
                         <p className="text-sm text-orange-800 mt-1 leading-relaxed">
                             Este cadastro está associado ao CNPJ informado. Para garantir a segurança fiscal, a alteração do documento não é permitida manualmente.
-                            <br/>
-                            **Precisa trocar o CNPJ?** Entre em contato com nosso <a href="#" className="underline font-bold hover:text-orange-950">Suporte</a>.
                         </p>
                     </div>
                 </div>
-                <button 
-                    onClick={() => consultarCNPJ(true)} 
-                    disabled={buscando} 
-                    className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm"
-                >
-                    {buscando ? 'Buscando...' : '↻ Atualizar Dados da Receita'}
-                </button>
+                {!isContador && (
+                    <button 
+                        onClick={() => consultarCNPJ(true)} 
+                        disabled={buscando} 
+                        className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm"
+                    >
+                        {buscando ? 'Buscando...' : '↻ Atualizar Dados da Receita'}
+                    </button>
+                )}
             </div>
         ) : (
-            // ALERTA AZUL: NOVO CADASTRO (Para manter o layout parecido)
             <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8 rounded-r shadow-sm flex items-start gap-4">
                 <div className="text-blue-500 mt-1">
                     <Briefcase size={24} />
@@ -222,8 +239,6 @@ export default function ConfiguracoesEmpresa() {
             </h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              {/* CNPJ (Travado se locked, Busca se unlocked) */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">CNPJ</label>
                 <div className="flex gap-2">
@@ -247,7 +262,6 @@ export default function ConfiguracoesEmpresa() {
                 </div>
               </div>
 
-              {/* Razão Social e Nome Fantasia (Sempre travados, vêm da API) */}
               <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label>
                   <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly />
@@ -257,10 +271,7 @@ export default function ConfiguracoesEmpresa() {
                   <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly />
               </div>
 
-              {/* LINHA DUPLA: Inscrição e Regime (Ambos Editáveis) */}
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                  
-                  {/* Inscrição Municipal - EDITÁVEL */}
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
                       <input 
@@ -271,8 +282,6 @@ export default function ConfiguracoesEmpresa() {
                           onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}
                       />
                   </div>
-
-                  {/* Regime Tributário - EDITÁVEL */}
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-blue-600 text-xs">(Editável)</span></label>
                       <select 
@@ -287,7 +296,7 @@ export default function ConfiguracoesEmpresa() {
                   </div>
               </div>
 
-              {/* CNAEs (Travado - Automático) */}
+              {/* CNAEs */}
               <div className="md:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-200 mt-2 opacity-80">
                 <div className="flex justify-between items-center mb-2">
                     <h4 className="text-sm font-bold text-gray-600 flex items-center gap-2">📋 Atividades (CNAEs) - Automático</h4>
@@ -318,50 +327,13 @@ export default function ConfiguracoesEmpresa() {
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">CEP</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.cep || ''} readOnly/>
-              </div>
-              
-              <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Logradouro</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.logradouro || ''} readOnly/>
-              </div>
-              
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Número</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.numero || ''} readOnly/>
-              </div>
-              
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Bairro</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.bairro || ''} readOnly/>
-              </div>
-              
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Cidade</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.cidade || ''} readOnly/>
-              </div>
-              
-              {/* LINHA FINAL: UF e IBGE */}
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">UF</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" maxLength={2} value={empresa.uf || ''} readOnly/>
-              </div>
-
-              {/* IBGE NO FIM DO ENDEREÇO (Conforme solicitado) */}
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Código IBGE</label>
-                  <input 
-                      type="text" 
-                      className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" 
-                      placeholder="Ex: 3550308" 
-                      value={empresa.codigoIbge || ''} 
-                      readOnly
-                  />
-              </div>
-            
+                <input className="p-3 border rounded-lg" placeholder="CEP" value={empresa.cep || ''} onChange={e => setEmpresa({...empresa, cep: e.target.value})}/>
+                <input className="md:col-span-2 p-3 border rounded-lg" placeholder="Logradouro" value={empresa.logradouro || ''} onChange={e => setEmpresa({...empresa, logradouro: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="Número" value={empresa.numero || ''} onChange={e => setEmpresa({...empresa, numero: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="Bairro" value={empresa.bairro || ''} onChange={e => setEmpresa({...empresa, bairro: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="Cidade" value={empresa.cidade || ''} onChange={e => setEmpresa({...empresa, cidade: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="UF" value={empresa.uf || ''} onChange={e => setEmpresa({...empresa, uf: e.target.value})}/>
+                <input className="p-3 border rounded-lg bg-gray-50" placeholder="IBGE" readOnly value={empresa.codigoIbge || ''}/>
             </div>
           </div>
 
@@ -381,7 +353,6 @@ export default function ConfiguracoesEmpresa() {
                             Expira em: <span className="font-mono font-bold text-gray-800">{dadosCertificado.vencimento ? new Date(dadosCertificado.vencimento).toLocaleDateString() : 'Data não identificada'}</span>
                         </p>
                     </div>
-                    {/* BOTÕES DE AÇÃO */}
                     <div className="flex gap-2">
                         <button 
                             type="button" 
@@ -389,7 +360,7 @@ export default function ConfiguracoesEmpresa() {
                             className="p-2 text-blue-600 hover:bg-blue-50 rounded transition"
                             title="Atualizar / Substituir"
                         >
-                            <Edit size={20} />
+                            <FileKey size={20} />
                         </button>
                         <button 
                             type="button" 
@@ -403,25 +374,17 @@ export default function ConfiguracoesEmpresa() {
                 </div>
             ) : null}
 
-            {/* FORMULÁRIO DE UPLOAD */}
             {(modoEdicaoCertificado || !dadosCertificado.ativo) && (
                 <div className="bg-white p-6 rounded-xl border border-dashed border-slate-300 hover:border-blue-400 transition group animate-in fade-in slide-in-from-top-2">
                     <label className="block text-sm font-bold text-slate-700 mb-4 group-hover:text-blue-600 transition flex items-center gap-2">
                         <FileKey size={18}/> {dadosCertificado.ativo ? 'Substituir Certificado Atual' : 'Configurar Novo Certificado'}
                     </label>
-                    
                     <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
                         <label className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg cursor-pointer transition font-medium w-full md:w-auto border ${certFile ? 'bg-green-50 text-green-700 border-green-200' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}>
                             {certFile ? <CheckCircle size={18}/> : <Upload size={18} />}
                             {certFile ? 'Arquivo Selecionado' : 'Escolher Arquivo (.pfx)'}
-                            <input 
-                                type="file" 
-                                accept=".pfx,.p12" 
-                                onChange={handleFileChange}
-                                className="hidden"
-                            />
+                            <input type="file" accept=".pfx,.p12" onChange={handleFileChange} className="hidden"/>
                         </label>
-                        
                         <div className="relative w-full md:w-64">
                             <Lock className="absolute left-3 top-3 text-gray-400" size={16} />
                             <input 
@@ -433,7 +396,6 @@ export default function ConfiguracoesEmpresa() {
                             />
                         </div>
                     </div>
-                    
                     <p className="text-[10px] text-gray-400 mt-4 border-t pt-2">
                         Nota de Segurança: Sua senha é utilizada apenas para validar o certificado e assinar as notas fiscais.
                     </p>
@@ -447,7 +409,6 @@ export default function ConfiguracoesEmpresa() {
                 {msg.texto}
               </div>
             )}
-
             <button type="submit" disabled={loading} className="w-full md:w-auto px-12 py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200 transform hover:scale-[1.02]">
               {loading ? 'Processando...' : <><Save size={20} /> Salvar Configurações</>}
             </button>
