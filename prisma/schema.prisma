@@ -263,23 +263,20 @@ model Ticket {
   descricao     String
   status        String   @default("ABERTO")
   
-  // Campos de Anexo
-  anexoBase64   String?
+  // NOVOS CAMPOS
+  clientUnread  Boolean  @default(false) // <--- ADICIONE ISTO (Indica notificação para o cliente)
+
+  anexoBase64   String? 
   anexoNome     String?
 
-  // Relação com Catálogo
+  // ... restante do model Ticket igual ...
   catalogId     String?
   catalogItem   TicketCatalog? @relation(fields: [catalogId], references: [id])
-
-  // Relações com Usuário (CORRIGIDO PARA BATAR COM MODELO USER)
   solicitanteId String
   solicitante   User     @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
-  
   atendenteId   String?
   atendente     User?    @relation("AtendenteTicket", fields: [atendenteId], references: [id])
-  
   mensagens     TicketMensagem[]
-  
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
