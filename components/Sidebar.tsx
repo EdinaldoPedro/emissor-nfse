@@ -5,18 +5,22 @@ import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield } f
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
+// --- IMPORTAÇÃO DO CONTEXTO ---
+import { useAppConfig } from '@/app/contexts/AppConfigContext';
 
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [userData, setUserData] = useState<any>(null);
   const [userRole, setUserRole] = useState('');
   const [isContador, setIsContador] = useState(false);
-  const [notificacoes, setNotificacoes] = useState(0); 
+  const [notificacoes, setNotificacoes] = useState(0);
+
+  // --- USANDO O CONTEXTO PARA TRADUÇÃO ---
+  const { t } = useAppConfig();
 
   const router = useRouter();
 
   useEffect(() => {
-    // Pega dados do localStorage (pode ser o ID real ou o do cliente que estamos "espiando")
     const userId = localStorage.getItem('userId');
     const role = localStorage.getItem('userRole');
     
@@ -36,10 +40,8 @@ export default function Sidebar() {
                 });
                 if(res.ok) setUserData(await res.json());
 
-                // 2. Notificações (Só busca se NÃO for staff/admin)
-                // Se estiver no "Modo Suporte", o role no localStorage é do cliente, então entra aqui.
+                // 2. Notificações (Só se for cliente)
                 if (!checkIsStaff(role)) {
-                    // CORREÇÃO AQUI: Mudado de '/api/cliente/...' para '/api/clientes/...'
                     const resNotif = await fetch('/api/clientes/notificacoes', {
                         headers: { 'x-user-id': userId }
                     });
@@ -81,9 +83,9 @@ export default function Sidebar() {
     <>
       <button 
         onClick={() => setIsOpen(true)} 
-        className="p-2 hover:bg-gray-100 rounded-lg transition relative"
+        className="p-2 hover:bg-gray-100 rounded-lg transition relative dark:hover:bg-slate-800"
       >
-        <Menu size={28} className="text-gray-700" />
+        <Menu size={28} className="text-gray-700 dark:text-gray-200" />
         
         {/* BALÃOZINHO NO ÍCONE HAMBÚRGUER */}
         {notificacoes > 0 && (
@@ -98,9 +100,9 @@ export default function Sidebar() {
         />
       )}
 
-      <div className={`fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
+      <div className={`fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col dark:bg-slate-900`}>
         
-        <div className="p-6 border-b flex justify-between items-center bg-blue-600 text-white shrink-0">
+        <div className="p-6 border-b flex justify-between items-center bg-blue-600 text-white shrink-0 border-gray-100 dark:border-slate-800">
           <h2 className="font-bold text-lg">Menu</h2>
           <button onClick={() => setIsOpen(false)} className="hover:bg-blue-700 p-1 rounded">
             <X size={24} />
@@ -111,14 +113,14 @@ export default function Sidebar() {
           
           <section>
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
-              <User size={14} /> Minha Conta
+              <User size={14} /> {t('menu', 'settings')} {/* TRADUZIDO */}
             </h3>
-            <div className="space-y-3 text-sm">
-              <p><span className="font-medium text-gray-700">Nome:</span> {userData?.nome || '...'}</p>
-              <p><span className="font-medium text-gray-700">Email:</span> {userData?.email || '...'}</p>
+            <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+              <p><span className="font-medium">Nome:</span> {userData?.nome || '...'}</p>
+              <p><span className="font-medium">Email:</span> {userData?.email || '...'}</p>
               
               {!isContador && (
-                  <p><span className="font-medium text-gray-700">Plano:</span> <span className="text-green-600 font-bold">{userData?.plano?.tipo || 'Gratuito'}</span></p>
+                  <p><span className="font-medium">Plano:</span> <span className="text-green-600 font-bold">{userData?.plano?.tipo || 'Gratuito'}</span></p>
               )}
               
               <Link href="/configuracoes/minha-conta" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
@@ -127,23 +129,23 @@ export default function Sidebar() {
             </div>
           </section>
 
-          <hr />
+          <hr className="dark:border-slate-800" />
 
           <section>
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Briefcase size={14} /> Minha Empresa
             </h3>
-            <div className="space-y-3 text-sm">
+            <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
               <p>
-                  <span className="font-medium text-gray-700 block mb-1">Razão Social:</span> 
-                  <span className="text-gray-500 leading-tight">{userData?.razaoSocial || '...'}</span>
+                  <span className="font-medium block mb-1">Razão Social:</span> 
+                  <span className="text-gray-500 leading-tight dark:text-gray-400">{userData?.razaoSocial || '...'}</span>
               </p>
               <p>
-                  <span className="font-medium text-gray-700">CNPJ:</span> 
-                  <span className="text-gray-500 ml-1">{userData?.documento || 'Não informado'}</span>
+                  <span className="font-medium">CNPJ:</span> 
+                  <span className="text-gray-500 ml-1 dark:text-gray-400">{userData?.documento || 'Não informado'}</span>
               </p>
               <p>
-                  <span className="font-medium text-gray-700">Certificado:</span>{' '}
+                  <span className="font-medium">Certificado:</span>{' '}
                   <span className={statusCert.classes}>{statusCert.label}</span>
               </p>
               <Link href="/configuracoes" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
@@ -152,17 +154,17 @@ export default function Sidebar() {
             </div>
           </section>
 
-          <hr />
+          <hr className="dark:border-slate-800" />
 
           <section>
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Settings size={14} /> Gestão
             </h3>
             <div className="flex flex-col gap-3">
-                <Link href="/cliente" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded">
-                    <FileText size={18} /> Meus Clientes
+                <Link href="/cliente" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded dark:text-gray-300 dark:hover:bg-slate-800">
+                    <FileText size={18} /> {t('menu', 'clients')} {/* TRADUZIDO */}
                 </Link>
-                <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded opacity-50 cursor-not-allowed">
+                <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded opacity-50 cursor-not-allowed dark:text-gray-300 dark:hover:bg-slate-800">
                     <FileText size={18} /> Relatórios (Em breve)
                 </Link>
             </div>
@@ -170,7 +172,7 @@ export default function Sidebar() {
 
           {showAdminPanel && (
              <section>
-                <hr className="mb-6"/>
+                <hr className="mb-6 dark:border-slate-800"/>
                 <h3 className="text-xs font-bold text-purple-600 uppercase mb-4 flex items-center gap-2">
                   <Shield size={14} /> Admin
                 </h3>
@@ -182,11 +184,11 @@ export default function Sidebar() {
 
         </div>
 
-        <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0">
+        <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0 dark:bg-slate-950 dark:border-slate-800">
             {/* O BOTÃO DE SUPORTE COM BALÃO DE NOTIFICAÇÃO */}
-            <Link href="/cliente/suporte" onClick={() => setIsOpen(false)} className="flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition">
+            <Link href="/cliente/suporte" onClick={() => setIsOpen(false)} className="flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition dark:text-gray-400">
                 <div className="flex items-center gap-2">
-                    <Phone size={16} /> Suporte Técnico
+                    <Phone size={16} /> {t('menu', 'support')} {/* TRADUZIDO */}
                 </div>
                 {notificacoes > 0 && (
                     <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm animate-pulse">
@@ -196,7 +198,7 @@ export default function Sidebar() {
             </Link>
             
             <button onClick={handleLogout} className="flex items-center gap-2 text-red-500 hover:text-red-700 w-full p-2 text-sm font-medium transition">
-                <LogOut size={16} /> Sair do Sistema
+                <LogOut size={16} /> {t('menu', 'logout')} {/* TRADUZIDO */}
             </button>
         </div>
 

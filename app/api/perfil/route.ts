@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 // GET
 export async function GET(request: Request) {
   const userId = request.headers.get('x-user-id');
-  const contextEmpresaId = request.headers.get('x-empresa-id'); // <--- NOVO HEADER
+  const contextEmpresaId = request.headers.get('x-empresa-id');
 
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
@@ -22,9 +22,8 @@ export async function GET(request: Request) {
 
   if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
-  // 2. Lógica de Contexto (Se for Contador acessando Cliente)
+  // 2. Lógica de Contexto
   if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
-      // Verifica segurança: Existe vinculo APROVADO entre esse contador e a empresa alvo?
       const vinculo = await prisma.contadorVinculo.findUnique({
           where: {
               contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId }
@@ -32,19 +31,15 @@ export async function GET(request: Request) {
       });
 
       if (vinculo && vinculo.status === 'APROVADO') {
-          empresaAlvoId = contextEmpresaId; // Permissão concedida!
-      } else {
-          // Se tentar burlar, ignora e carrega o próprio perfil (ou poderia dar erro 403)
-          console.warn("Tentativa de acesso não autorizado a contexto:", contextEmpresaId);
+          empresaAlvoId = contextEmpresaId; 
       }
   }
 
-  // Se não tem contexto (ou falhou), usa a empresa do próprio usuário
   if (!empresaAlvoId) {
       empresaAlvoId = user.empresaId;
   }
 
-  // 3. Busca os dados da empresa ALVO (pode ser a do cliente ou a do próprio user)
+  // 3. Busca os dados da empresa ALVO
   let dadosEmpresa: any = {};
   
   if (empresaAlvoId) {
@@ -55,12 +50,11 @@ export async function GET(request: Request) {
       if (emp) dadosEmpresa = emp;
   }
 
-  // Remove dados sensíveis do retorno
   // @ts-ignore
   const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
 
   return NextResponse.json({
-    // Dados da Empresa (Do contexto ou própria)
+    // Dados da Empresa
     ...restEmpresa,
     emailComercial: emailEmpresa,
     temCertificado: !!certificadoA1,
@@ -68,14 +62,22 @@ export async function GET(request: Request) {
     cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
     atividades: dadosEmpresa.atividades || [],
 
-    // Dados do Usuário (Sempre quem está logado)
+    // Dados do Usuário
     role: user.role,
     nome: user.nome,
     email: user.email,
     cpf: user.cpf,
     telefone: user.telefone,
     
-    // Flag para o front saber que é visualização
+    // --- CORREÇÃO AQUI: AGRUPAR PREFERÊNCIAS ---
+    // O frontend espera um objeto 'configuracoes', mas o banco tem campos soltos.
+    configuracoes: {
+        darkMode: user.darkMode,
+        idioma: user.idioma,
+        notificacoesEmail: user.notificacoesEmail
+    },
+    
+    // Flag de contexto
     isContextMode: empresaAlvoId !== user.empresaId
   });
 }
@@ -96,28 +98,34 @@ export async function PUT(request: Request) {
     const isAdmin = ['ADMIN', 'MASTER', 'SUPORTE'].includes(user?.role || '');
     const empresaExistente = user?.empresa;
 
-    // === LÓGICA DE TRAVAMENTO INTELIGENTE ===
-    // Se o cadastro está completo e não é admin, VERIFICAMOS O QUE ESTÁ MUDANDO.
-    if (empresaExistente?.cadastroCompleto && !isAdmin) {
+    if (empresaExistente?.cadastroCompleto && !isAdmin && body.documento) {
         const cnpjAtual = empresaExistente.documento;
         const cnpjNovo = body.documento.replace(/\D/g, '');
-
-        // Se tentar trocar o CNPJ, bloqueia.
         if (cnpjAtual !== cnpjNovo) {
-            return NextResponse.json({ 
-                error: 'O CNPJ está vinculado e não pode ser alterado. Contate o suporte.' 
-            }, { status: 403 });
+            return NextResponse.json({ error: 'CNPJ bloqueado.' }, { status: 403 });
         }
-        // Se o CNPJ for o mesmo, permite seguir (para atualizar endereço ou certificado).
     }
 
-    // 1. Atualiza User
+    // 1. Atualiza User (Dados Pessoais + Configurações)
+    const userDataToUpdate: any = {
+        nome: body.nome,
+        telefone: body.telefone
+    };
+
+    // --- CORREÇÃO AQUI: DESAGRUPAR PREFERÊNCIAS ---
+    // Se vier o objeto 'configuracoes', salvamos nos campos individuais do banco
+    if (body.configuracoes) {
+        userDataToUpdate.darkMode = body.configuracoes.darkMode;
+        userDataToUpdate.idioma = body.configuracoes.idioma;
+        userDataToUpdate.notificacoesEmail = body.configuracoes.notificacoesEmail;
+    }
+
     await prisma.user.update({
       where: { id: userId },
-      data: { nome: body.nome, telefone: body.telefone }
+      data: userDataToUpdate
     });
 
-    // 2. Atualiza Empresa
+    // 2. Atualiza Empresa (Se houver CNPJ)
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
       
@@ -134,16 +142,14 @@ export async function PUT(request: Request) {
           uf: body.uf,
           codigoIbge: body.codigoIbge,
           email: body.emailComercial || body.email,
-          cadastroCompleto: true // Garante que continue travado/completo
+          cadastroCompleto: true 
       };
 
-      // --- TRATAMENTO DO CERTIFICADO ---
+      // Tratamento Certificado
       if (body.deletarCertificado) {
           dadosEmpresa.certificadoA1 = null;
           dadosEmpresa.senhaCertificado = null;
           dadosEmpresa.certificadoVencimento = null;
-          // Se deletar, podemos destravar para permitir troca de CNPJ se quiser? 
-          // Por segurança, mantemos travado o CNPJ, mas o certificado fica null.
       } 
       else if (body.certificadoArquivo && body.certificadoSenha) {
           try {
@@ -171,7 +177,6 @@ export async function PUT(request: Request) {
           create: { documento: cnpjLimpo, ...dadosEmpresa }
       });
 
-      // Garante Vínculo
       if (user?.empresaId !== empresaSalva.id) {
           const donoAtual = await prisma.user.findFirst({ where: { empresaId: empresaSalva.id } });
           if (donoAtual && donoAtual.id !== userId && !isAdmin) {
@@ -180,7 +185,6 @@ export async function PUT(request: Request) {
           await prisma.user.update({ where: { id: userId }, data: { empresaId: empresaSalva.id } });
       }
 
-      // CNAEs
       if (body.cnaes && Array.isArray(body.cnaes)) {
           await prisma.cnae.deleteMany({ where: { empresaId: empresaSalva.id } });
           if (body.cnaes.length > 0) {

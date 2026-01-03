@@ -4,9 +4,15 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
+// --- IMPORTAÇÃO DO CONTEXTO ---
+import { useAppConfig } from '@/app/contexts/AppConfigContext';
 
 export default function MinhaContaPage() {
   const router = useRouter();
+  
+  // --- USANDO O CONTEXTO ---
+  const { darkMode, toggleDarkMode, language, changeLanguage } = useAppConfig();
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -62,10 +68,19 @@ export default function MinhaContaPage() {
             configuracoes: apiData.configuracoes || prev.configuracoes,
             metadata: apiData.metadata || prev.metadata
         }));
+
+        // --- SINCRONIZA O CONTEXTO GLOBAL COM O BANCO AO CARREGAR ---
+        if (apiData.configuracoes) {
+            // Se no banco estiver true, ativa o dark mode globalmente
+            toggleDarkMode(apiData.configuracoes.darkMode);
+            // Seta o idioma globalmente
+            if(apiData.configuracoes.idioma) changeLanguage(apiData.configuracoes.idioma);
+        }
+
         setLoading(false);
       })
       .catch(err => { console.error(err); setLoading(false); });
-  }, [router]);
+  }, [router]); // Removido toggleDarkMode/changeLanguage das dependências para evitar loop
 
   // Função de troca de plano (Atualiza o estado e fecha o modal)
   const handlePlanChange = async (newSlug: string, newCiclo: string) => {
@@ -102,7 +117,17 @@ export default function MinhaContaPage() {
       const userId = localStorage.getItem('userId');
       try {
         // Removemos campos auxiliares antes de enviar
-        const { planoSlug, planoCiclo, ...payload } = data;
+        const { planoSlug, planoCiclo, ...restData } = data;
+
+        // Garante que estamos salvando o estado ATUAL do contexto (Dark/Lang) no banco
+        const payload = {
+            ...restData,
+            configuracoes: {
+                ...restData.configuracoes,
+                darkMode: darkMode, // Pega do Contexto Global
+                idioma: language    // Pega do Contexto Global
+            }
+        };
 
         const res = await fetch('/api/perfil', {
           method: 'PUT',
@@ -116,22 +141,22 @@ export default function MinhaContaPage() {
   if (loading) return <div className="p-10 text-center text-gray-500">Carregando perfil...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 md:p-12 relative">
+    <div className="min-h-screen bg-gray-50 p-6 md:p-12 relative transition-colors duration-300">
       
       {/* --- MODAL DE SELEÇÃO DE PLANOS --- */}
       {showPlans && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto">
-                <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto dark:bg-slate-800 dark:text-white">
+                <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10 dark:bg-slate-800 dark:border-slate-700">
                     <div>
-                        <h2 className="text-2xl font-bold text-slate-800">Alterar Assinatura</h2>
-                        <p className="text-sm text-slate-500">Escolha o plano ideal para o seu negócio.</p>
+                        <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Alterar Assinatura</h2>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">Escolha o plano ideal para o seu negócio.</p>
                     </div>
-                    <button onClick={() => setShowPlans(false)} className="p-2 hover:bg-gray-100 rounded-full transition">
-                        <X size={24} className="text-gray-500"/>
+                    <button onClick={() => setShowPlans(false)} className="p-2 hover:bg-gray-100 rounded-full transition dark:hover:bg-slate-700">
+                        <X size={24} className="text-gray-500 dark:text-gray-400"/>
                     </button>
                 </div>
-                <div className="p-8 bg-gray-50">
+                <div className="p-8 bg-gray-50 dark:bg-slate-900">
                     <PlanSelector 
                         currentPlan={data.planoSlug} 
                         currentCycle={data.planoCiclo}
@@ -146,10 +171,10 @@ export default function MinhaContaPage() {
         
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
-          <button onClick={() => router.back()} className="p-2 hover:bg-gray-200 rounded-full transition">
-            <ArrowLeft className="text-gray-600" />
+          <button onClick={() => router.back()} className="p-2 hover:bg-gray-200 rounded-full transition dark:hover:bg-slate-800">
+            <ArrowLeft className="text-gray-600 dark:text-gray-300" />
           </button>
-          <h1 className="text-3xl font-bold text-gray-800">Minha Conta</h1>
+          <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Minha Conta</h1>
         </div>
 
         <form onSubmit={handleSalvar}>
@@ -159,7 +184,7 @@ export default function MinhaContaPage() {
             <div className="md:col-span-1 space-y-6">
               
               {/* Card Perfil Visual */}
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 text-center">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 text-center dark:bg-slate-800 dark:border-slate-700">
                 <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600 overflow-hidden">
                   {data.perfil.avatarUrl ? (
                       <img src={data.perfil.avatarUrl} alt="Avatar" className="w-full h-full object-cover"/>
@@ -167,25 +192,25 @@ export default function MinhaContaPage() {
                       <User size={40} />
                   )}
                 </div>
-                <h2 className="font-bold text-lg text-gray-800">{data.nome}</h2>
-                <p className="text-sm text-gray-500">{data.perfil.cargo || 'Sem cargo definido'}</p>
+                <h2 className="font-bold text-lg text-gray-800 dark:text-white">{data.nome}</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{data.perfil.cargo || 'Sem cargo definido'}</p>
                 <p className="text-xs text-blue-600 font-medium mt-1">{data.perfil.empresa}</p>
               </div>
 
               {/* Card Plano (Com Botão de Troca) */}
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden dark:bg-slate-800 dark:border-slate-700">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500"></div>
-                <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
+                <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex items-center gap-2 dark:text-gray-500">
                     <CreditCard size={14}/> Assinatura Atual
                 </h3>
                 <div className="text-center">
-                    <p className="text-2xl font-black text-slate-800">{data.planoSlug}</p>
+                    <p className="text-2xl font-black text-slate-800 dark:text-white">{data.planoSlug}</p>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{data.planoCiclo}</p>
                     
                     <button 
                         type="button"
                         onClick={() => setShowPlans(true)}
-                        className="w-full py-2 bg-blue-50 text-blue-600 font-bold text-sm rounded-lg hover:bg-blue-100 transition border border-blue-200"
+                        className="w-full py-2 bg-blue-50 text-blue-600 font-bold text-sm rounded-lg hover:bg-blue-100 transition border border-blue-200 dark:bg-slate-700 dark:text-blue-400 dark:border-slate-600 dark:hover:bg-slate-600"
                     >
                         Trocar de Plano
                     </button>
@@ -193,7 +218,7 @@ export default function MinhaContaPage() {
               </div>
 
               {/* Metadata */}
-              <div className="bg-gray-100 p-4 rounded-lg text-[10px] text-gray-500 space-y-1 font-mono">
+              <div className="bg-gray-100 p-4 rounded-lg text-[10px] text-gray-500 space-y-1 font-mono dark:bg-slate-800 dark:text-gray-400">
                 <p>ID: {typeof window !== 'undefined' ? localStorage.getItem('userId') : '...'}</p>
                 <p>Criado em: {data.metadata.createdAt ? new Date(data.metadata.createdAt).toLocaleDateString() : '-'}</p>
                 <p>IP: {data.metadata.ipOrigem || 'Não registrado'}</p>
@@ -204,94 +229,95 @@ export default function MinhaContaPage() {
             <div className="md:col-span-2 space-y-6">
               
               {/* Seção 1: Dados Pessoais */}
-              <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-                <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2">
+              <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 dark:bg-slate-800 dark:border-slate-700">
+                <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2 dark:text-white">
                     <User size={20}/> Dados Pessoais
                 </h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nome Completo</label>
-                        <input className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" 
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Nome Completo</label>
+                        <input className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:bg-slate-900 dark:border-slate-600 dark:text-white" 
                                value={data.nome} onChange={e => setData({...data, nome: e.target.value})} />
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Email</label>
                         <div className="relative">
                             <Mail className="absolute left-3 top-3 text-gray-400" size={16} />
-                            <input className="w-full pl-10 p-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm" 
+                            <input className="w-full pl-10 p-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-gray-400" 
                                    disabled value={data.email} />
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">CPF</label>
-                        <input className="w-full p-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm" 
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">CPF</label>
+                        <input className="w-full p-2.5 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-gray-400" 
                                disabled value={data.cpf} />
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Telefone</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Telefone</label>
                         <div className="relative">
                             <Phone className="absolute left-3 top-3 text-gray-400" size={16} />
-                            <input className="w-full pl-10 p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" 
+                            <input className="w-full pl-10 p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:bg-slate-900 dark:border-slate-600 dark:text-white" 
                                    value={data.telefone || ''} onChange={e => setData({...data, telefone: e.target.value})} />
                         </div>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cargo / Função</label>
-                        <input className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" 
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Cargo / Função</label>
+                        <input className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:bg-slate-900 dark:border-slate-600 dark:text-white" 
                                value={data.perfil.cargo} onChange={e => setData({...data, perfil: {...data.perfil, cargo: e.target.value}})} />
                     </div>
                 </div>
               </div>
 
-              {/* Seção 2: Preferências (RESTAURADA) */}
-              <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
-                <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2">
+              {/* Seção 2: Preferências (ATUALIZADA COM O CONTEXTO) */}
+              <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100 dark:bg-slate-800 dark:border-slate-700">
+                <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2 dark:text-white">
                     <Settings size={20}/> Preferências
                 </h3>
                 
                 <div className="space-y-4">
-                    {/* Toggle Dark Mode */}
-                    <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition">
+                    {/* Toggle Dark Mode (Conectado ao Contexto) */}
+                    <div 
+                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition cursor-pointer dark:border-slate-600 dark:hover:bg-slate-700"
+                        onClick={() => toggleDarkMode(!darkMode)}
+                    >
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gray-100 rounded-full"><Monitor size={18} className="text-gray-600"/></div>
+                            <div className="p-2 bg-gray-100 rounded-full dark:bg-slate-600"><Monitor size={18} className="text-gray-600 dark:text-gray-300"/></div>
                             <div>
-                                <p className="font-medium text-sm text-gray-800">Modo Escuro (Dark Mode)</p>
-                                <p className="text-xs text-gray-500">Altera a aparência para cores escuras.</p>
+                                <p className="font-medium text-sm text-gray-800 dark:text-white">Modo Escuro (Dark Mode)</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Altera a aparência para cores escuras.</p>
                             </div>
                         </div>
-                        <input 
-                            type="checkbox" 
-                            className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
-                            checked={data.configuracoes.darkMode}
-                            onChange={e => setData({...data, configuracoes: {...data.configuracoes, darkMode: e.target.checked}})}
-                        />
+                        {/* Switch Visual */}
+                        <div className={`w-10 h-5 rounded-full p-1 transition-colors duration-300 ${darkMode ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                            <div className={`bg-white w-3 h-3 rounded-full shadow-md transform transition-transform duration-300 ${darkMode ? 'translate-x-5' : ''}`}></div>
+                        </div>
                     </div>
 
-                    {/* Toggle Notificações */}
-                    <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition">
+                    {/* Toggle Notificações (Mantém estado local pois é pref de email) */}
+                    <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition dark:border-slate-600 dark:hover:bg-slate-700">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gray-100 rounded-full"><Mail size={18} className="text-gray-600"/></div>
+                            <div className="p-2 bg-gray-100 rounded-full dark:bg-slate-600"><Mail size={18} className="text-gray-600 dark:text-gray-300"/></div>
                             <div>
-                                <p className="font-medium text-sm text-gray-800">Notificações por Email</p>
-                                <p className="text-xs text-gray-500">Receber alertas sobre notas emitidas.</p>
+                                <p className="font-medium text-sm text-gray-800 dark:text-white">Notificações por Email</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Receber alertas sobre notas emitidas.</p>
                             </div>
                         </div>
                         <input 
                             type="checkbox" 
-                            className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
+                            className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 dark:bg-slate-900 dark:border-slate-600"
                             checked={data.configuracoes.notificacoesEmail}
                             onChange={e => setData({...data, configuracoes: {...data.configuracoes, notificacoesEmail: e.target.checked}})}
                         />
                     </div>
 
-                    {/* Select Idioma */}
+                    {/* Select Idioma (Conectado ao Contexto) */}
                     <div className="pt-2">
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Idioma do Sistema</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Idioma do Sistema</label>
                         <select 
-                            className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white"
-                            value={data.configuracoes.idioma}
-                            onChange={e => setData({...data, configuracoes: {...data.configuracoes, idioma: e.target.value}})}
+                            className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white dark:bg-slate-900 dark:border-slate-600 dark:text-white"
+                            value={language}
+                            onChange={e => changeLanguage(e.target.value as any)}
                         >
                             <option value="pt-BR">Português (Brasil)</option>
                             <option value="en-US">English (US)</option>
@@ -309,7 +335,7 @@ export default function MinhaContaPage() {
                 <button 
                   type="submit" 
                   disabled={saving}
-                  className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 font-bold shadow-lg shadow-blue-100 disabled:opacity-70 disabled:cursor-not-allowed"
+                  className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 font-bold shadow-lg shadow-blue-100 disabled:opacity-70 disabled:cursor-not-allowed dark:shadow-none"
                 >
                   {saving ? 'Salvando...' : <><Save size={20} /> Salvar Alterações</>}
                 </button>
