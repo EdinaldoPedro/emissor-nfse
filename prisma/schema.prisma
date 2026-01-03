@@ -50,13 +50,19 @@ model User {
   ipOrigem         String?
   lastLoginAt      DateTime? 
   
-  empresaId String?
+  empresaId String?  @unique
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
   
   clientes  UserCliente[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  ticketsCriados    Ticket[] @relation("Solicitante")
+  ticketsAtendidos  Ticket[] @relation("Atendente")
+  mensagensTicket   TicketMensagem[]
+
+  empresasContabeis ContadorVinculo[] @relation("ContadorUser")
 }
 
 // --- EMPRESAS ---
@@ -85,7 +91,7 @@ model Empresa {
   regimeTributario   String? @default("MEI")
   
   // Relações
-  donos        User[] @relation("DonoEmpresa")
+  donoUser     User? @relation("DonoEmpresa")
   vinculadoA   UserCliente[] 
   atividades   Cnae[]
   
@@ -104,6 +110,8 @@ model Empresa {
   
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime?
+
+  contadoresLink    ContadorVinculo[] @relation("EmpresaContabil")
 }
 
 
@@ -243,4 +251,98 @@ model SystemLog {
   venda     Venda?   @relation(fields: [vendaId], references: [id])
   
   createdAt DateTime @default(now())
+}
+
+model Ticket {
+  id            String   @id @default(uuid())
+  protocolo     Int      @default(autoincrement())
+  
+  assunto       String
+  categoria     String?
+  prioridade    String   @default("MEDIA")
+  descricao     String
+  status        String   @default("ABERTO")
+  
+  // --- NOVOS CAMPOS DE ANEXO ---
+  anexoBase64   String? 
+  anexoNome     String?
+
+  // --- RELAÇÃO COM O CATÁLOGO (CORREÇÃO DO ERRO) ---
+  catalogId     String?
+  catalogItem   TicketCatalog? @relation(fields: [catalogId], references: [id])
+
+  solicitanteId String
+  solicitante   User     @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
+  
+  atendenteId   String?
+  atendente     User?    @relation("AtendenteTicket", fields: [atendenteId], references: [id])
+  
+  mensagens     TicketMensagem[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+
+model TicketMensagem {
+  id        String   @id @default(uuid())
+  mensagem  String   // Texto ou HTML
+  anexos    String?  // Link ou Base64 (opcional)
+  
+  interno   Boolean  @default(false) // Se true, o cliente NÃO vê (nota interna da equipe)
+
+  anexoBase64 String?
+  anexoNome   String?
+  
+  ticketId  String
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  usuarioId String
+  usuario   User     @relation(fields: [usuarioId], references: [id])
+  
+  createdAt DateTime @default(now())
+}
+
+enum TicketStatus {
+  ABERTO
+  EM_ANDAMENTO
+  AGUARDANDO_CLIENTE
+  RESOLVIDO
+  FECHADO
+}
+
+enum TicketPriority {
+  BAIXA
+  MEDIA
+  ALTA
+  CRITICA
+}
+
+model ContadorVinculo {
+  id        String   @id @default(uuid())
+  status    String   @default("PENDENTE") // PENDENTE, APROVADO, REJEITADO
+  
+  contadorId String
+  contador   User     @relation("ContadorUser", fields: [contadorId], references: [id])
+  
+  empresaId  String
+  empresa    Empresa  @relation("EmpresaContabil", fields: [empresaId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([contadorId, empresaId]) // Evita duplicidade
+}
+
+odel TicketCatalog {
+  id          String   @id @default(uuid())
+  titulo      String   // Ex: "Erro na Sefaz"
+  prioridade  String   @default("MEDIA")
+  instrucoes  String?  // Texto para o atendente
+  ativo       Boolean  @default(true)
+  
+  tickets     Ticket[] // Essa linha exige que o Ticket tenha o 'catalogItem' acima
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

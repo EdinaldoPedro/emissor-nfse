@@ -8,18 +8,19 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
   try {
-    const { ticketId, mensagem, interno } = await request.json();
+    const { ticketId, mensagem, interno, anexoBase64, anexoNome } = await request.json();
 
     const novaMsg = await prisma.ticketMensagem.create({
         data: {
             ticketId,
             usuarioId: userId,
-            mensagem,
-            interno: interno || false
+            mensagem: mensagem || (anexoBase64 ? 'Enviou um anexo.' : ''), // Texto opcional se tiver anexo
+            interno: interno || false,
+            anexoBase64: anexoBase64 || null,
+            anexoNome: anexoNome || null
         }
     });
 
-    // Atualiza data do ticket para subir na lista
     await prisma.ticket.update({
         where: { id: ticketId },
         data: { updatedAt: new Date() }
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(novaMsg);
   } catch (e) {
+    console.error(e);
     return NextResponse.json({ error: 'Erro ao enviar' }, { status: 500 });
   }
 }

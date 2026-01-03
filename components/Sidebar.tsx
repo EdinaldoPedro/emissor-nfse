@@ -10,22 +10,34 @@ export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [userData, setUserData] = useState<any>(null);
   const [userRole, setUserRole] = useState('');
+  
+  // Estado para saber se é contador
+  const [isContador, setIsContador] = useState(false);
+
   const router = useRouter();
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
     const role = localStorage.getItem('userRole');
     
-    if (role) setUserRole(role);
+    if (role) {
+        setUserRole(role);
+        setIsContador(role === 'CONTADOR');
+    }
 
     const fetchUser = async () => {
         if(userId) {
             try {
-                const res = await fetch('/api/perfil', { headers: {'x-user-id': userId}});
+                const contextId = localStorage.getItem('empresaContextId');
+                
+                const res = await fetch('/api/perfil', { 
+                    headers: {
+                        'x-user-id': userId,
+                        'x-empresa-id': contextId || '' 
+                    }
+                });
                 if(res.ok) setUserData(await res.json());
-            } catch (error) {
-                console.error("Erro ao buscar perfil", error);
-            }
+            } catch (error) { console.error("Erro", error); }
         }
     };
 
@@ -37,39 +49,25 @@ export default function Sidebar() {
     router.push('/login');
   };
 
-  // --- LÓGICA DE STATUS DO CERTIFICADO (MANTIDA) ---
   const getStatusCertificado = () => {
-    // 1. Sem certificado
-    if (!userData?.temCertificado) {
-        return { label: 'Pendente', classes: 'text-red-500' };
-    }
+    if (!userData?.temCertificado) return { label: 'Pendente', classes: 'text-red-500' };
+    if (!userData.vencimentoCertificado) return { label: 'Ativo', classes: 'text-green-600' };
 
-    // 2. Com certificado, mas sem data (caso raro, assume ativo)
-    if (!userData.vencimentoCertificado) {
-        return { label: 'Ativo', classes: 'text-green-600' };
-    }
-
-    // 3. Cálculo de datas
     const hoje = new Date();
     const vencimento = new Date(userData.vencimentoCertificado);
     const diffTime = vencimento.getTime() - hoje.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    // Vencido
-    if (diffDays < 0) {
-        return { label: 'Vencido', classes: 'text-red-600 font-bold' };
-    }
-    
-    // Perto de vencer (30 dias) - Usei Amber para ficar legível no fundo branco
-    if (diffDays <= 30) {
-        return { label: 'A Vencer', classes: 'text-amber-600 font-bold' };
-    }
+    if (diffDays < 0) return { label: 'Vencido', classes: 'text-red-600 font-bold' };
+    if (diffDays <= 30) return { label: 'A Vencer', classes: 'text-amber-600 font-bold' };
 
-    // Válido
     return { label: 'Válido', classes: 'text-green-600' };
   };
 
   const statusCert = getStatusCertificado();
+
+  // Verifica se deve mostrar o painel Admin (Staff mas NÃO Contador)
+  const showAdminPanel = checkIsStaff(userRole) && userRole !== 'CONTADOR';
 
   return (
     <>
@@ -91,7 +89,7 @@ export default function Sidebar() {
         
         {/* CABEÇALHO */}
         <div className="p-6 border-b flex justify-between items-center bg-blue-600 text-white shrink-0">
-          <h2 className="font-bold text-lg">Configurações</h2>
+          <h2 className="font-bold text-lg">Menu</h2>
           <button onClick={() => setIsOpen(false)} className="hover:bg-blue-700 p-1 rounded">
             <X size={24} />
           </button>
@@ -107,8 +105,11 @@ export default function Sidebar() {
             <div className="space-y-3 text-sm">
               <p><span className="font-medium text-gray-700">Nome:</span> {userData?.nome || '...'}</p>
               <p><span className="font-medium text-gray-700">Email:</span> {userData?.email || '...'}</p>
-              <p><span className="font-medium text-gray-700">CPF:</span> {userData?.cpf || 'Não informado'}</p>
-              <p><span className="font-medium text-gray-700">Plano:</span> <span className="text-green-600 font-bold">{userData?.plano?.tipo || 'Gratuito'}</span></p>
+              
+              {!isContador && (
+                  <p><span className="font-medium text-gray-700">Plano:</span> <span className="text-green-600 font-bold">{userData?.plano?.tipo || 'Gratuito'}</span></p>
+              )}
+              
               <Link href="/configuracoes/minha-conta" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
                 Editar Dados Pessoais
               </Link>
@@ -131,7 +132,6 @@ export default function Sidebar() {
                   <span className="text-gray-500 ml-1">{userData?.documento || 'Não informado'}</span>
               </p>
               
-              {/* STATUS VOLTOU AO PADRÃO DE TEXTO SIMPLES */}
               <p>
                   <span className="font-medium text-gray-700">Certificado:</span>{' '}
                   <span className={statusCert.classes}>
@@ -155,18 +155,20 @@ export default function Sidebar() {
                 <Link href="/cliente" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded">
                     <FileText size={18} /> Meus Clientes
                 </Link>
+                
+                {/* "MEUS CHAMADOS" REMOVIDO DAQUI */}
+
                 <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded opacity-50 cursor-not-allowed">
                     <FileText size={18} /> Relatórios (Em breve)
                 </Link>
             </div>
           </section>
 
-          <hr />
-
-          {checkIsStaff(userRole) && (
+          {showAdminPanel && (
              <section>
+                <hr className="mb-6"/>
                 <h3 className="text-xs font-bold text-purple-600 uppercase mb-4 flex items-center gap-2">
-                  <Shield size={14} /> Acesso Interno
+                  <Shield size={14} /> Admin
                 </h3>
                 <Link 
                   href="/admin/dashboard" 
@@ -182,10 +184,12 @@ export default function Sidebar() {
 
         {/* RODAPÉ */}
         <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0">
-            <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 w-full p-2 text-sm">
-                <Phone size={16} /> Suporte
-            </button>
-            <button onClick={handleLogout} className="flex items-center gap-2 text-red-500 hover:text-red-700 w-full p-2 text-sm font-medium">
+            {/* O LINK PARA OS CHAMADOS FICA AQUI AGORA */}
+            <Link href="/cliente/suporte" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition">
+                <Phone size={16} /> Suporte Técnico
+            </Link>
+            
+            <button onClick={handleLogout} className="flex items-center gap-2 text-red-500 hover:text-red-700 w-full p-2 text-sm font-medium transition">
                 <LogOut size={16} /> Sair do Sistema
             </button>
         </div>

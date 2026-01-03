@@ -1,6 +1,5 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
-// IMPORT CORRIGIDO ABAIXO:
 import { Search, FileText, MoreVertical, Ban, RefreshCcw, Share2, ChevronLeft, ChevronRight, Loader2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -21,10 +20,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // Evita duplo fetch na montagem
   const isFirstRender = useRef(true);
 
-  // Debounce do input de busca
   useEffect(() => {
     const timer = setTimeout(() => {
         setDebouncedSearch(searchTerm);
@@ -36,11 +33,19 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const fetchVendas = useCallback(() => {
     setLoading(true);
     const userId = localStorage.getItem('userId');
+    
+    // --- CORREÇÃO: PEGAR O CONTEXTO DO CONTADOR ---
+    const contextId = localStorage.getItem('empresaContextId');
+    // ----------------------------------------------
+
     const limit = compact ? 10 : 10; 
     const typeFilter = onlyValid ? 'valid' : 'all';
 
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
-        headers: { 'x-user-id': userId || '' }
+        headers: { 
+            'x-user-id': userId || '',
+            'x-empresa-id': contextId || '' // <--- ENVIANDO O CONTEXTO
+        }
     })
     .then(r => r.json())
     .then(res => {
@@ -59,7 +64,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       router.push(`/emitir?retry=${vendaId}`);
   };
 
-  // --- TRADUTOR DE ERROS (PARA O CLIENTE) ---
   const getFriendlyError = (rawMessage: string | null) => {
       if (!rawMessage) return "Erro desconhecido. Tente novamente.";
       
@@ -175,7 +179,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                                 FALHOU <AlertCircle size={10}/>
                                             </span>
                                             
-                                            {/* TOOLTIP AMIGÁVEL PARA O CLIENTE */}
                                             <div className="absolute bottom-full mb-2 w-72 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition pointer-events-none z-20 text-left border border-slate-600">
                                                 <div className="flex items-start gap-2">
                                                     <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5"/>
