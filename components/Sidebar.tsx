@@ -11,11 +11,12 @@ export default function Sidebar() {
   const [userData, setUserData] = useState<any>(null);
   const [userRole, setUserRole] = useState('');
   const [isContador, setIsContador] = useState(false);
-  const [notificacoes, setNotificacoes] = useState(0); // <--- ESTADO DO BALÃO
+  const [notificacoes, setNotificacoes] = useState(0); 
 
   const router = useRouter();
 
   useEffect(() => {
+    // Pega dados do localStorage (pode ser o ID real ou o do cliente que estamos "espiando")
     const userId = localStorage.getItem('userId');
     const role = localStorage.getItem('userRole');
     
@@ -27,16 +28,19 @@ export default function Sidebar() {
     const fetchData = async () => {
         if(userId) {
             try {
-                // 1. Dados do Usuário
                 const contextId = localStorage.getItem('empresaContextId');
+                
+                // 1. Dados do Usuário
                 const res = await fetch('/api/perfil', { 
                     headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' }
                 });
                 if(res.ok) setUserData(await res.json());
 
-                // 2. Notificações (Só se for cliente)
+                // 2. Notificações (Só busca se NÃO for staff/admin)
+                // Se estiver no "Modo Suporte", o role no localStorage é do cliente, então entra aqui.
                 if (!checkIsStaff(role)) {
-                    const resNotif = await fetch('/api/cliente/notificacoes', {
+                    // CORREÇÃO AQUI: Mudado de '/api/cliente/...' para '/api/clientes/...'
+                    const resNotif = await fetch('/api/clientes/notificacoes', {
                         headers: { 'x-user-id': userId }
                     });
                     if (resNotif.ok) {
@@ -49,9 +53,9 @@ export default function Sidebar() {
     };
 
     if (isOpen) fetchData(); // Busca ao abrir o menu
-    fetchData(); // Busca ao carregar a página (para mostrar o balão no ícone do menu)
+    fetchData(); // Busca ao carregar a página também
 
-  }, [isOpen]); // Recarrega se abrir o menu
+  }, [isOpen]); 
 
   const handleLogout = () => {
     localStorage.clear();
@@ -81,7 +85,7 @@ export default function Sidebar() {
       >
         <Menu size={28} className="text-gray-700" />
         
-        {/* BALÃOZINHO NO ÍCONE DO HAMBÚRGUER */}
+        {/* BALÃOZINHO NO ÍCONE HAMBÚRGUER */}
         {notificacoes > 0 && (
             <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
         )}
@@ -179,13 +183,13 @@ export default function Sidebar() {
         </div>
 
         <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0">
-            {/* O BOTÃO DE SUPORTE COM BALÃO */}
+            {/* O BOTÃO DE SUPORTE COM BALÃO DE NOTIFICAÇÃO */}
             <Link href="/cliente/suporte" onClick={() => setIsOpen(false)} className="flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition">
                 <div className="flex items-center gap-2">
                     <Phone size={16} /> Suporte Técnico
                 </div>
                 {notificacoes > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">
+                    <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm animate-pulse">
                         {notificacoes}
                     </span>
                 )}
