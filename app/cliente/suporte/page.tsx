@@ -1,17 +1,36 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Plus, MessageSquare, Clock, CheckCircle, UserCheck, Check, X, AlertTriangle } from 'lucide-react';
+import { Plus, MessageSquare, Clock, CheckCircle, UserCheck, Check, X, AlertTriangle, ArrowLeft, Search, Filter } from 'lucide-react';
 import Link from 'next/link';
-import Sidebar from '@/components/Sidebar';
+import { useRouter } from 'next/navigation';
 
 export default function MeusChamados() {
+  const router = useRouter();
   const [tickets, setTickets] = useState<any[]>([]); 
-  const [solicitacoes, setSolicitacoes] = useState<any[]>([]); // Estado para solicitações de contador
+  const [filteredTickets, setFilteredTickets] = useState<any[]>([]);
+  const [solicitacoes, setSolicitacoes] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
+  
+  const [termoBusca, setTermoBusca] = useState('');
 
   useEffect(() => {
     carregarDados();
   }, []);
+
+  // Filtro local
+  useEffect(() => {
+    if (!termoBusca) {
+        setFilteredTickets(tickets);
+    } else {
+        const lower = termoBusca.toLowerCase();
+        const filtrados = tickets.filter(t => 
+            t.assunto.toLowerCase().includes(lower) || 
+            String(t.protocolo).includes(lower) ||
+            (t.categoria && t.categoria.toLowerCase().includes(lower))
+        );
+        setFilteredTickets(filtrados);
+    }
+  }, [termoBusca, tickets]);
 
   const carregarDados = async () => {
     const userId = localStorage.getItem('userId');
@@ -22,10 +41,15 @@ export default function MeusChamados() {
         // 1. Busca Tickets
         const resTickets = await fetch('/api/suporte/tickets', { headers });
         const dataTickets = await resTickets.json();
-        if (Array.isArray(dataTickets)) setTickets(dataTickets);
-        else setTickets([]);
+        if (Array.isArray(dataTickets)) {
+            setTickets(dataTickets);
+            setFilteredTickets(dataTickets);
+        } else {
+            setTickets([]);
+            setFilteredTickets([]);
+        }
 
-        // 2. Busca Solicitações de Contador (NOVO)
+        // 2. Busca Solicitações de Contador
         const resSolicitacoes = await fetch('/api/contador/vinculo?mode=cliente', { headers });
         const dataSolicitacoes = await resSolicitacoes.json();
         if (Array.isArray(dataSolicitacoes)) setSolicitacoes(dataSolicitacoes);
@@ -54,7 +78,6 @@ export default function MeusChamados() {
           
           if(res.ok) {
               alert(acao === 'APROVAR' ? "Acesso concedido com sucesso!" : "Solicitação recusada.");
-              // Remove da lista visualmente
               setSolicitacoes(prev => prev.filter(s => s.id !== vinculoId));
           } else {
               alert("Erro ao processar solicitação.");
@@ -62,60 +85,75 @@ export default function MeusChamados() {
       } catch (e) { alert("Erro de conexão."); }
   };
 
-  // --- FUNÇÃO DE STATUS ---
   const getStatusInfo = (s: string) => {
       switch(s) {
           case 'ABERTO': 
-              return { label: 'Não Iniciado', class: 'bg-blue-100 text-blue-700 border-blue-200' };
+              return { label: 'Não Iniciado', class: 'bg-blue-50 text-blue-700 border-blue-200' };
           case 'EM_ANDAMENTO': 
-              return { label: 'Em Andamento', class: 'bg-yellow-100 text-yellow-700 border-yellow-200' };
+              return { label: 'Em Andamento', class: 'bg-yellow-50 text-yellow-700 border-yellow-200' };
           case 'AGUARDANDO_CLIENTE': 
-              return { label: 'Aguardando Você', class: 'bg-orange-100 text-orange-700 border-orange-200' };
+              return { label: 'Aguardando Você', class: 'bg-orange-50 text-orange-700 border-orange-200' };
           case 'RESOLVIDO': 
-              return { label: 'Concluído', class: 'bg-green-100 text-green-700 border-green-200' };
+              return { label: 'Concluído', class: 'bg-green-50 text-green-700 border-green-200' };
           case 'FECHADO': 
-              return { label: 'Inconclusivo/Fechado', class: 'bg-gray-100 text-gray-600 border-gray-200' };
+              return { label: 'Fechado', class: 'bg-gray-100 text-gray-600 border-gray-200' };
           default: 
               return { label: s, class: 'bg-gray-100 text-gray-600' };
       }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="flex justify-between items-center p-6 border-b bg-white sticky top-0 z-10 shadow-sm">
-          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-              <MessageSquare className="text-blue-600" size={24}/> Central de Suporte
-          </h1>
-          <Sidebar />
-      </header>
+    <div className="min-h-screen bg-slate-50 p-6 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
 
-      <div className="p-6 max-w-5xl mx-auto">
-        
+        {/* HEADER */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+                <button onClick={() => router.push('/cliente/dashboard')} className="p-2 bg-white border border-slate-200 rounded-full hover:bg-slate-100 transition text-slate-500">
+                    <ArrowLeft size={20} />
+                </button>
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <MessageSquare className="text-blue-600" size={24}/> Central de Suporte
+                    </h1>
+                    <p className="text-slate-500 text-sm">Acompanhe seus tickets e solicitações de acesso.</p>
+                </div>
+            </div>
+            
+            <div className="flex gap-3">
+                <Link 
+                    href="/cliente/suporte/novo"
+                    className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-md font-medium"
+                >
+                    <Plus size={20} /> Abrir Novo Chamado
+                </Link>
+            </div>
+        </div>
+
         {/* --- ÁREA DE SOLICITAÇÕES DE ACESSO (CONTADOR) --- */}
         {solicitacoes.length > 0 && (
-            <div className="mb-10 bg-orange-50 border border-orange-200 rounded-xl p-6 shadow-sm animate-in fade-in slide-in-from-top-4">
+            <div className="bg-white border-l-4 border-orange-500 rounded-xl shadow-sm p-6 animate-in fade-in slide-in-from-top-4">
                 <div className="flex items-start gap-4 mb-4">
-                    <div className="p-3 bg-orange-100 text-orange-600 rounded-full shrink-0">
-                        <UserCheck size={28}/>
+                    <div className="p-2 bg-orange-50 text-orange-600 rounded-lg shrink-0">
+                        <UserCheck size={24}/>
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-orange-900">Solicitações de Acesso Pendentes</h2>
-                        <p className="text-orange-800 text-sm mt-1">
-                            Os profissionais abaixo solicitaram acesso aos dados da sua empresa. 
-                            Ao aceitar, você concede permissão para visualizarem notas e dados fiscais.
+                        <h2 className="text-lg font-bold text-slate-800">Solicitações de Acesso</h2>
+                        <p className="text-slate-500 text-sm mt-1">
+                            Contadores solicitando permissão para gerenciar sua empresa.
                         </p>
                     </div>
                 </div>
 
-                <div className="space-y-3">
+                <div className="grid gap-3">
                     {solicitacoes.map(sol => (
-                        <div key={sol.id} className="bg-white p-4 rounded-lg border border-orange-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div key={sol.id} className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-bold text-slate-500">
+                                <div className="w-10 h-10 bg-white border rounded-full flex items-center justify-center font-bold text-slate-600 shadow-sm">
                                     {sol.contador.nome.charAt(0)}
                                 </div>
                                 <div>
-                                    <p className="font-bold text-slate-800">{sol.contador.nome}</p>
+                                    <p className="font-bold text-slate-800 text-sm">{sol.contador.nome}</p>
                                     <p className="text-xs text-slate-500">{sol.contador.email}</p>
                                 </div>
                             </div>
@@ -123,87 +161,90 @@ export default function MeusChamados() {
                             <div className="flex gap-2 w-full md:w-auto">
                                 <button 
                                     onClick={() => responderSolicitacao(sol.id, 'APROVAR', sol.contador.nome)}
-                                    className="flex-1 md:flex-none bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700 flex items-center justify-center gap-2 transition"
+                                    className="flex-1 md:flex-none bg-green-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-green-700 flex items-center justify-center gap-2 transition"
                                 >
-                                    <Check size={16}/> Autorizar Acesso
+                                    <Check size={14}/> Autorizar
                                 </button>
                                 <button 
                                     onClick={() => responderSolicitacao(sol.id, 'REJEITAR', sol.contador.nome)}
-                                    className="flex-1 md:flex-none bg-white border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-50 flex items-center justify-center gap-2 transition"
+                                    className="flex-1 md:flex-none bg-white border border-red-200 text-red-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-50 flex items-center justify-center gap-2 transition"
                                 >
-                                    <X size={16}/> Negar
+                                    <X size={14}/> Negar
                                 </button>
                             </div>
                         </div>
                     ))}
                 </div>
-                
-                <div className="mt-4 pt-3 border-t border-orange-200/50 flex items-center gap-2 text-[11px] text-orange-700/70 font-medium">
-                    <AlertTriangle size={12}/>
-                    <span>Atenção: A responsabilidade pelo compartilhamento de dados é exclusiva do titular da conta.</span>
-                </div>
             </div>
         )}
-        {/* -------------------------------------------------- */}
 
-        <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-            <div>
-                <h2 className="text-2xl font-bold text-slate-800">Meus Chamados</h2>
-                <p className="text-slate-500 text-sm">Histórico de atendimento e dúvidas.</p>
-            </div>
-            <Link href="/cliente/suporte/novo" className="bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 font-bold shadow-lg shadow-blue-100 transition">
-                <Plus size={20}/> Abrir Novo Chamado
-            </Link>
-        </div>
-
-        {loading ? (
-            <div className="text-center p-12 text-slate-400">Carregando informações...</div>
-        ) : tickets.length === 0 ? (
-            <div className="text-center p-12 bg-white rounded-xl shadow-sm border border-dashed border-slate-300">
-                <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <MessageSquare className="text-slate-300" size={32}/>
+        {/* LISTA DE CHAMADOS */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            
+            {/* Barra de Filtro */}
+            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
+                <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm uppercase tracking-wide">
+                    <Filter size={16} className="text-slate-400"/> Meus Tickets
+                </h3>
+                <div className="relative w-full md:w-72">
+                    <Search className="absolute left-3 top-2.5 text-slate-400" size={18}/>
+                    <input 
+                        className="w-full pl-10 p-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none transition"
+                        placeholder="Buscar por assunto ou protocolo..."
+                        value={termoBusca}
+                        onChange={e => setTermoBusca(e.target.value)}
+                    />
                 </div>
-                <h3 className="font-bold text-slate-700 text-lg">Nenhum chamado encontrado</h3>
-                <p className="text-slate-500 mb-6">Precisa de ajuda com alguma nota ou configuração?</p>
-                <Link href="/cliente/suporte/novo" className="text-blue-600 font-bold hover:underline">
-                    Abra seu primeiro ticket
-                </Link>
             </div>
-        ) : (
-            <div className="space-y-4">
-                {tickets.map(t => (
-                    <Link key={t.id} href={`/cliente/suporte/${t.id}`}>
-                        <div className="bg-white p-5 rounded-xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition flex justify-between items-center group cursor-pointer">
-                            <div className="flex gap-5 items-center">
-                                <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm bg-slate-100 text-slate-500 group-hover:bg-blue-50 group-hover:text-blue-600 transition`}>
-                                    #{t.protocolo}
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-slate-800 text-lg group-hover:text-blue-600 transition">{t.assunto}</h3>
-                                    <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
-                                        <span className="flex items-center gap-1"><Clock size={12}/> {new Date(t.createdAt).toLocaleDateString()}</span>
-                                        <span>•</span>
-                                        <span className="font-medium bg-slate-100 px-2 py-0.5 rounded">{t.categoria || 'Geral'}</span>
+
+            {loading ? (
+                <div className="text-center p-12 text-slate-400">Carregando...</div>
+            ) : filteredTickets.length === 0 ? (
+                <div className="text-center p-16 flex flex-col items-center">
+                    <div className="bg-slate-50 p-4 rounded-full mb-4">
+                        <MessageSquare className="text-slate-300" size={32}/>
+                    </div>
+                    <h3 className="font-bold text-slate-700 text-lg">Nenhum chamado encontrado</h3>
+                    <p className="text-slate-500 text-sm mt-1 max-w-xs">
+                        Se tiver alguma dúvida ou problema, não hesite em abrir um novo ticket.
+                    </p>
+                </div>
+            ) : (
+                <div className="divide-y divide-slate-100">
+                    {filteredTickets.map(t => (
+                        <Link key={t.id} href={`/cliente/suporte/${t.id}`}>
+                            <div className="p-5 hover:bg-slate-50 transition flex flex-col md:flex-row justify-between items-start md:items-center gap-4 group cursor-pointer border-l-4 border-transparent hover:border-blue-500">
+                                <div className="flex gap-4 items-center">
+                                    <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 border border-blue-100">
+                                        #{t.protocolo}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-slate-800 group-hover:text-blue-600 transition text-base">{t.assunto}</h3>
+                                        <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+                                            <span className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded"><Clock size={10}/> {new Date(t.createdAt).toLocaleDateString()}</span>
+                                            {t.categoria && <span>• {t.categoria}</span>}
+                                        </div>
                                     </div>
                                 </div>
+                                
+                                <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+                                    {(() => {
+                                        const statusInfo = getStatusInfo(t.status);
+                                        return (
+                                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border flex items-center gap-1.5 ${statusInfo.class}`}>
+                                                {t.status === 'RESOLVIDO' && <CheckCircle size={10}/>}
+                                                {statusInfo.label}
+                                            </span>
+                                        );
+                                    })()}
+                                    <ArrowLeft size={16} className="text-slate-300 rotate-180 group-hover:text-blue-500 transition-transform group-hover:translate-x-1"/>
+                                </div>
                             </div>
-                            
-                            <div className="flex items-center gap-6">
-                                {(() => {
-                                    const statusInfo = getStatusInfo(t.status);
-                                    return (
-                                        <span className={`px-3 py-1 rounded text-xs font-bold uppercase border flex items-center gap-1 ${statusInfo.class}`}>
-                                            {t.status === 'RESOLVIDO' && <CheckCircle size={12}/>}
-                                            {statusInfo.label}
-                                        </span>
-                                    );
-                                })()}
-                            </div>
-                        </div>
-                    </Link>
-                ))}
-            </div>
-        )}
+                        </Link>
+                    ))}
+                </div>
+            )}
+        </div>
       </div>
     </div>
   );

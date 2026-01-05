@@ -1,22 +1,22 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Send, Shield, User, Lock, Clock, Book, Save, ArrowLeft, Paperclip, Download, X, MessageCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { Send, Shield, User, Lock, Clock, Book, ArrowLeft, Paperclip, Download, X, MessageCircle, Loader2, AlertTriangle, FileText, CheckCircle } from 'lucide-react';
 
 const STATUS_MAP: Record<string, string> = {
     'ABERTO': 'Não Iniciado',
     'EM_ANDAMENTO': 'Em Andamento',
-    'AGUARDANDO_CLIENTE': 'Aguardando retorno do cliente',
-    'RESOLVIDO': 'Finalizado',
-    'FECHADO': 'Inconclusivo'
+    'AGUARDANDO_CLIENTE': 'Aguardando Cliente',
+    'RESOLVIDO': 'Resolvido',
+    'FECHADO': 'Fechado'
 };
 
 const STATUS_COLORS: Record<string, string> = {
-    'ABERTO': 'bg-gray-100 text-gray-700 border-gray-300',
+    'ABERTO': 'bg-slate-100 text-slate-700 border-slate-200',
     'EM_ANDAMENTO': 'bg-blue-50 text-blue-700 border-blue-200',
     'AGUARDANDO_CLIENTE': 'bg-orange-50 text-orange-700 border-orange-200',
     'RESOLVIDO': 'bg-green-50 text-green-700 border-green-200',
-    'FECHADO': 'bg-red-50 text-red-700 border-red-200'
+    'FECHADO': 'bg-gray-100 text-gray-600 border-gray-200'
 };
 
 export default function ResolucaoAdmin() {
@@ -29,26 +29,19 @@ export default function ResolucaoAdmin() {
   const [activeTab, setActiveTab] = useState<'CLIENTE' | 'INTERNO'>('CLIENTE');
   const [anexo, setAnexo] = useState<{base64: string, nome: string} | null>(null);
   const [tempoDecorrido, setTempoDecorrido] = useState('');
-  
-  // Estados de controle de UI
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const msgEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. Função de Carregamento Otimizada
   const carregarDados = useCallback(async () => {
       try {
-          // Busca Ticket
           const resTicket = await fetch(`/api/suporte/tickets/${id}`);
           if (!resTicket.ok) throw new Error("Erro ao buscar ticket");
           const dataTicket = await resTicket.json();
-          
           if (dataTicket.error) throw new Error(dataTicket.error);
-          
           setTicket(dataTicket);
 
-          // Busca Staff (apenas se ainda não tiver carregado)
           if (staffMembers.length === 0) {
               const resUsers = await fetch('/api/admin/users');
               if (resUsers.ok) {
@@ -57,61 +50,43 @@ export default function ResolucaoAdmin() {
                   setStaffMembers(staff);
               }
           }
-          
-          setError(''); // Limpa erros se der sucesso
+          setError(''); 
       } catch (e: any) { 
-          console.error("Erro no carregamento:", e);
-          // Só define erro se não tiver dados anteriores (para não piscar a tela no refresh automático)
           if (!ticket) setError(e.message || "Erro desconhecido");
       } finally {
           setLoading(false);
       }
   }, [id, staffMembers.length, ticket]);
 
-  // 2. Efeito Inicial e Polling (Timer)
   useEffect(() => { 
       carregarDados(); 
-      const interval = setInterval(() => {
-          // Polling silencioso (não ativa loading spinner)
-          carregarDados();
-      }, 10000); 
+      const interval = setInterval(carregarDados, 10000); 
       return () => clearInterval(interval);
   }, [carregarDados]);
 
-  // 3. Cronômetro Inteligente (Otimizado para não loopar)
   useEffect(() => {
       if (!ticket) return;
-      
       const updateTimer = () => {
           const inicio = new Date(ticket.createdAt).getTime();
           const isFinalizado = ['RESOLVIDO', 'FECHADO'].includes(ticket.status);
           const fim = isFinalizado ? new Date(ticket.updatedAt).getTime() : new Date().getTime();
-
           const diff = fim - inicio;
           const dias = Math.floor(diff / 86400000);
           const horas = Math.floor((diff % 86400000) / 3600000);
           const minutos = Math.floor((diff % 3600000) / 60000);
-          
           let str = dias > 0 ? `${dias}d ` : '';
           str += `${horas}h ${minutos}m`;
           if(isFinalizado) str += ' (Finalizado)';
-          
           setTempoDecorrido(str);
       };
-
-      updateTimer(); // Roda a primeira vez
-      
-      // Só cria o intervalo se o ticket NÃO estiver finalizado
+      updateTimer();
       if (!['RESOLVIDO', 'FECHADO'].includes(ticket.status)) {
           const timer = setInterval(updateTimer, 60000);
           return () => clearInterval(timer);
       }
-  }, [ticket?.status, ticket?.createdAt, ticket?.updatedAt]); // Dependências específicas para evitar loop
+  }, [ticket?.status, ticket?.createdAt, ticket?.updatedAt]);
 
-  // 4. Scroll Automático
-  useEffect(() => { 
-      msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
-  }, [ticket?.mensagens?.length, activeTab]); // Só roda se mudar o número de mensagens ou a aba
+  useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [ticket?.mensagens?.length, activeTab]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -126,104 +101,66 @@ export default function ResolucaoAdmin() {
   const enviarMsg = async () => {
       if(!novaMsg.trim() && !anexo) return;
       const userId = localStorage.getItem('userId');
-      
-      // Feedback visual imediato (Opcional, mas bom para UX)
       const tempMsg = novaMsg;
       setNovaMsg(''); 
-      
       try {
           await fetch('/api/suporte/tickets/mensagem', {
               method: 'POST',
               headers: {'Content-Type':'application/json', 'x-user-id': userId || ''},
               body: JSON.stringify({ 
-                  ticketId: id, 
-                  mensagem: tempMsg, 
-                  interno: activeTab === 'INTERNO',
-                  anexoBase64: anexo?.base64, 
-                  anexoNome: anexo?.nome
+                  ticketId: id, mensagem: tempMsg, interno: activeTab === 'INTERNO',
+                  anexoBase64: anexo?.base64, anexoNome: anexo?.nome
               })
           });
           setAnexo(null);
-          carregarDados(); // Recarrega para mostrar a msg oficial
-      } catch (e) { 
-          alert("Erro ao enviar mensagem."); 
-          setNovaMsg(tempMsg); // Devolve o texto em caso de erro
-      }
+          carregarDados();
+      } catch (e) { alert("Erro ao enviar."); setNovaMsg(tempMsg); }
   };
 
   const atualizarTicket = async (campo: string, valor: string) => {
       if (campo === 'status' && !confirm(`Alterar status para "${STATUS_MAP[valor] || valor}"?`)) return;
-      
       try {
           await fetch(`/api/suporte/tickets/${id}`, {
               method: 'PUT', headers: {'Content-Type':'application/json'},
               body: JSON.stringify({ [campo]: valor })
           });
           carregarDados();
-      } catch (e) { alert("Erro ao atualizar status."); }
+      } catch (e) { alert("Erro ao atualizar."); }
   };
 
-  // --- TRATAMENTO DE ESTADOS DE CARREGAMENTO E ERRO ---
-  if (loading) return (
-      <div className="flex h-screen items-center justify-center bg-slate-50 text-blue-600 gap-2">
-          <Loader2 className="animate-spin" size={32}/>
-          <span className="font-bold">Carregando atendimento...</span>
-      </div>
-  );
+  if (loading) return <div className="flex h-screen items-center justify-center bg-slate-50 text-blue-600 gap-2"><Loader2 className="animate-spin" size={32}/></div>;
+  if (error) return <div className="flex h-screen items-center justify-center text-red-500 gap-2"><AlertTriangle/> {error}</div>;
+  if (!ticket) return null;
 
-  if (error) return (
-      <div className="flex h-screen items-center justify-center bg-slate-50">
-          <div className="bg-white p-8 rounded-xl shadow-lg border border-red-100 text-center max-w-md">
-              <div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
-                  <AlertTriangle size={32}/>
-              </div>
-              <h2 className="text-xl font-bold text-slate-800 mb-2">Erro ao carregar</h2>
-              <p className="text-slate-500 mb-6">{error}</p>
-              <button onClick={() => router.push('/admin/suporte')} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 transition">
-                  Voltar para Lista
-              </button>
-          </div>
-      </div>
-  );
-
-  if (!ticket) return null; // Fallback final
-
-  // Filtro de Mensagens
-  const mensagensFiltradas = ticket.mensagens?.filter((m: any) => 
-      activeTab === 'INTERNO' ? m.interno : !m.interno
-  ) || [];
+  const mensagensFiltradas = ticket.mensagens?.filter((m: any) => activeTab === 'INTERNO' ? m.interno : !m.interno) || [];
 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden">
         
-        {/* SIDEBAR DE INFORMAÇÕES */}
-        <div className="w-80 bg-white border-r flex flex-col shrink-0 h-full shadow-lg z-10">
-            <div className="p-6 border-b">
-                <button onClick={() => router.back()} className="text-xs text-slate-500 hover:text-blue-600 mb-4 flex items-center gap-1 transition">
-                    <ArrowLeft size={12}/> Voltar
+        {/* SIDEBAR */}
+        <div className="w-80 bg-white border-r flex flex-col shrink-0 h-full shadow-lg z-20">
+            <div className="p-5 border-b">
+                <button onClick={() => router.back()} className="text-xs text-slate-500 hover:text-blue-600 mb-4 flex items-center gap-1 transition font-bold uppercase tracking-wide">
+                    <ArrowLeft size={14}/> Voltar
                 </button>
-                <div className="flex justify-between items-start">
-                    <h1 className="font-bold text-xl text-slate-800">#{ticket.protocolo}</h1>
-                    <div className={`flex items-center gap-1 text-xs font-mono px-2 py-1 rounded border ${['RESOLVIDO','FECHADO'].includes(ticket.status) ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                        <Clock size={12}/> {tempoDecorrido}
-                    </div>
+                <div className="flex justify-between items-start mb-2">
+                    <span className="font-mono text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded border">#{ticket.protocolo}</span>
+                    <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1"><Clock size={12}/> {tempoDecorrido}</div>
                 </div>
-                <p className="text-sm text-slate-600 mt-2 font-medium line-clamp-3 bg-slate-50 p-2 rounded border border-slate-100" title={ticket.assunto}>
-                    {ticket.assunto}
-                </p>
+                <h1 className="font-bold text-lg text-slate-800 leading-tight mb-2">{ticket.assunto}</h1>
                 
                 {ticket.anexoBase64 && (
-                    <a href={ticket.anexoBase64} download={ticket.anexoNome} className="mt-3 flex items-center gap-2 p-2 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold border border-blue-100 hover:bg-blue-100 transition w-full truncate">
-                        <Paperclip size={14}/> Anexo Inicial
+                    <a href={ticket.anexoBase64} download={ticket.anexoNome} className="flex items-center gap-2 p-2 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold border border-blue-100 hover:bg-blue-100 transition w-full truncate mt-3">
+                        <Paperclip size={14}/> Anexo da Abertura
                     </a>
                 )}
             </div>
 
-            {/* INSTRUÇÕES DO CATÁLOGO (Se existir) */}
+            {/* Instruções do Catálogo */}
             {ticket.catalogItem?.instrucoes && (
                 <div className="p-4 bg-yellow-50 border-b border-yellow-200">
                     <h4 className="text-[10px] font-black text-yellow-800 uppercase mb-2 flex items-center gap-2 tracking-wider">
-                        <Book size={12}/> Procedimento Padrão
+                        <Book size={12}/> Procedimento Interno
                     </h4>
                     <p className="text-xs text-yellow-900 leading-relaxed whitespace-pre-line bg-white/60 p-3 rounded border border-yellow-200/50">
                         {ticket.catalogItem.instrucoes}
@@ -233,114 +170,160 @@ export default function ResolucaoAdmin() {
             
             <div className="p-6 space-y-6 flex-1 overflow-y-auto">
                 <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Status do Atendimento</label>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Status</label>
                     <select className={`w-full p-2.5 rounded-lg border text-sm font-bold cursor-pointer outline-none transition ${STATUS_COLORS[ticket.status]}`}
                         value={ticket.status} onChange={(e) => atualizarTicket('status', e.target.value)}>
                         {Object.entries(STATUS_MAP).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Atendente Responsável</label>
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Atendente</label>
                     <select className="w-full p-2.5 rounded-lg border text-sm bg-white outline-blue-500 text-slate-700" value={ticket.atendenteId || ''} onChange={(e) => atualizarTicket('atendenteId', e.target.value)}>
-                        <option value="">-- Atribuir a --</option>
+                        <option value="">-- Não atribuído --</option>
                         {staffMembers.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}
                     </select>
                 </div>
-                <div className="pt-4 border-t text-sm">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Solicitante</span>
-                    <p className="font-bold text-slate-700 mt-1">{ticket.solicitante.nome}</p>
-                    <p className="text-slate-500 text-xs mb-2">{ticket.solicitante.email}</p>
-                    
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-4 block">Empresa Vinculada</span>
-                    <p className="font-bold text-blue-600 text-xs truncate bg-blue-50 p-2 rounded border border-blue-100 mt-1">
-                        {ticket.solicitante.empresa?.razaoSocial || 'Sem Empresa Vinculada'}
-                    </p>
+
+                <div className="pt-6 border-t mt-4">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold border border-slate-200">
+                            {ticket.solicitante.nome.charAt(0)}
+                        </div>
+                        <div>
+                            <p className="font-bold text-slate-700 text-sm">{ticket.solicitante.nome}</p>
+                            <p className="text-xs text-slate-400">{ticket.solicitante.email}</p>
+                        </div>
+                    </div>
+                    {ticket.solicitante.empresa && (
+                        <div className="bg-slate-50 p-3 rounded-lg border text-xs">
+                            <p className="font-bold text-slate-700 mb-1 flex items-center gap-1"><Shield size={12}/> Empresa</p>
+                            <p className="text-slate-600 truncate">{ticket.solicitante.empresa.razaoSocial}</p>
+                            <p className="font-mono text-slate-400 mt-0.5">{ticket.solicitante.empresa.documento}</p>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
 
-        {/* ÁREA DE CHAT */}
-        <div className="flex-1 flex flex-col bg-slate-100">
-            {/* ABAS */}
-            <div className="bg-white border-b flex px-6 shadow-sm z-10">
-                <button onClick={() => setActiveTab('CLIENTE')} className={`flex items-center gap-2 px-6 py-4 text-sm font-bold border-b-2 transition-colors ${activeTab === 'CLIENTE' ? 'border-blue-600 text-blue-600 bg-blue-50/30' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}>
-                    <MessageCircle size={18}/> Chat Cliente
-                </button>
-                <button onClick={() => setActiveTab('INTERNO')} className={`flex items-center gap-2 px-6 py-4 text-sm font-bold border-b-2 transition-colors ${activeTab === 'INTERNO' ? 'border-yellow-500 text-yellow-700 bg-yellow-50/30' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}>
-                    <Lock size={16}/> Notas Internas
-                </button>
-            </div>
-
-            <div className={`flex-1 p-6 overflow-y-auto space-y-4 custom-scrollbar ${activeTab === 'INTERNO' ? 'bg-yellow-50/30' : ''}`}>
-                <div className="flex justify-center mb-4">
-                    <div className="bg-slate-200/80 text-slate-500 text-[10px] px-3 py-1 rounded-full uppercase font-bold shadow-sm backdrop-blur-sm">
-                        {activeTab === 'INTERNO' ? '🔒 Área Exclusiva da Equipe' : '🌎 Visível para o Cliente'}
-                    </div>
+        {/* CHAT AREA */}
+        <div className="flex-1 flex flex-col bg-slate-100 relative">
+            
+            {/* TABS */}
+            <div className="bg-white border-b flex px-6 shadow-sm z-10 sticky top-0 justify-center">
+                <div className="flex gap-4">
+                    <button onClick={() => setActiveTab('CLIENTE')} className={`flex items-center gap-2 px-6 py-4 text-sm font-bold border-b-2 transition-colors ${activeTab === 'CLIENTE' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}>
+                        <MessageCircle size={18}/> Chat Cliente
+                    </button>
+                    <button onClick={() => setActiveTab('INTERNO')} className={`flex items-center gap-2 px-6 py-4 text-sm font-bold border-b-2 transition-colors ${activeTab === 'INTERNO' ? 'border-yellow-500 text-yellow-700 bg-yellow-50/50' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}>
+                        <Lock size={16}/> Notas Internas
+                    </button>
                 </div>
-
-                {mensagensFiltradas.length === 0 && (
-                    <div className="text-center text-slate-400 mt-10 italic flex flex-col items-center gap-2">
-                        <MessageCircle size={40} className="opacity-20"/>
-                        Nenhuma mensagem nesta aba.
-                    </div>
-                )}
-
-                {mensagensFiltradas.map((msg: any) => {
-                    const isStaff = ['ADMIN','SUPORTE','MASTER', 'SUPORTE_TI', 'CONTADOR'].includes(msg.usuario.role);
-                    return (
-                        <div key={msg.id} className={`flex w-full ${isStaff ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[75%] rounded-2xl p-4 shadow-sm relative border ${
-                                msg.interno ? 'bg-yellow-100 border-yellow-200 text-yellow-900' :
-                                isStaff ? 'bg-blue-600 text-white border-blue-600 rounded-br-none' : 
-                                'bg-white text-slate-800 border-slate-200 rounded-bl-none'
-                            }`}>
-                                <div className={`flex items-center gap-2 mb-1 text-[10px] uppercase font-bold tracking-wider ${isStaff && !msg.interno ? 'text-blue-200' : 'text-slate-400'}`}>
-                                    {isStaff ? <Shield size={10}/> : <User size={10}/>}
-                                    <span>{msg.usuario.nome}</span>
-                                    <span>• {new Date(msg.createdAt).toLocaleTimeString().slice(0,5)}</span>
-                                </div>
-                                <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.mensagem}</p>
-                                {msg.anexoBase64 && (
-                                    <div className={`mt-2 pt-2 border-t ${isStaff && !msg.interno ? 'border-white/20' : 'border-black/10'}`}>
-                                        <a href={msg.anexoBase64} download={msg.anexoNome} className={`flex items-center gap-2 text-xs font-bold underline ${isStaff && !msg.interno ? 'text-white' : 'text-blue-600'}`}>
-                                            <Download size={14}/> {msg.anexoNome}
-                                        </a>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })}
-                <div ref={msgEndRef} />
             </div>
 
-            {/* INPUT */}
+            {/* MENSAGENS (CONTAINER CENTRALIZADO) */}
+            <div className={`flex-1 p-6 overflow-y-auto custom-scrollbar ${activeTab === 'INTERNO' ? 'bg-yellow-50/30' : ''}`}>
+                <div className="max-w-4xl mx-auto space-y-6"> {/* <--- AQUI ESTÁ O TRUQUE DO TAMANHO */}
+                    <div className="flex justify-center mb-4">
+                        <div className={`text-[10px] px-3 py-1 rounded-full uppercase font-bold shadow-sm backdrop-blur-sm border ${
+                            activeTab === 'INTERNO' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-slate-200 text-slate-600 border-slate-300'
+                        }`}>
+                            {activeTab === 'INTERNO' ? '🔒 Área Privada da Equipe' : '🌎 Visível para o Cliente'}
+                        </div>
+                    </div>
+
+                    {mensagensFiltradas.length === 0 && (
+                        <div className="text-center text-slate-400 mt-20 flex flex-col items-center gap-3 opacity-50">
+                            <MessageCircle size={48} strokeWidth={1}/>
+                            <p>Nenhuma mensagem nesta aba.</p>
+                        </div>
+                    )}
+
+                    {mensagensFiltradas.map((msg: any) => {
+                        const isStaff = ['ADMIN','SUPORTE','MASTER', 'SUPORTE_TI', 'CONTADOR'].includes(msg.usuario.role);
+                        const isMe = isStaff;
+
+                        return (
+                            <div key={msg.id} className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`flex max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'} gap-3`}>
+                                    
+                                    {/* AVATAR */}
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 shadow-sm border ${
+                                        isMe ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-white text-slate-600 border-slate-200'
+                                    }`}>
+                                        {isMe ? <Shield size={14}/> : <User size={14}/>}
+                                    </div>
+
+                                    {/* BALÃO */}
+                                    <div className={`p-4 rounded-2xl shadow-sm relative text-sm border leading-relaxed whitespace-pre-wrap ${
+                                        msg.interno 
+                                            ? 'bg-yellow-100 border-yellow-200 text-yellow-900 rounded-tr-none' 
+                                            : isMe 
+                                                ? 'bg-blue-600 text-white border-blue-600 rounded-tr-none' 
+                                                : 'bg-white text-slate-700 border-slate-200 rounded-tl-none'
+                                    }`}>
+                                        
+                                        <div className={`flex items-center justify-between gap-4 mb-1 text-[10px] font-bold uppercase tracking-wider ${
+                                            msg.interno ? 'text-yellow-700' : isMe ? 'text-blue-200' : 'text-slate-400'
+                                        }`}>
+                                            <span>{msg.usuario.nome}</span>
+                                            <span>{new Date(msg.createdAt).toLocaleTimeString().slice(0,5)}</span>
+                                        </div>
+
+                                        {msg.mensagem}
+
+                                        {msg.anexoBase64 && (
+                                            <div className={`mt-3 pt-3 border-t ${msg.interno ? 'border-yellow-200' : isMe ? 'border-blue-500' : 'border-slate-100'}`}>
+                                                <a href={msg.anexoBase64} download={msg.anexoNome} className={`flex items-center gap-2 text-xs font-bold underline decoration-dotted ${
+                                                    msg.interno ? 'text-yellow-800' : isMe ? 'text-white' : 'text-blue-600'
+                                                }`}>
+                                                    <Download size={14}/> {msg.anexoNome}
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                    <div ref={msgEndRef} />
+                </div>
+            </div>
+
+            {/* INPUT AREA */}
             <div className={`p-4 border-t ${activeTab === 'INTERNO' ? 'bg-yellow-50 border-yellow-200' : 'bg-white'}`}>
-                <div className="max-w-4xl mx-auto">
+                <div className="max-w-3xl mx-auto"> {/* <--- LARGURA MÁXIMA CONTROLADA */}
                     {anexo && (
-                        <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-bold w-fit border border-blue-200 mb-2 animate-in slide-in-from-bottom-2">
+                        <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold w-fit border border-blue-200 mb-2 animate-in slide-in-from-bottom-2 shadow-sm">
                             <Paperclip size={12}/> {anexo.nome}
-                            <button onClick={() => setAnexo(null)} className="hover:text-red-500"><X size={12}/></button>
+                            <button onClick={() => setAnexo(null)} className="hover:text-red-500 ml-2"><X size={14}/></button>
                         </div>
                     )}
                     <div className="flex gap-3 items-end">
-                        <label className="p-3 text-slate-400 hover:text-blue-600 hover:bg-slate-100 rounded-xl cursor-pointer transition border border-transparent hover:border-slate-200 h-14 flex items-center" title="Anexar Arquivo">
+                        <label className="p-3 text-slate-400 hover:text-blue-600 hover:bg-slate-50 rounded-xl cursor-pointer transition border border-transparent hover:border-slate-200 h-12 flex items-center justify-center bg-white shadow-sm" title="Anexar">
                             <Paperclip size={20}/>
                             <input type="file" className="hidden" onChange={handleFile} accept="image/*,.pdf"/>
                         </label>
                         
-                        <textarea 
-                            className={`flex-1 p-3 border-2 rounded-xl outline-none resize-none h-14 transition focus:ring-0 ${activeTab === 'INTERNO' ? 'border-yellow-300 bg-yellow-50 focus:border-yellow-500 text-yellow-900 placeholder-yellow-600/50' : 'border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-400'}`}
-                            placeholder={activeTab === 'INTERNO' ? "Escreva uma nota interna (invisível ao cliente)..." : "Escreva sua resposta para o cliente..."}
-                            value={novaMsg} 
-                            onChange={e => setNovaMsg(e.target.value)}
-                            onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarMsg(); } }}
-                        />
+                        <div className="flex-1 relative">
+                            <textarea 
+                                className={`w-full p-3 pr-10 border rounded-xl outline-none resize-none h-12 min-h-[48px] max-h-32 transition shadow-sm focus:ring-2 focus:ring-offset-1 ${
+                                    activeTab === 'INTERNO' 
+                                    ? 'bg-white border-yellow-300 focus:ring-yellow-400 text-yellow-900 placeholder:text-yellow-400/70' 
+                                    : 'bg-white border-slate-200 focus:border-blue-400 focus:ring-blue-100 text-slate-700'
+                                }`}
+                                placeholder={activeTab === 'INTERNO' ? "Escreva uma nota interna (cliente NÃO vê)..." : "Escreva sua resposta..."}
+                                value={novaMsg} 
+                                onChange={e => setNovaMsg(e.target.value)}
+                                onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarMsg(); } }}
+                            />
+                        </div>
                         
                         <button 
                             onClick={enviarMsg} 
                             disabled={!novaMsg.trim() && !anexo}
-                            className={`h-14 w-14 rounded-xl transition flex items-center justify-center text-white shadow-md hover:shadow-lg disabled:opacity-50 disabled:shadow-none ${activeTab === 'INTERNO' ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                            className={`h-12 w-12 rounded-xl transition flex items-center justify-center text-white shadow-md hover:shadow-lg disabled:opacity-50 disabled:shadow-none ${
+                                activeTab === 'INTERNO' ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-blue-600 hover:bg-blue-700'
+                            }`}
                         >
                             <Send size={20}/>
                         </button>

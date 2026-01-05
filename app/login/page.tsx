@@ -11,7 +11,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: any) => {
+const handleSubmit = async (e: any) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -31,16 +31,21 @@ export default function Login() {
         return;
       }
 
-      localStorage.removeItem('isSupportMode'); 
-      localStorage.removeItem('adminBackUpId');
+      // === LIMPEZA TOTAL DE SESSÃO ANTERIOR ===
+      localStorage.clear(); // Limpa tudo para garantir
+      // Ou remova especificamente se preferir não limpar tudo:
+      // localStorage.removeItem('isSupportMode'); 
+      // localStorage.removeItem('adminBackUpId');
+      // localStorage.removeItem('empresaContextId'); // <--- O CULPADO ESTAVA AQUI
 
+      // Seta os novos dados
       localStorage.setItem('userId', dados.id); 
       localStorage.setItem('userRole', dados.role);
 
       if (dados.role === 'ADMIN' || dados.role === 'MASTER' || dados.role === 'SUPORTE') {
         router.push('/admin/dashboard');
       } else if (dados.role === 'CONTADOR') {
-        router.push('/contador'); // <--- NOVA ROTA
+        router.push('/contador');
       } else {
         router.push('/cliente/dashboard');
       }
