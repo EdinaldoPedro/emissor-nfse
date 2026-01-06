@@ -1,27 +1,35 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
+import axios from 'axios';
 import https from 'https';
 import fs from 'fs';
+import forge from 'node-forge';
 
+// URLs da API Nacional
 const URL_HOMOLOGACAO = "https://hom.nfse.gov.br/api/publica/emissao"; 
 const URL_PRODUCAO = "https://nfse.gov.br/api/publica/emissao";
 
 const prisma = new PrismaClient();
 const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
 
-// --- HELPER: SEGURANÇA E CONTEXTO (NOVO) ---
+// --- HELPER: SEGURANÇA E CONTEXTO (CORRIGIDO PARA ADMINS) ---
 async function getEmpresaContexto(userId: string, contextId: string | null) {
-    // 1. Busca o usuário logado para saber quem é
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return null;
 
-    // 2. Se não tem contexto (é o próprio dono acessando), retorna a empresa dele
+    // 1. Super-poderes para Staff (Permite Admin/Suporte atuar em qualquer empresa)
+    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+    if (isStaff && contextId && contextId !== 'null' && contextId !== 'undefined') {
+        return contextId; 
+    }
+
+    // 2. Se não tem contexto, usa a empresa do próprio usuário (Dono)
     if (!contextId || contextId === 'null' || contextId === 'undefined') {
         return user.empresaId;
     }
 
-    // 3. Se tem contexto (Contador acessando), verifica se existe vínculo APROVADO
+    // 3. Se tem contexto e não é Admin, verifica vínculo de contador
     const vinculo = await prisma.contadorVinculo.findUnique({
         where: {
             contadorId_empresaId: { contadorId: userId, empresaId: contextId }
@@ -29,72 +37,137 @@ async function getEmpresaContexto(userId: string, contextId: string | null) {
     });
 
     if (vinculo && vinculo.status === 'APROVADO') {
-        return contextId; // Permissão concedida! Retorna o ID da empresa do cliente.
+        return contextId; 
     }
 
-    return null; // Tentativa de acesso sem permissão
+    return null;
 }
 
-// --- FUNÇÃO DE ENVIO PARA A SEFAZ (MANTIDA IGUAL) ---
-async function enviarParaPortalNacional(dps: any, empresa: any) {
-    let pfxBuffer;
+// --- HELPER: EXTRAÇÃO DE CERTIFICADO (PFX -> PEM) ---
+function extrairCredenciaisDoPFX(pfxBuffer: Buffer, senha: string) {
     try {
-        if (empresa.certificadoA1 && empresa.certificadoA1.length > 200 && !empresa.certificadoA1.includes('/')) {
+        const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
+        const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, senha || '');
+
+        const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
+        // @ts-ignore
+        const cert = certBags[forge.pki.oids.certBag]?.[0]?.cert;
+
+        const keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
+        // @ts-ignore
+        let key = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
+
+        if (!key) {
+            const keyBags2 = p12.getBags({ bagType: forge.pki.oids.keyBag });
+            // @ts-ignore
+            key = keyBags2[forge.pki.oids.keyBag]?.[0]?.key;
+        }
+
+        if (!cert || !key) throw new Error("Certificado ou chave privada não encontrados no arquivo.");
+
+        return {
+            cert: forge.pki.certificateToPem(cert),
+            key: forge.pki.privateKeyToPem(key)
+        };
+
+    } catch (e: any) {
+        if (e.message.includes('password') || e.message.includes('MAC')) {
+            throw new Error("Senha do certificado incorreta.");
+        }
+        throw new Error(`Erro ao ler PFX: ${e.message}`);
+    }
+}
+
+// --- FUNÇÃO DE ENVIO ---
+async function enviarParaPortalNacional(dps: any, empresa: any) {
+    let pfxBuffer: Buffer;
+
+    try {
+        if (empresa.certificadoA1 && empresa.certificadoA1.length > 250) {
             pfxBuffer = Buffer.from(empresa.certificadoA1, 'base64');
         } else {
-            if (!empresa.certificadoA1 || !fs.existsSync(empresa.certificadoA1)) throw new Error(`Certificado não encontrado.`);
+            if (!empresa.certificadoA1 || !fs.existsSync(empresa.certificadoA1)) {
+                throw new Error(`Arquivo do certificado não encontrado.`);
+            }
             pfxBuffer = fs.readFileSync(empresa.certificadoA1);
         }
-    } catch (e) {
-        throw new Error("Falha ao ler o certificado digital.");
+    } catch (e: any) {
+        throw new Error(`Erro ao carregar arquivo do certificado: ${e.message}`);
+    }
+
+    let credenciais;
+    try {
+        credenciais = extrairCredenciaisDoPFX(pfxBuffer, empresa.senhaCertificado);
+    } catch (e: any) {
+        return { 
+            sucesso: false, 
+            motivo: "Erro no Certificado", 
+            listaErros: [{ codigo: "CERT_ERR", mensagem: e.message }] 
+        };
     }
 
     const httpsAgent = new https.Agent({
-        pfx: pfxBuffer,
-        passphrase: empresa.senhaCertificado,
-        rejectUnauthorized: false 
+        cert: credenciais.cert,
+        key: credenciais.key,
+        rejectUnauthorized: false,
+        keepAlive: true,
+        timeout: 120000 
     });
 
     const url = empresa.ambiente === 'PRODUCAO' ? URL_PRODUCAO : URL_HOMOLOGACAO;
 
     try {
-        const response = await fetch(url, {
-            method: 'POST',
+        const response = await axios.post(url, dps, {
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Basic ' + Buffer.from(`${cleanString(empresa.documento)}:${empresa.senhaCertificado}`).toString('base64') 
             },
-            body: JSON.stringify(dps),
-            // @ts-ignore
-            agent: httpsAgent 
+            httpsAgent: httpsAgent,
+            timeout: 120000 
         });
 
-        const responseText = await response.text();
-        let data;
-        try { data = JSON.parse(responseText); } catch (e) { throw new Error(`Erro não-JSON da Sefaz: ${responseText.substring(0, 200)}`); }
-
-        if (!response.ok) {
-            return { sucesso: false, motivo: "Rejeição Sefaz", listaErros: data.erros || [{ codigo: response.status, mensagem: data.message }] };
-        }
+        const data = response.data;
 
         return {
             sucesso: true,
             notaGov: {
-                numero: data.numeroNfse || Math.floor(Math.random() * 100000), 
+                numero: data.numeroNfse || 'PENDENTE', 
                 chave: data.chaveAcesso,
                 protocolo: data.protocolo,
                 xml: data.xmlProcessado
             }
         };
+
     } catch (error: any) {
-        return { sucesso: false, motivo: "Falha de Conexão", listaErros: [{ codigo: "NET_ERR", mensagem: error.message }] };
+        console.error("ERRO PORTAL NACIONAL:", error.message);
+
+        if (error.response) {
+            const data = error.response.data;
+            return { 
+                sucesso: false, 
+                motivo: "Rejeição do Portal Nacional", 
+                listaErros: data.erros || [{ codigo: error.response.status, mensagem: JSON.stringify(data) }] 
+            };
+        } else if (error.request) {
+            return { 
+                sucesso: false, 
+                motivo: "Sem resposta do Portal Nacional (Timeout)", 
+                listaErros: [{ codigo: "TIMEOUT", mensagem: "O servidor do Portal Nacional demorou a responder." }] 
+            };
+        } else {
+            return { 
+                sucesso: false, 
+                motivo: "Erro Interno do Emissor", 
+                listaErros: [{ codigo: "SETUP_ERR", mensagem: error.message }] 
+            };
+        }
     }
 }
 
-// --- API POST (EMISSÃO COM CONTEXTO) ---
+// --- API POST (ENDPOINT PRINCIPAL) ---
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id');
-  const contextId = request.headers.get('x-empresa-id'); // Header do contador
+  const contextId = request.headers.get('x-empresa-id'); 
   
   let vendaIdLog = null;
   let empresaIdLog = null;
@@ -105,24 +178,20 @@ export async function POST(request: Request) {
 
     if (!userId) throw new Error("Usuário não identificado.");
 
-    // 1. Resolve a Empresa Emissora (Prestador) usando o Contexto
     const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
     if (!empresaIdAlvo) throw new Error("Acesso negado ou empresa não identificada.");
 
     empresaIdLog = empresaIdAlvo;
 
-    // Busca dados completos do Prestador (Empresa do Cliente)
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
     if (!prestador) throw new Error("Dados da empresa emissora não encontrados.");
 
-    // Busca o Tomador (Cliente do Cliente)
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!tomador) throw new Error('Cliente tomador não encontrado.');
 
-    // 2. Criar Venda (Vinculada à Empresa do Contexto)
     const venda = await prisma.venda.create({
         data: {
-            empresaId: prestador.id, // <--- Importante: Venda fica na empresa certa
+            empresaId: prestador.id,
             clienteId: tomador.id,
             valor: parseFloat(valor),
             descricao: descricao,
@@ -131,7 +200,6 @@ export async function POST(request: Request) {
     });
     vendaIdLog = venda.id; 
 
-    // === 3. DE-PARA INTELIGENTE ===
     const cnaeLimpo = cleanString(codigoCnae);
     const isMEI = prestador.regimeTributario === 'MEI';
     
@@ -143,15 +211,10 @@ export async function POST(request: Request) {
     });
 
     if (regraFiscal) {
-        if (regraFiscal.itemLc && regraFiscal.itemLc.trim() !== '') {
-            itemLc = regraFiscal.itemLc;
-        }
-        if (regraFiscal.codigoTributacaoNacional && regraFiscal.codigoTributacaoNacional.trim() !== '') {
-            codigoTribNacional = regraFiscal.codigoTributacaoNacional;
-        }
+        if (regraFiscal.itemLc) itemLc = regraFiscal.itemLc;
+        if (regraFiscal.codigoTributacaoNacional) codigoTribNacional = regraFiscal.codigoTributacaoNacional;
     }
 
-    // 4. Montagem do JSON (DPS)
     const infDPS = {
         versao: "1.00",
         ambiente: prestador.ambiente === 'PRODUCAO' ? '1' : '2',
@@ -160,7 +223,7 @@ export async function POST(request: Request) {
         subst: { subst: "2" },
         prestador: {
             cpfCNPJ: { cnpj: cleanString(prestador.documento) },
-            inscricaoMunicipal: cleanString(prestador.inscricaoMunicipal),
+            inscricaoMunicipal: cleanString(prestador.inscricaoMunicipal) || "00000", 
             regimeTributario: isMEI ? 4 : 1, 
         },
         tomador: {
@@ -174,7 +237,10 @@ export async function POST(request: Request) {
             endereco: {
                 codigoMunicipio: tomador.codigoIbge || "9999999",
                 cep: cleanString(tomador.cep),
-                uf: tomador.uf
+                uf: tomador.uf,
+                logradouro: tomador.logradouro || undefined,
+                numero: tomador.numero || undefined,
+                bairro: tomador.bairro || undefined
             }
         },
         servico: {
@@ -198,17 +264,15 @@ export async function POST(request: Request) {
         }
     };
 
-    // 5. Log
     await createLog({
         level: 'INFO', action: 'DPS_GERADA',
-        message: `Emissão por ${userId} (Contexto: ${empresaIdAlvo})`,
+        message: `Emissão iniciada por ${userId}`,
         empresaId: prestador.id,
         vendaId: venda.id,
         details: infDPS 
     });
 
-    // 6. Envio
-    if (!prestador.certificadoA1) throw new Error("Certificado Digital não cadastrado nesta empresa.");
+    if (!prestador.certificadoA1) throw new Error("Certificado Digital não cadastrado.");
     
     const respostaPortal = await enviarParaPortalNacional(infDPS, prestador);
 
@@ -216,23 +280,26 @@ export async function POST(request: Request) {
         await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
         
         await createLog({
-            level: 'ERRO', action: 'REJEICAO_SEFAZ',
-            message: `Sefaz rejeitou: ${respostaPortal.motivo}`,
+            level: 'ERRO', action: 'ERRO_EMISSAO_PORTAL',
+            message: `Falha: ${respostaPortal.motivo}`,
             empresaId: prestador.id,
             vendaId: venda.id,
             details: respostaPortal.listaErros
         });
-        throw new Error("Erro na comunicação com a Sefaz.");
+        
+        return NextResponse.json({ 
+            error: "Emissão falhou. Verifique os logs.",
+            details: respostaPortal.listaErros 
+        }, { status: 400 });
     }
 
-    // 7. Sucesso - Salva Nota
     const dadosGov = respostaPortal.notaGov;
     const novaNota = await prisma.notaFiscal.create({
       data: {
         vendaId: venda.id,
-        empresaId: prestador.id, // Vínculo correto
+        empresaId: prestador.id,
         clienteId: tomador.id,
-        numero: parseInt(dadosGov.numero),
+        numero: parseInt(dadosGov.numero) || 0,
         valor: parseFloat(valor),
         descricao: descricao,
         prestadorCnpj: cleanString(prestador.documento),
@@ -266,100 +333,96 @@ export async function POST(request: Request) {
   }
 }
 
-// --- API GET (LISTAGEM COM CONTEXTO) ---
+// --- API GET (LISTAGEM) ---
 export async function GET(request: Request) {
-  const userId = request.headers.get('x-user-id');
-  const contextId = request.headers.get('x-empresa-id'); // Header do contador
-
-  const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '1');
-  const limit = parseInt(searchParams.get('limit') || '10');
-  const search = searchParams.get('search') || '';
-  const type = searchParams.get('type') || 'all';
-
-  if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
-
-  try {
-    // 1. Resolve qual empresa estamos vendo (Contexto ou Própria)
-    const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
-
-    // Se não encontrou empresa ou não tem permissão, retorna vazio
-    if (!empresaIdAlvo) return NextResponse.json([], { status: 200 });
-
-    const skip = (page - 1) * limit;
-
-    const whereClause: any = {
-        empresaId: empresaIdAlvo, // <--- Filtra pela empresa correta
-        ...(search && {
-            OR: [
-                { cliente: { razaoSocial: { contains: search } } },
-                { cliente: { documento: { contains: search } } },
-                ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
-            ]
-        })
-    };
-
-    if (type === 'valid') {
-        whereClause.status = { in: ['CONCLUIDA', 'CANCELADA'] };
+    const userId = request.headers.get('x-user-id');
+    const contextId = request.headers.get('x-empresa-id');
+  
+    const { searchParams } = new URL(request.url);
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const search = searchParams.get('search') || '';
+    const type = searchParams.get('type') || 'all';
+  
+    if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
+  
+    try {
+      const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
+      if (!empresaIdAlvo) return NextResponse.json([], { status: 200 });
+  
+      const skip = (page - 1) * limit;
+  
+      const whereClause: any = {
+          empresaId: empresaIdAlvo,
+          ...(search && {
+              OR: [
+                  { cliente: { razaoSocial: { contains: search } } },
+                  { cliente: { documento: { contains: search } } },
+                  ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
+              ]
+          })
+      };
+  
+      if (type === 'valid') {
+          whereClause.status = { in: ['CONCLUIDA', 'CANCELADA'] };
+      }
+  
+      const [vendas, total] = await prisma.$transaction([
+          prisma.venda.findMany({
+              where: whereClause,
+              take: limit,
+              skip: skip,
+              orderBy: { createdAt: 'desc' },
+              include: {
+                  cliente: { select: { razaoSocial: true, documento: true } },
+                  notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, codigoServico: true } },
+                  logs: {
+                      where: { level: 'ERRO' },
+                      orderBy: { createdAt: 'desc' },
+                      take: 1,
+                      select: { message: true }
+                  }
+              }
+          }),
+          prisma.venda.count({ where: whereClause })
+      ]);
+  
+      const cnaesEncontrados = Array.from(new Set(
+          vendas.flatMap(v => v.notas.map(n => n.cnae)).filter(Boolean)
+      ));
+  
+      const infosCnae = await prisma.globalCnae.findMany({
+          where: { codigo: { in: cnaesEncontrados as string[] } },
+          select: { codigo: true, itemLc: true }
+      });
+  
+      const mapaItemLc = new Map(infosCnae.map(i => [i.codigo, i.itemLc]));
+  
+      const dadosFinais = vendas.map(v => {
+          const nota = v.notas[0];
+          let itemLcDisplay = '---';
+  
+          if (nota && nota.cnae) {
+              const doBanco = mapaItemLc.get(nota.cnae);
+              if (doBanco) itemLcDisplay = doBanco;
+              else if (nota.codigoServico && nota.codigoServico.length >= 4) {
+                 itemLcDisplay = `${nota.codigoServico.substring(0,2)}.${nota.codigoServico.substring(2,4)}`;
+              }
+          }
+  
+          return {
+              ...v,
+              notas: v.notas.map(n => ({ ...n, itemLc: itemLcDisplay })),
+              motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
+          };
+      });
+  
+      return NextResponse.json({
+          data: dadosFinais,
+          meta: { total, page, totalPages: Math.ceil(total / limit) }
+      });
+  
+    } catch (error) {
+      return NextResponse.json({ error: 'Erro ao buscar notas' }, { status: 500 });
     }
-
-    const [vendas, total] = await prisma.$transaction([
-        prisma.venda.findMany({
-            where: whereClause,
-            take: limit,
-            skip: skip,
-            orderBy: { createdAt: 'desc' },
-            include: {
-                cliente: { select: { razaoSocial: true, documento: true } },
-                notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, codigoServico: true } },
-                logs: {
-                    where: { level: 'ERRO' },
-                    orderBy: { createdAt: 'desc' },
-                    take: 1,
-                    select: { message: true }
-                }
-            }
-        }),
-        prisma.venda.count({ where: whereClause })
-    ]);
-
-    // Otimização para buscar nome do item LC
-    const cnaesEncontrados = Array.from(new Set(
-        vendas.flatMap(v => v.notas.map(n => n.cnae)).filter(Boolean)
-    ));
-
-    const infosCnae = await prisma.globalCnae.findMany({
-        where: { codigo: { in: cnaesEncontrados as string[] } },
-        select: { codigo: true, itemLc: true }
-    });
-
-    const mapaItemLc = new Map(infosCnae.map(i => [i.codigo, i.itemLc]));
-
-    const dadosFinais = vendas.map(v => {
-        const nota = v.notas[0];
-        let itemLcDisplay = '---';
-
-        if (nota && nota.cnae) {
-            const doBanco = mapaItemLc.get(nota.cnae);
-            if (doBanco) itemLcDisplay = doBanco;
-            else if (nota.codigoServico && nota.codigoServico.length >= 4) {
-               itemLcDisplay = `${nota.codigoServico.substring(0,2)}.${nota.codigoServico.substring(2,4)}`;
-            }
-        }
-
-        return {
-            ...v,
-            notas: v.notas.map(n => ({ ...n, itemLc: itemLcDisplay })),
-            motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
-        };
-    });
-
-    return NextResponse.json({
-        data: dadosFinais,
-        meta: { total, page, totalPages: Math.ceil(total / limit) }
-    });
-
-  } catch (error) {
-    return NextResponse.json({ error: 'Erro ao buscar notas' }, { status: 500 });
-  }
 }
