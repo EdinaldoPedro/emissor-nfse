@@ -45,7 +45,7 @@ export abstract class BaseStrategy {
         }
     }
 
-    // --- ASSINATURA CORRIGIDA (PADRÃO VÁLIDO IGUAL AO EXEMPLO) ---
+    // --- ASSINATURA AJUSTADA (Visual Sefaz + SHA1) ---
     protected assinarXML(xml: string, tagId: string, empresa: any): string {
         try {
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
@@ -61,34 +61,42 @@ export abstract class BaseStrategy {
             
             let nodeToSign = match[0]; 
 
-            // 2. TRUQUE DO HASH (Virtual Injection)
-            // O arquivo enviado NÃO terá xmlns na tag infDPS (para não ser redundante),
-            // mas o Hash TEM que ser calculado como se tivesse (C14N Exclusive).
+            // 2. INJEÇÃO VIRTUAL (Se não tiver namespace, injeta para o hash)
+            // Isso garante que o hash contemple o namespace mesmo se o XML não tiver (herança)
             if (!nodeToSign.includes('xmlns="http://www.sped.fazenda.gov.br/nfse"')) {
-                // Injeta o xmlns virtualmente apenas para o hash
                 nodeToSign = nodeToSign.replace('<infDPS', '<infDPS xmlns="http://www.sped.fazenda.gov.br/nfse"');
             }
 
-            // 3. Calcula Digest (SHA-256)
-            const shasum = crypto.createHash('sha256');
+            // 3. Digest SHA-1
+            const shasum = crypto.createHash('sha1');
             shasum.update(nodeToSign, 'utf8');
             const digestValue = shasum.digest('base64');
 
-            // 4. Monta SignedInfo (EXATAMENTE IGUAL AO XML VÁLIDO)
-            // - Sem espaços entre tags
-            // - Com xmlns na tag SignedInfo
-            // - Algoritmo xml-exc-c14n# (SEM WithComments)
-            const signedInfo = `<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#"><CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"></CanonicalizationMethod><SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"></SignatureMethod><Reference URI="#${tagId}"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></Transform><Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"></Transform></Transforms><DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></DigestMethod><DigestValue>${digestValue}</DigestValue></Reference></SignedInfo>`;
+            // 4. Monta o SignedInfo
+            // MUDANÇA: Usando tags self-closing COM ESPAÇO ( />) igual ao XML válido da Sefaz.
+            const signedInfoContent = 
+`<CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" />` +
+`<SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1" />` +
+`<Reference URI="#${tagId}">` +
+`<Transforms>` +
+`<Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" />` +
+`<Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" />` +
+`</Transforms>` +
+`<DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1" />` +
+`<DigestValue>${digestValue}</DigestValue>` +
+`</Reference>`;
 
-            // 5. Assina
-            const signer = crypto.createSign('RSA-SHA256');
-            signer.update(signedInfo);
+            // 5. Assina (Com Namespace no SignedInfo para cálculo)
+            const signedInfoToSign = `<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">${signedInfoContent}</SignedInfo>`;
+            
+            const signer = crypto.createSign('RSA-SHA1');
+            signer.update(signedInfoToSign);
             const signatureValue = signer.sign(credenciais.key, 'base64');
 
-            // 6. Monta Bloco Signature
-            const signatureXML = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">${signedInfo}<SignatureValue>${signatureValue}</SignatureValue><KeyInfo><X509Data><X509Certificate>${certClean}</X509Certificate></X509Data></KeyInfo></Signature>`;
+            // 6. Monta o XML Final (Sem namespace redundante no SignedInfo para evitar E999)
+            // AQUI MANTEMOS A ESTRUTURA LIMPA PARA ENVIO
+            const signatureXML = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo>${signedInfoContent}</SignedInfo><SignatureValue>${signatureValue}</SignatureValue><KeyInfo><X509Data><X509Certificate>${certClean}</X509Certificate></X509Data></KeyInfo></Signature>`;
 
-            // 7. Insere no XML Final
             return xml.replace('</DPS>', `${signatureXML}</DPS>`);
 
         } catch (e: any) {

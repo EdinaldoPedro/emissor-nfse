@@ -6,6 +6,7 @@ export class MeiRecifeStrategy extends BaseStrategy implements IEmissorStrategy 
     async executar(dados: IDadosEmissao): Promise<IResultadoEmissao> {
         const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente } = dados;
 
+        // === 1. VALIDAÇÃO ===
         try {
             this.validarCertificado(prestador);
             this.validarTomador(tomador); 
@@ -34,6 +35,7 @@ export class MeiRecifeStrategy extends BaseStrategy implements IEmissorStrategy 
             };
         }
 
+        // === 2. DADOS ===
         const dataAgora = new Date();
         const dhEmi = this.formatarDataSefaz(dataAgora); 
         const dCompet = dhEmi.split('T')[0]; 
@@ -52,8 +54,10 @@ export class MeiRecifeStrategy extends BaseStrategy implements IEmissorStrategy 
         const tomadorCNPJ = this.cleanString(tomador.documento);
         const tomadorCEP = this.cleanString(tomador.cep);
         
-        // XML MINIFICADO SEM NAMESPACE REDUNDANTE (BaseStrategy injeta virtualmente para o hash)
-        const xml = `<?xml version="1.0" encoding="UTF-8"?><DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00"><infDPS Id="${idDps}"><tpAmb>${tpAmb}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>EmissorWeb_1.0</verAplic><serie>${parseInt(serie)}</serie><nDPS>${nDps}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${ibgePrestador}</cLocEmi><prest><CNPJ>${cnpjPrestador}</CNPJ>${prestador.telefone ? `<fone>${this.cleanString(prestador.telefone)}</fone>` : ''}${prestador.email ? `<email>${prestador.email}</email>` : ''}<regTrib><opSimpNac>2</opSimpNac><regEspTrib>0</regEspTrib></regTrib></prest><toma><CNPJ>${tomadorCNPJ}</CNPJ><xNome>${tomador.razaoSocial}</xNome><end><endNac><cMun>${this.cleanString(tomador.codigoIbge)}</cMun><CEP>${tomadorCEP}</CEP></endNac><xLgr>${tomador.logradouro}</xLgr><nro>${tomador.numero}</nro>${tomador.complemento ? `<xCpl>${tomador.complemento}</xCpl>` : ''}<xBairro>${tomador.bairro || 'Centro'}</xBairro></end>${tomador.email ? `<email>${tomador.email}</email>` : ''}${tomador.telefone ? `<fone>${this.cleanString(tomador.telefone)}</fone>` : ''}</toma><serv><locPrest><cLocPrestacao>${ibgePrestador}</cLocPrestacao></locPrest><cServ><cTribNac>${this.cleanString(servico.codigoTribNacional)}</cTribNac><xDescServ>${servico.descricao}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valServ}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>1</tpRetISSQN></tribMun><totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores></infDPS></DPS>`;
+        // === 3. MONTAGEM XML (COM NAMESPACE EXPLICITO) ===
+        // MUDANÇA: Adicionei xmlns na infDPS. Isso garante que o XML seja "self-contained" 
+        // e o hash calculado por nós (que já injeta o xmlns) bata com o da Sefaz.
+        const xml = `<?xml version="1.0" encoding="UTF-8"?><DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00"><infDPS xmlns="http://www.sped.fazenda.gov.br/nfse" Id="${idDps}"><tpAmb>${tpAmb}</tpAmb><dhEmi>${dhEmi}</dhEmi><verAplic>EmissorWeb_1.0</verAplic><serie>${parseInt(serie)}</serie><nDPS>${nDps}</nDPS><dCompet>${dCompet}</dCompet><tpEmit>1</tpEmit><cLocEmi>${ibgePrestador}</cLocEmi><prest><CNPJ>${cnpjPrestador}</CNPJ>${prestador.telefone ? `<fone>${this.cleanString(prestador.telefone)}</fone>` : ''}${prestador.email ? `<email>${prestador.email}</email>` : ''}<regTrib><opSimpNac>2</opSimpNac><regEspTrib>0</regEspTrib></regTrib></prest><toma><CNPJ>${tomadorCNPJ}</CNPJ><xNome>${tomador.razaoSocial}</xNome><end><endNac><cMun>${this.cleanString(tomador.codigoIbge)}</cMun><CEP>${tomadorCEP}</CEP></endNac><xLgr>${tomador.logradouro}</xLgr><nro>${tomador.numero}</nro>${tomador.complemento ? `<xCpl>${tomador.complemento}</xCpl>` : ''}<xBairro>${tomador.bairro || 'Centro'}</xBairro></end>${tomador.email ? `<email>${tomador.email}</email>` : ''}${tomador.telefone ? `<fone>${this.cleanString(tomador.telefone)}</fone>` : ''}</toma><serv><locPrest><cLocPrestacao>${ibgePrestador}</cLocPrestacao></locPrest><cServ><cTribNac>${this.cleanString(servico.codigoTribNacional)}</cTribNac><xDescServ>${servico.descricao}</xDescServ></cServ></serv><valores><vServPrest><vServ>${valServ}</vServ></vServPrest><trib><tribMun><tribISSQN>1</tribISSQN><tpRetISSQN>1</tpRetISSQN></tribMun><totTrib><indTotTrib>0</indTotTrib></totTrib></trib></valores></infDPS></DPS>`;
 
         try {
             const xmlAssinado = this.assinarXML(xml, idDps, prestador);
