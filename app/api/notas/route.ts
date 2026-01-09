@@ -5,129 +5,111 @@ import axios from 'axios';
 import https from 'https';
 import fs from 'fs';
 import forge from 'node-forge';
+import zlib from 'zlib'; // <--- IMPORTANTE: GZIP
 
 // URLs da API Nacional
-const URL_HOMOLOGACAO = "https://hom.nfse.gov.br/api/publica/emissao"; 
-const URL_PRODUCAO = "https://nfse.gov.br/api/publica/emissao";
+const URL_HOMOLOGACAO = "https://sefin.producaorestrita.nfse.gov.br/SefinNacional/nfse"; 
+const URL_PRODUCAO = "https://sefin.nfse.gov.br/SefinNacional/nfse";
 
 const prisma = new PrismaClient();
 const cleanString = (str: string | null) => str ? str.replace(/\D/g, '') : '';
 
-// --- HELPER: SEGURANÇA E CONTEXTO (CORRIGIDO PARA ADMINS) ---
+// --- HELPER: SEGURANÇA E CONTEXTO ---
 async function getEmpresaContexto(userId: string, contextId: string | null) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return null;
 
-    // 1. Super-poderes para Staff (Permite Admin/Suporte atuar em qualquer empresa)
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
     if (isStaff && contextId && contextId !== 'null' && contextId !== 'undefined') {
         return contextId; 
     }
 
-    // 2. Se não tem contexto, usa a empresa do próprio usuário (Dono)
     if (!contextId || contextId === 'null' || contextId === 'undefined') {
         return user.empresaId;
     }
 
-    // 3. Se tem contexto e não é Admin, verifica vínculo de contador
     const vinculo = await prisma.contadorVinculo.findUnique({
-        where: {
-            contadorId_empresaId: { contadorId: userId, empresaId: contextId }
-        }
+        where: { contadorId_empresaId: { contadorId: userId, empresaId: contextId } }
     });
 
-    if (vinculo && vinculo.status === 'APROVADO') {
-        return contextId; 
-    }
-
+    if (vinculo && vinculo.status === 'APROVADO') return contextId; 
     return null;
 }
 
-// --- HELPER: EXTRAÇÃO DE CERTIFICADO (PFX -> PEM) ---
+// --- HELPER: EXTRAÇÃO DE CERTIFICADO ---
 function extrairCredenciaisDoPFX(pfxBuffer: Buffer, senha: string) {
     try {
         const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
         const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, senha || '');
-
         const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
         // @ts-ignore
         const cert = certBags[forge.pki.oids.certBag]?.[0]?.cert;
-
         const keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
         // @ts-ignore
         let key = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
-
         if (!key) {
             const keyBags2 = p12.getBags({ bagType: forge.pki.oids.keyBag });
             // @ts-ignore
             key = keyBags2[forge.pki.oids.keyBag]?.[0]?.key;
         }
-
-        if (!cert || !key) throw new Error("Certificado ou chave privada não encontrados no arquivo.");
-
+        if (!cert || !key) throw new Error("Certificado/Chave não encontrados.");
         return {
             cert: forge.pki.certificateToPem(cert),
             key: forge.pki.privateKeyToPem(key)
         };
-
     } catch (e: any) {
-        if (e.message.includes('password') || e.message.includes('MAC')) {
-            throw new Error("Senha do certificado incorreta.");
-        }
-        throw new Error(`Erro ao ler PFX: ${e.message}`);
+        throw new Error(`Erro PFX: ${e.message}`);
     }
 }
 
-// --- FUNÇÃO DE ENVIO ---
-async function enviarParaPortalNacional(dps: any, empresa: any) {
+// --- FUNÇÃO DE ENVIO (GZIP + BASE64) ---
+async function enviarParaPortalNacional(xmlDps: string, empresa: any) {
     let pfxBuffer: Buffer;
-
     try {
         if (empresa.certificadoA1 && empresa.certificadoA1.length > 250) {
             pfxBuffer = Buffer.from(empresa.certificadoA1, 'base64');
         } else {
-            if (!empresa.certificadoA1 || !fs.existsSync(empresa.certificadoA1)) {
-                throw new Error(`Arquivo do certificado não encontrado.`);
-            }
+            if (!empresa.certificadoA1) throw new Error("Arquivo não encontrado");
             pfxBuffer = fs.readFileSync(empresa.certificadoA1);
         }
-    } catch (e: any) {
-        throw new Error(`Erro ao carregar arquivo do certificado: ${e.message}`);
-    }
+    } catch (e: any) { return { sucesso: false, motivo: `Erro leitura PFX: ${e.message}`, listaErros: [] }; }
 
     let credenciais;
-    try {
-        credenciais = extrairCredenciaisDoPFX(pfxBuffer, empresa.senhaCertificado);
-    } catch (e: any) {
-        return { 
-            sucesso: false, 
-            motivo: "Erro no Certificado", 
-            listaErros: [{ codigo: "CERT_ERR", mensagem: e.message }] 
-        };
-    }
+    try { credenciais = extrairCredenciaisDoPFX(pfxBuffer, empresa.senhaCertificado); } 
+    catch (e: any) { return { sucesso: false, motivo: "Certificado inválido", listaErros: [{ codigo: "CERT", mensagem: e.message }] }; }
 
     const httpsAgent = new https.Agent({
         cert: credenciais.cert,
         key: credenciais.key,
         rejectUnauthorized: false,
-        keepAlive: true,
-        timeout: 120000 
+        keepAlive: true
     });
 
     const url = empresa.ambiente === 'PRODUCAO' ? URL_PRODUCAO : URL_HOMOLOGACAO;
 
     try {
-        const response = await axios.post(url, dps, {
+        console.log(`[DEBUG] Preparando GZIP para: ${url}`);
+
+        // 1. GZIP do XML
+        const xmlBuffer = Buffer.from(xmlDps, 'utf-8');
+        const xmlGzip = zlib.gzipSync(xmlBuffer);
+        
+        // 2. Base64
+        const arquivoBase64 = xmlGzip.toString('base64');
+
+        // 3. JSON Wrapper
+        const payload = { arquivo: arquivoBase64 };
+
+        const response = await axios.post(url, payload, {
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json', // Agora sim JSON
                 'Authorization': 'Basic ' + Buffer.from(`${cleanString(empresa.documento)}:${empresa.senhaCertificado}`).toString('base64') 
             },
             httpsAgent: httpsAgent,
-            timeout: 120000 
+            timeout: 60000
         });
 
         const data = response.data;
-
         return {
             sucesso: true,
             notaGov: {
@@ -139,36 +121,33 @@ async function enviarParaPortalNacional(dps: any, empresa: any) {
         };
 
     } catch (error: any) {
-        console.error("ERRO PORTAL NACIONAL:", error.message);
+        let erroMsg = error.message;
+        let erroCodigo = "NET";
+        let erroDetalhe = JSON.stringify(error.response?.data || {});
 
         if (error.response) {
-            const data = error.response.data;
-            return { 
-                sucesso: false, 
-                motivo: "Rejeição do Portal Nacional", 
-                listaErros: data.erros || [{ codigo: error.response.status, mensagem: JSON.stringify(data) }] 
-            };
-        } else if (error.request) {
-            return { 
-                sucesso: false, 
-                motivo: "Sem resposta do Portal Nacional (Timeout)", 
-                listaErros: [{ codigo: "TIMEOUT", mensagem: "O servidor do Portal Nacional demorou a responder." }] 
-            };
-        } else {
-            return { 
-                sucesso: false, 
-                motivo: "Erro Interno do Emissor", 
-                listaErros: [{ codigo: "SETUP_ERR", mensagem: error.message }] 
-            };
+            erroCodigo = String(error.response.status);
+            erroMsg = `Erro HTTP ${error.response.status}`;
+            console.error("Erro API Body:", error.response.data);
         }
+
+        return { 
+            sucesso: false, 
+            motivo: erroMsg, 
+            listaErros: [{ 
+                codigo: erroCodigo, 
+                mensagem: erroDetalhe, 
+                // Salva o XML original para lermos no log (NÃO o base64)
+                xmlOriginal: xmlDps 
+            }] 
+        };
     }
 }
 
-// --- API POST (ENDPOINT PRINCIPAL) ---
+// --- API POST (EMISSÃO) ---
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextId = request.headers.get('x-empresa-id'); 
-  
   let vendaIdLog = null;
   let empresaIdLog = null;
 
@@ -177,17 +156,13 @@ export async function POST(request: Request) {
     const { clienteId, valor, descricao, codigoCnae } = body;
 
     if (!userId) throw new Error("Usuário não identificado.");
-
     const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
-    if (!empresaIdAlvo) throw new Error("Acesso negado ou empresa não identificada.");
-
+    if (!empresaIdAlvo) throw new Error("Acesso negado.");
     empresaIdLog = empresaIdAlvo;
 
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
-    if (!prestador) throw new Error("Dados da empresa emissora não encontrados.");
-
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
-    if (!tomador) throw new Error('Cliente tomador não encontrado.');
+    if (!prestador || !tomador) throw new Error("Empresas não encontradas.");
 
     const venda = await prisma.venda.create({
         data: {
@@ -200,99 +175,88 @@ export async function POST(request: Request) {
     });
     vendaIdLog = venda.id; 
 
+    // Dados Fiscais
     const cnaeLimpo = cleanString(codigoCnae);
     const isMEI = prestador.regimeTributario === 'MEI';
-    
-    let itemLc = ''; 
-    let codigoTribNacional = ''; 
+    let itemLc = '01.01'; 
+    let codigoTribNacional = '010101'; 
 
-    const regraFiscal = await prisma.globalCnae.findUnique({
-        where: { codigo: cnaeLimpo }
-    });
-
+    const regraFiscal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeLimpo } });
     if (regraFiscal) {
         if (regraFiscal.itemLc) itemLc = regraFiscal.itemLc;
-        if (regraFiscal.codigoTributacaoNacional) codigoTribNacional = regraFiscal.codigoTributacaoNacional;
+        if (regraFiscal.codigoTributacaoNacional) codigoTribNacional = cleanString(regraFiscal.codigoTributacaoNacional);
     }
 
-    const infDPS = {
-        versao: "1.00",
-        ambiente: prestador.ambiente === 'PRODUCAO' ? '1' : '2',
-        dhEmiss: new Date().toISOString(),
-        dCompet: new Date().toISOString().split('T')[0],
-        subst: { subst: "2" },
-        prestador: {
-            cpfCNPJ: { cnpj: cleanString(prestador.documento) },
-            inscricaoMunicipal: cleanString(prestador.inscricaoMunicipal) || "00000", 
-            regimeTributario: isMEI ? 4 : 1, 
-        },
-        tomador: {
-            identificacaoTomador: {
-                cpfCNPJ: {
-                    cnpj: cleanString(tomador.documento).length === 14 ? cleanString(tomador.documento) : undefined,
-                    cpf: cleanString(tomador.documento).length === 11 ? cleanString(tomador.documento) : undefined,
-                }
-            },
-            razaoSocial: tomador.razaoSocial,
-            endereco: {
-                codigoMunicipio: tomador.codigoIbge || "9999999",
-                cep: cleanString(tomador.cep),
-                uf: tomador.uf,
-                logradouro: tomador.logradouro || undefined,
-                numero: tomador.numero || undefined,
-                bairro: tomador.bairro || undefined
-            }
-        },
-        servico: {
-            locPrest: { codigoMunicipio: prestador.codigoIbge },
-            codigoCnae: cnaeLimpo,
-            codigoTributacaoNacional: cleanString(codigoTribNacional), 
-            itemListaServico: cleanString(itemLc),
-            discriminacao: descricao,
-        },
-        valores: {
-            vServ: parseFloat(valor),
-            vDescIncond: 0,
-            vDescCond: 0,
-            vLiq: parseFloat(valor),
-            trib: {
-                tribMun: {
-                    tribISSQN: 1, 
-                    tpRetISSQN: 2 
-                }
-            }
-        }
-    };
+    // MONTAGEM DO XML (DPS)
+    const dhEmiss = new Date().toISOString();
+    const dCompet = new Date().toISOString().split('T')[0];
+    const valServ = parseFloat(valor).toFixed(2);
+
+    // XML COMPLETO DO DPS
+    const xmlDPS = `
+<DPS xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infDPS versao="1.00">
+    <dhEmiss>${dhEmiss}</dhEmiss>
+    <dCompet>${dCompet}</dCompet>
+    <prestador>
+      <cpfCNPJ>
+        <cnpj>${cleanString(prestador.documento)}</cnpj>
+      </cpfCNPJ>
+      <inscricaoMunicipal>${cleanString(prestador.inscricaoMunicipal) || "00000"}</inscricaoMunicipal>
+    </prestador>
+    <tomador>
+      <identificacaoTomador>
+        <cpfCNPJ>
+          <cnpj>${cleanString(tomador.documento)}</cnpj>
+        </cpfCNPJ>
+      </identificacaoTomador>
+    </tomador>
+    <servico>
+      <locPrest>
+        <codigoMunicipio>${prestador.codigoIbge}</codigoMunicipio>
+      </locPrest>
+      <codigoCnae>${cnaeLimpo}</codigoCnae>
+      <codigoTributacaoNacional>${codigoTribNacional}</codigoTributacaoNacional>
+      <discriminacao>${descricao}</discriminacao>
+    </servico>
+    <valores>
+      <vServ>${valServ}</vServ>
+      <vLiq>${valServ}</vLiq>
+      <trib>
+        <tribMun>
+          <tribISSQN>1</tribISSQN>
+          <tpRetISSQN>2</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infDPS>
+</DPS>`;
 
     await createLog({
         level: 'INFO', action: 'DPS_GERADA',
-        message: `Emissão iniciada por ${userId}`,
+        message: `XML Gerado. Preparando envio GZIP.`,
         empresaId: prestador.id,
         vendaId: venda.id,
-        details: infDPS 
+        // CORREÇÃO DO LOG: Salva como objeto para aparecer na caixa bonita
+        details: { xmlGerado: xmlDPS } 
     });
 
-    if (!prestador.certificadoA1) throw new Error("Certificado Digital não cadastrado.");
-    
-    const respostaPortal = await enviarParaPortalNacional(infDPS, prestador);
+    // ENVIO
+    const respostaPortal = await enviarParaPortalNacional(xmlDPS, prestador);
 
     if (!respostaPortal.sucesso) {
         await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
-        
         await createLog({
             level: 'ERRO', action: 'ERRO_EMISSAO_PORTAL',
             message: `Falha: ${respostaPortal.motivo}`,
             empresaId: prestador.id,
             vendaId: venda.id,
-            details: respostaPortal.listaErros
+            details: JSON.stringify(respostaPortal.listaErros, null, 2)
         });
-        
-        return NextResponse.json({ 
-            error: "Emissão falhou. Verifique os logs.",
-            details: respostaPortal.listaErros 
-        }, { status: 400 });
+        return NextResponse.json({ error: "Emissão falhou.", details: respostaPortal.listaErros }, { status: 400 });
     }
 
+    // SUCESSO
     const dadosGov = respostaPortal.notaGov;
     const novaNota = await prisma.notaFiscal.create({
       data: {
@@ -306,22 +270,17 @@ export async function POST(request: Request) {
         tomadorCnpj: cleanString(tomador.documento),
         status: 'AUTORIZADA',
         chaveAcesso: dadosGov.chave,
-        protocolo: dadosGov.protocolo,
         xmlBase64: dadosGov.xml,
         cnae: cnaeLimpo,
-        codigoServico: codigoTribNacional,
         dataEmissao: new Date()
       }
     });
 
     await prisma.venda.update({ where: { id: venda.id }, data: { status: 'CONCLUIDA' } });
-
     return NextResponse.json({ success: true, nota: novaNota }, { status: 201 });
 
   } catch (error: any) {
-    if (vendaIdLog) {
-       try { await prisma.venda.update({ where: { id: vendaIdLog }, data: { status: 'ERRO_EMISSAO' } }); } catch(e){}
-    }
+    if (vendaIdLog) try { await prisma.venda.update({ where: { id: vendaIdLog }, data: { status: 'ERRO_EMISSAO' } }); } catch(e){}
     await createLog({
         level: 'ERRO', action: 'FALHA_SISTEMA',
         message: error.message,
@@ -333,7 +292,7 @@ export async function POST(request: Request) {
   }
 }
 
-// --- API GET (LISTAGEM) ---
+// --- API GET (LISTAGEM DE NOTAS) ---
 export async function GET(request: Request) {
     const userId = request.headers.get('x-user-id');
     const contextId = request.headers.get('x-empresa-id');
@@ -380,7 +339,7 @@ export async function GET(request: Request) {
                       where: { level: 'ERRO' },
                       orderBy: { createdAt: 'desc' },
                       take: 1,
-                      select: { message: true }
+                      select: { message: true, details: true }
                   }
               }
           }),

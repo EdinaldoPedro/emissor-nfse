@@ -3,9 +3,93 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { 
     ArrowLeft, FileJson, Building, User, FileText, 
-    DollarSign, Activity, RefreshCw, Trash2, Code, AlertTriangle, CheckCircle, Copy, Loader2
+    DollarSign, Activity, RefreshCw, Trash2, Code, AlertTriangle, 
+    CheckCircle, Copy, Loader2, ChevronDown, ChevronRight, Terminal
 } from 'lucide-react';
 
+// --- HELPER: Limpa JSON "sujo" (com muitas barras invertidas) ---
+const formatLogDetails = (rawDetails: any) => {
+    try {
+        // Se já for objeto, formata direto
+        if (typeof rawDetails === 'object' && rawDetails !== null) {
+            return JSON.stringify(rawDetails, null, 2);
+        }
+
+        // Se for string, tenta parsear primeiro
+        let parsed = JSON.parse(rawDetails);
+
+        // Função recursiva para limpar strings JSON aninhadas (o "double escaping")
+        const deepParse = (obj: any): any => {
+            if (typeof obj === 'string') {
+                if (obj.trim().startsWith('{') || obj.trim().startsWith('[')) {
+                    try { return deepParse(JSON.parse(obj)); } catch { return obj; }
+                }
+                return obj;
+            }
+            if (Array.isArray(obj)) return obj.map(item => deepParse(item));
+            if (typeof obj === 'object' && obj !== null) {
+                const newObj: any = {};
+                for (const key in obj) newObj[key] = deepParse(obj[key]);
+                return newObj;
+            }
+            return obj;
+        };
+
+        const cleanData = deepParse(parsed);
+        // O SEGREDO: o terceiro argumento (2) força a indentação de 2 espaços
+        return JSON.stringify(cleanData, null, 2); 
+    } catch (e) {
+        return String(rawDetails);
+    }
+};
+
+// --- COMPONENTE: Linha de Log Expansível (Visual Novo) ---
+function LogRow({ log }: { log: any }) {
+    const [expanded, setExpanded] = useState(log.level === 'ERRO'); 
+    const hasDetails = !!log.details;
+    const jsonBonito = hasDetails ? formatLogDetails(log.details) : null;
+
+    return (
+        <div className="relative pl-6 border-l-2 border-slate-200 pb-6 last:pb-0 group">
+            <div className={`absolute -left-[7px] top-0 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm ${
+                log.level === 'ERRO' ? 'bg-red-500' : 
+                log.action === 'REENVIO_MANUAL' ? 'bg-blue-600' : 'bg-emerald-500'
+            }`}></div>
+            
+            <div className="flex flex-col gap-2">
+                <div onClick={() => hasDetails && setExpanded(!expanded)} className={`flex justify-between items-start ${hasDetails ? 'cursor-pointer select-none' : ''}`}>
+                    <div>
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-xs font-bold px-2 py-0.5 rounded border uppercase ${
+                                log.level === 'ERRO' ? 'bg-red-50 text-red-700 border-red-100' : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}>{log.action}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                        </div>
+                        <p className={`text-sm font-medium ${log.level === 'ERRO' ? 'text-red-700' : 'text-slate-700'}`}>{log.message}</p>
+                    </div>
+                    {hasDetails && <div className="text-slate-400 group-hover:text-blue-500 transition pt-1">{expanded ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}</div>}
+                </div>
+
+                {expanded && jsonBonito && (
+                    <div className="mt-2 animate-in slide-in-from-top-2 fade-in duration-200">
+                        <div className="rounded-lg overflow-hidden border border-slate-700 shadow-md bg-slate-950">
+                            <div className="px-3 py-2 border-b border-slate-800 bg-slate-900 flex justify-between items-center">
+                                <span className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-2"><Terminal size={12} className="text-blue-400"/> Payload / Resposta</span>
+                                <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(jsonBonito); }} className="text-slate-500 hover:text-white transition flex items-center gap-1 text-[10px] font-bold uppercase"><Copy size={12}/> Copiar</button>
+                            </div>
+                            <div className="p-4 overflow-x-auto custom-scrollbar">
+                                {/* O 'whitespace-pre' garante que a indentação do JSON.stringify seja respeitada */}
+                                <pre className={`text-xs font-mono leading-relaxed whitespace-pre ${log.level === 'ERRO' ? 'text-red-300' : 'text-emerald-300'}`}>{jsonBonito}</pre>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// --- PÁGINA PRINCIPAL ---
 export default function DetalheVendaCompleto() {
   const { id } = useParams();
   const router = useRouter();
@@ -25,38 +109,56 @@ export default function DetalheVendaCompleto() {
       cnae: ''
   });
 
-  const fetchVenda = () => {
-    // Não ativa loading total para não piscar a tela inteira se for apenas refresh
-    if (!venda) setLoading(true);
+  // Função de busca (com modo silencioso para o auto-refresh)
+  const fetchVenda = (silent = false) => {
+    if (!silent && !venda) setLoading(true);
     
     fetch(`/api/admin/vendas/${id}`)
         .then(r => r.json())
         .then(data => {
-            setVenda(data);
-            
-            // Tenta pegar CNAE da nota ou do JSON salvo
-            let cnaeSalvo = data.notas?.[0]?.cnae || '';
-            if (!cnaeSalvo && data.payloadJson) {
-                try {
-                    const parsed = typeof data.payloadJson === 'string' ? JSON.parse(data.payloadJson) : data.payloadJson;
-                    cnaeSalvo = parsed?.servico?.codigoCnae || '';
-                } catch(e) {}
-            }
+            // Só atualiza se houve mudança real (evita piscar a tela à toa)
+            const mudouStatus = !venda || venda.status !== data.status;
+            const mudouLogs = !venda || venda.logs.length !== data.logs.length;
 
-            // Só atualiza o form se não estiver editando, para não sobrescrever o que o usuário digita
-            if (!isEditing) {
-                setFormData({
-                    descricao: data.descricao || '',
-                    valor: data.valor ? String(data.valor).replace('.', ',') : '',
-                    cnae: cnaeSalvo
-                });
+            if (!venda || mudouStatus || mudouLogs) {
+                setVenda(data);
+                
+                // Preenche form só na primeira carga ou se não estiver editando
+                if (!isEditing && !silent) {
+                    let cnaeSalvo = data.notas?.[0]?.cnae || '';
+                    if (!cnaeSalvo && data.payloadJson) {
+                        try {
+                            const parsed = typeof data.payloadJson === 'string' ? JSON.parse(data.payloadJson) : data.payloadJson;
+                            cnaeSalvo = parsed?.servico?.codigoCnae || '';
+                        } catch(e) {}
+                    }
+
+                    setFormData({
+                        descricao: data.descricao || '',
+                        valor: data.valor ? String(data.valor).replace('.', ',') : '',
+                        cnae: cnaeSalvo
+                    });
+                }
             }
         })
-        .catch(err => console.error("Erro ao buscar venda:", err))
+        .catch(err => console.error(err))
         .finally(() => setLoading(false));
   };
 
+  // 1. Carga inicial
   useEffect(() => { fetchVenda(); }, [id]);
+
+  // 2. AUTO-REFRESH (POLLING)
+  // Se o status for "PROCESSANDO", atualiza a cada 3 segundos para pegar o log novo
+  useEffect(() => {
+      let interval: NodeJS.Timeout;
+      if (venda && venda.status === 'PROCESSANDO') {
+          interval = setInterval(() => {
+              fetchVenda(true); // true = refresh silencioso
+          }, 3000); 
+      }
+      return () => clearInterval(interval);
+  }, [venda?.status]);
 
   const parseValor = (val: string) => {
       if(!val) return 0;
@@ -66,10 +168,8 @@ export default function DetalheVendaCompleto() {
 
   const handleSave = async (reenviar = false) => {
       setProcessing(true);
-      
-      // 1. RECUPERAR CREDENCIAIS DO LOCALSTORAGE
       const userId = localStorage.getItem('userId');
-      const contextId = localStorage.getItem('empresaContextId'); // <--- ESSENCIAL
+      const contextId = localStorage.getItem('empresaContextId');
 
       const payloadEnvio = {
           ...formData,
@@ -77,7 +177,7 @@ export default function DetalheVendaCompleto() {
       };
 
       try {
-          // Salva no banco (PUT)
+          // 1. Salvar no Banco (PUT)
           const resUpdate = await fetch(`/api/admin/vendas/${id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
@@ -87,13 +187,12 @@ export default function DetalheVendaCompleto() {
           if (!resUpdate.ok) throw new Error("Erro ao salvar dados no banco.");
 
           if (reenviar) {
-              // 2. REENVIA COM OS HEADERS DE AUTENTICAÇÃO CORRETOS
               const resRetry = await fetch('/api/notas/retry', {
                   method: 'POST',
                   headers: { 
                       'Content-Type': 'application/json', 
-                      'x-user-id': userId || '',       // <--- OBRIGATÓRIO
-                      'x-empresa-id': contextId || ''  // <--- OBRIGATÓRIO SE FOR CONTADOR
+                      'x-user-id': userId || '',
+                      'x-empresa-id': contextId || ''
                   },
                   body: JSON.stringify({ 
                       vendaId: id, 
@@ -102,31 +201,28 @@ export default function DetalheVendaCompleto() {
               });
               
               const dataRetry = await resRetry.json();
+              if(!resRetry.ok) throw new Error(dataRetry.error || "Erro no processamento.");
               
-              // Se der erro, mostra mensagem mas não trava a tela
-              if(!resRetry.ok) {
-                  alert(`⚠️ Erro no envio: ${dataRetry.error || "Falha desconhecida"}`);
-                  // Mesmo com erro, recarrega para mostrar o log de falha
-                  setIsEditing(false);
-                  fetchVenda();
-                  return;
-              }
+              alert("🚀 Reenvio iniciado! Acompanhe na aba de Logs.");
               
-              alert("🚀 Reenvio iniciado com sucesso!");
-              
-              // Atualiza interface
+              // Muda para visualização de processamento
               setIsEditing(false);
+              setVenda((prev: any) => ({ ...prev, status: 'PROCESSANDO' }));
               setActiveTab('logs');
-              setTimeout(() => fetchVenda(), 1000); 
+              
+              // Força atualização imediata
+              setTimeout(() => fetchVenda(true), 500);
 
           } else {
-              alert("✅ Rascunho salvo.");
+              alert("✅ Rascunho salvo com sucesso.");
               setIsEditing(false);
               fetchVenda();
           }
 
       } catch (error: any) {
           alert("❌ " + error.message);
+          // IMPORTANTE: Atualiza a tela mesmo com erro para pegar o log de falha do banco
+          fetchVenda(true);
       } finally {
           setProcessing(false);
       }
@@ -154,7 +250,8 @@ export default function DetalheVendaCompleto() {
   if (!venda) return <div className="p-8">Venda não encontrada.</div>;
 
   const statusColor = venda.status === 'CONCLUIDA' ? 'bg-green-100 text-green-700 border-green-200' : 
-                      venda.status === 'ERRO_EMISSAO' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-blue-100 text-blue-700';
+                      venda.status === 'ERRO_EMISSAO' ? 'bg-red-100 text-red-700 border-red-200' : 
+                      venda.status === 'PROCESSANDO' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-700';
 
   let prettyPayload = "// Payload indisponível";
   try { prettyPayload = JSON.stringify(JSON.parse(venda.payloadJson), null, 2); } catch(e) {}
@@ -172,7 +269,7 @@ export default function DetalheVendaCompleto() {
                   <h1 className="text-xl font-bold text-slate-800 flex items-center gap-3">
                       Venda #{venda.id.split('-')[0]}
                       <span className={`text-[10px] px-2 py-0.5 rounded border uppercase ${statusColor}`}>
-                          {venda.status.replace('_', ' ')}
+                          {venda.status === 'PROCESSANDO' ? <span className="flex items-center gap-1"><Loader2 size={10} className="animate-spin"/> PROCESSANDO</span> : venda.status.replace('_', ' ')}
                       </span>
                   </h1>
                   <p className="text-xs text-slate-500">
@@ -200,6 +297,7 @@ export default function DetalheVendaCompleto() {
                   </button>
                   <button onClick={() => setActiveTab('logs')} className={`px-6 py-3 text-sm font-bold border-b-2 transition ${activeTab === 'logs' ? 'border-orange-600 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                       <Activity size={16} className="inline mr-2 mb-0.5"/> Logs
+                      {venda.status === 'PROCESSANDO' && <span className="ml-2 w-2 h-2 bg-orange-500 rounded-full inline-block animate-pulse"></span>}
                   </button>
               </div>
 
@@ -213,7 +311,7 @@ export default function DetalheVendaCompleto() {
                                 <span className="font-bold">Modo de Correção Ativo</span>
                             </div>
                             <div className="flex gap-2 w-full sm:w-auto">
-                                <button onClick={() => { setIsEditing(false); }} className="flex-1 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-xs font-bold transition">
+                                <button onClick={() => { setIsEditing(false); fetchVenda(); }} className="flex-1 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-xs font-bold transition">
                                     Cancelar
                                 </button>
                                 <button onClick={() => handleSave(false)} disabled={processing} className="flex-1 px-4 py-2 rounded-lg bg-white/20 hover:bg-white/30 text-xs font-bold transition">
@@ -337,30 +435,13 @@ export default function DetalheVendaCompleto() {
                   </div>
               )}
 
-              {/* ABA LOGS */}
+              {/* ABA LOGS MELHORADA (Com Accordion e Estilo Dark) */}
               {activeTab === 'logs' && (
                   <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
                       <div className="overflow-y-auto p-4 space-y-4 custom-scrollbar max-h-[600px]">
-                          {venda.logs.map((log: any) => (
-                              <div key={log.id} className="relative pl-4 border-l-2 border-slate-200 pb-4 last:pb-0">
-                                  <div className={`absolute -left-[5px] top-0 w-2.5 h-2.5 rounded-full ${
-                                      log.level === 'ERRO' ? 'bg-red-500' : 
-                                      log.action === 'REENVIO_MANUAL' ? 'bg-blue-600' : 'bg-green-500'
-                                  }`}></div>
-                                  
-                                  <div className="flex justify-between items-start">
-                                      <p className="text-xs font-bold text-slate-700">{log.action}</p>
-                                      <span className="text-[10px] text-slate-400 font-mono">{new Date(log.createdAt).toLocaleTimeString()}</span>
-                                  </div>
-                                  <p className="text-xs text-slate-600 mt-1 break-words">{log.message}</p>
-                                  
-                                  {log.details && log.level === 'ERRO' && (
-                                      <div className="mt-2 bg-red-50 p-3 rounded text-[10px] font-mono text-red-700 border border-red-100 break-words leading-relaxed">
-                                          {log.details.length > 300 ? log.details.substring(0, 300) + '...' : log.details}
-                                      </div>
-                                  )}
-                              </div>
-                          ))}
+                          {venda.logs.length === 0 ? <p className="text-center text-gray-400 text-sm">Nenhum registro.</p> : 
+                            venda.logs.map((log: any) => <LogRow key={log.id} log={log} />)
+                          }
                       </div>
                   </div>
               )}
