@@ -142,7 +142,10 @@ export async function PUT(request: Request) {
           uf: body.uf,
           codigoIbge: body.codigoIbge,
           email: body.emailComercial || body.email,
-          cadastroCompleto: true 
+          cadastroCompleto: true,
+          serieDPS: body.serieDPS, 
+          ultimoDPS: body.ultimoDPS ? parseInt(String(body.ultimoDPS)) : undefined,
+          ambiente: body.ambiente // Garante que salva Homologação/Produção
       };
 
       // Tratamento Certificado

@@ -109,6 +109,9 @@ model Empresa {
   vendasCompradas  Venda[]      @relation("VendaTomador")
 
   logs             SystemLog[]
+
+  serieDPS   String   @default("900") // Padrão 900 para testes/homolog
+  ultimoDPS  Int      @default(0)     // Começa do zero. O próximo será 1.
   
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime?

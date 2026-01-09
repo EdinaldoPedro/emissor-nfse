@@ -31,7 +31,10 @@ export default function ConfiguracoesEmpresa() {
     bairro: '',
     cidade: '',
     uf: '',
-    codigoIbge: ''
+    codigoIbge: '',
+    ambiente: 'HOMOLOGACAO', // Default
+    serieDPS: '900',
+    ultimoDPS: 0
   });
 
   useEffect(() => {
@@ -203,6 +206,47 @@ export default function ConfiguracoesEmpresa() {
                 <input className="p-3 border rounded-lg bg-gray-50" placeholder="IBGE" readOnly value={empresa.codigoIbge}/>
             </div>
           </div>
+
+          {/* === NOVA ÁREA: CONFIGURAÇÃO DE EMISSÃO (DPS) === */}
+            <div className="mt-6 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <h4 className="text-sm font-bold text-blue-800 mb-3 flex items-center gap-2">
+                    ⚙️ Configuração de Numeração (DPS)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1">Ambiente</label>
+                        <select 
+                            className="w-full p-2 border rounded bg-white text-sm"
+                            value={empresa.ambiente || 'HOMOLOGACAO'}
+                            onChange={e => setEmpresa({...empresa, ambiente: e.target.value})}
+                        >
+                            <option value="HOMOLOGACAO">Homologação (Teste)</option>
+                            <option value="PRODUCAO">Produção (Valendo)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1">Série DPS</label>
+                        <input 
+                            type="text" 
+                            className="w-full p-2 border rounded text-sm font-mono"
+                            value={empresa.serieDPS || '900'} 
+                            onChange={e => setEmpresa({...empresa, serieDPS: e.target.value})}
+                            placeholder="Ex: 900"
+                        />
+                        <p className="text-[9px] text-slate-400 mt-1">Geralmente 900 p/ Homolog.</p>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1">Último Número Usado</label>
+                        <input 
+                            type="number" 
+                            className="w-full p-2 border rounded text-sm font-mono font-bold text-blue-700"
+                            value={empresa.ultimoDPS} 
+                            onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}
+                        />
+                        <p className="text-[9px] text-slate-400 mt-1">O sistema usará o Próximo (X + 1).</p>
+                    </div>
+                </div>
+            </div>
 
           {/* --- ÁREA DO CERTIFICADO DIGITAL --- */}
           <div className="p-8 bg-slate-50">
