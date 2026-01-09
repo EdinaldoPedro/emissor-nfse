@@ -3,9 +3,9 @@ import https from 'https';
 import fs from 'fs';
 import forge from 'node-forge';
 import zlib from 'zlib';
+import crypto from 'crypto'; 
 import { IResultadoEmissao } from '../interfaces/IEmissorStrategy';
 
-// Endpoints Oficiais
 const URL_HOMOLOGACAO = "https://sefin.producaorestrita.nfse.gov.br/SefinNacional/nfse"; 
 const URL_PRODUCAO = "https://sefin.nfse.gov.br/SefinNacional/nfse";
 
@@ -15,28 +15,88 @@ export abstract class BaseStrategy {
         return str ? str.replace(/\D/g, '') : '';
     }
 
-    // --- NOVO: Validação Básica Compartilhada ---
+    protected formatarDataSefaz(date: Date): string {
+        const timestamp = date.getTime();
+        const offsetBrasilia = -3 * 60 * 60 * 1000;
+        const dateBR = new Date(timestamp + offsetBrasilia);
+        
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        
+        const YYYY = dateBR.getUTCFullYear();
+        const MM = pad(dateBR.getUTCMonth() + 1);
+        const DD = pad(dateBR.getUTCDate());
+        const HH = pad(dateBR.getUTCHours());
+        const mm = pad(dateBR.getUTCMinutes());
+        const ss = pad(dateBR.getUTCSeconds());
+        
+        return `${YYYY}-${MM}-${DD}T${HH}:${mm}:${ss}-03:00`;
+    }
+
     protected validarCertificado(empresa: any): void {
-        if (!empresa.certificadoA1) {
-            throw new Error("Certificado Digital não encontrado. Faça o upload nas configurações da empresa.");
-        }
-        if (!empresa.senhaCertificado) {
-            throw new Error("Senha do certificado não configurada.");
-        }
+        if (!empresa.certificadoA1) throw new Error("Certificado Digital não encontrado.");
+        if (!empresa.senhaCertificado) throw new Error("Senha do certificado não configurada.");
     }
 
     protected validarTomador(tomador: any): void {
         if (!tomador.documento) throw new Error("Documento do Tomador (CPF/CNPJ) é obrigatório.");
         if (!tomador.razaoSocial) throw new Error("Nome/Razão Social do Tomador é obrigatório.");
-        // Endereço é crucial para NFS-e Nacional
         if (!tomador.cep || !tomador.logradouro || !tomador.numero) {
              throw new Error("Endereço do Tomador incompleto. CEP, Logradouro e Número são obrigatórios.");
         }
     }
-    // --------------------------------------------
+
+    // --- ASSINATURA CORRIGIDA (PADRÃO VÁLIDO IGUAL AO EXEMPLO) ---
+    protected assinarXML(xml: string, tagId: string, empresa: any): string {
+        try {
+            const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
+            
+            const certClean = credenciais.cert
+                .replace('-----BEGIN CERTIFICATE-----', '')
+                .replace('-----END CERTIFICATE-----', '')
+                .replace(/[\r\n]/g, '');
+
+            // 1. Extrai infDPS
+            const match = xml.match(/<infDPS[\s\S]*?<\/infDPS>/);
+            if (!match) throw new Error("Tag infDPS não encontrada para assinatura.");
+            
+            let nodeToSign = match[0]; 
+
+            // 2. TRUQUE DO HASH (Virtual Injection)
+            // O arquivo enviado NÃO terá xmlns na tag infDPS (para não ser redundante),
+            // mas o Hash TEM que ser calculado como se tivesse (C14N Exclusive).
+            if (!nodeToSign.includes('xmlns="http://www.sped.fazenda.gov.br/nfse"')) {
+                // Injeta o xmlns virtualmente apenas para o hash
+                nodeToSign = nodeToSign.replace('<infDPS', '<infDPS xmlns="http://www.sped.fazenda.gov.br/nfse"');
+            }
+
+            // 3. Calcula Digest (SHA-256)
+            const shasum = crypto.createHash('sha256');
+            shasum.update(nodeToSign, 'utf8');
+            const digestValue = shasum.digest('base64');
+
+            // 4. Monta SignedInfo (EXATAMENTE IGUAL AO XML VÁLIDO)
+            // - Sem espaços entre tags
+            // - Com xmlns na tag SignedInfo
+            // - Algoritmo xml-exc-c14n# (SEM WithComments)
+            const signedInfo = `<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#"><CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"></CanonicalizationMethod><SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"></SignatureMethod><Reference URI="#${tagId}"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></Transform><Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"></Transform></Transforms><DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"></DigestMethod><DigestValue>${digestValue}</DigestValue></Reference></SignedInfo>`;
+
+            // 5. Assina
+            const signer = crypto.createSign('RSA-SHA256');
+            signer.update(signedInfo);
+            const signatureValue = signer.sign(credenciais.key, 'base64');
+
+            // 6. Monta Bloco Signature
+            const signatureXML = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">${signedInfo}<SignatureValue>${signatureValue}</SignatureValue><KeyInfo><X509Data><X509Certificate>${certClean}</X509Certificate></X509Data></KeyInfo></Signature>`;
+
+            // 7. Insere no XML Final
+            return xml.replace('</DPS>', `${signatureXML}</DPS>`);
+
+        } catch (e: any) {
+            throw new Error(`Erro assinatura: ${e.message}`);
+        }
+    }
 
     protected extrairCredenciais(pfxBase64: string | null, senha: string | null) {
-        // ... (código anterior de extração mantido igual) ...
         if (!pfxBase64) throw new Error("Certificado digital não encontrado.");
         
         try {
@@ -97,7 +157,6 @@ export abstract class BaseStrategy {
 
             const data = response.data;
             
-            // Tratamento de sucesso da API (mesmo que venha erros de negócio)
             if (data.erros && data.erros.length > 0) {
                  return {
                     sucesso: false,
@@ -125,7 +184,6 @@ export abstract class BaseStrategy {
             if (error.response) {
                 erroMsg = `Erro HTTP ${error.response.status}: ${error.response.statusText}`;
                 detalhes = error.response.data || {};
-                console.error("[API ERRO BODY]", JSON.stringify(detalhes, null, 2));
             }
 
             return {

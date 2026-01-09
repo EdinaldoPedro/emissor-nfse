@@ -8,17 +8,54 @@ interface LogParams {
   message: string;
   details?: any; 
   empresaId?: string;
-  vendaId?: string; // <--- NOVO
+  vendaId?: string; 
+}
+
+// --- SANITIZAÇÃO DE DADOS SENSÍVEIS ---
+const CHAVES_SENSIVEIS = [
+    'senha', 'password', 'senhaCertificado', 'certificadoA1', 
+    'Authorization', 'token', 'key', 'pfx', 'certificado'
+];
+
+function sanitizarObjeto(obj: any): any {
+    if (!obj) return obj;
+    if (typeof obj === 'string') return obj; // Se for string pura, retorna (mas idealmente não logar string com senha)
+    
+    if (Array.isArray(obj)) {
+        return obj.map(item => sanitizarObjeto(item));
+    }
+
+    if (typeof obj === 'object') {
+        const novoObj: any = {};
+        for (const key in obj) {
+            // Verifica se a chave atual é sensível (case insensitive)
+            const ehSensivel = CHAVES_SENSIVEIS.some(k => key.toLowerCase().includes(k.toLowerCase()));
+            
+            if (ehSensivel) {
+                novoObj[key] = '*** DADO SENSÍVEL OMITIDO ***';
+            } else {
+                // Recursão para objetos aninhados (ex: prestador.senhaCertificado)
+                novoObj[key] = sanitizarObjeto(obj[key]);
+            }
+        }
+        return novoObj;
+    }
+
+    return obj;
 }
 
 export async function createLog({ level, action, message, details, empresaId, vendaId }: LogParams) {
   try {
     let detailsStr = '';
-    if (details) {
-        if (details instanceof Error) {
-            detailsStr = JSON.stringify({ message: details.message, stack: details.stack }, null, 2);
+    
+    // Aplica sanitização antes de converter para string
+    const dadosSeguros = sanitizarObjeto(details);
+
+    if (dadosSeguros) {
+        if (dadosSeguros instanceof Error) {
+            detailsStr = JSON.stringify({ message: dadosSeguros.message, stack: dadosSeguros.stack }, null, 2);
         } else {
-            detailsStr = JSON.stringify(details, null, 2);
+            detailsStr = JSON.stringify(dadosSeguros, null, 2);
         }
     }
 
@@ -29,7 +66,7 @@ export async function createLog({ level, action, message, details, empresaId, ve
         message,
         details: detailsStr,
         empresaId,
-        vendaId // <--- Salvando
+        vendaId 
       }
     });
 

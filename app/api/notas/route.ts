@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
-// --- CORREÇÃO DO IMPORT: Usando @/app/services ---
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory'; 
+import { getTributacaoPorCnae } from '@/app/utils/tributacao'; 
 
 const prisma = new PrismaClient();
 
-// Helper de Contexto
+// ... (getEmpresaContexto e limparPayloadParaLog mantidos iguais) ...
 async function getEmpresaContexto(userId: string, contextId: string | null) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return null;
@@ -19,7 +19,16 @@ async function getEmpresaContexto(userId: string, contextId: string | null) {
     return (vinculo && vinculo.status === 'APROVADO') ? contextId : null;
 }
 
-// === API POST (DISPATCHER) ===
+function limparPayloadParaLog(payload: any) {
+    const copia = JSON.parse(JSON.stringify(payload));
+    if (copia.prestador) {
+        copia.prestador.senhaCertificado = '*** PROTEGIDO ***';
+        copia.prestador.certificadoA1 = '*** ARQUIVO PFX OMITIDO ***';
+        copia.prestador.senha = '*** PROTEGIDO ***';
+    }
+    return copia;
+}
+
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextId = request.headers.get('x-empresa-id'); 
@@ -36,19 +45,20 @@ export async function POST(request: Request) {
     if (!empresaIdAlvo) throw new Error("Acesso negado.");
     empresaIdLog = empresaIdAlvo;
 
-    // 2. Coleta de Dados (Banco)
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!prestador || !tomador) throw new Error("Empresas não encontradas.");
 
-    // 3. Gestão da Venda (Cria ou Atualiza)
+    // 2. Gestão da Venda
     let venda;
     if (vendaId) {
         venda = await prisma.venda.update({
             where: { id: vendaId },
             data: { valor: parseFloat(valor), descricao: descricao, status: "PROCESSANDO" }
         });
-        await createLog({ level: 'INFO', action: 'EMISSAO_INICIADA', message: `Reiniciando emissão (Venda ${vendaId})`, empresaId: prestador.id, vendaId: venda.id });
+        // 3. Sequencial DPS
+        // Não incrementa no retry para tentar manter o mesmo, OU incrementa se falhou antes
+        // Por segurança fiscal, vamos incrementar sempre que gerar um novo DPS
     } else {
         venda = await prisma.venda.create({
             data: { empresaId: prestador.id, clienteId: tomador.id, valor: parseFloat(valor), descricao: descricao, status: "PROCESSANDO" }
@@ -56,30 +66,35 @@ export async function POST(request: Request) {
     }
     vendaIdLog = venda.id;
 
-    // 4. Sequencial DPS
     const novoNumeroDPS = (prestador.ultimoDPS || 0) + 1;
     await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: novoNumeroDPS } });
 
-    // 5. Dados Fiscais
+    // 4. Inteligência Fiscal
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
         const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
         if (cnaeBanco) cnaeFinal = cnaeBanco.codigo.replace(/\D/g, '');
     }
-    if (!cnaeFinal) throw new Error("CNAE obrigatório.");
+    if (!cnaeFinal) throw new Error("CNAE é obrigatório.");
 
     let codigoTribNacional = '010101';
     let itemLc = '01.01';
-    const regraFiscal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
-    if (regraFiscal) {
-        if(regraFiscal.codigoTributacaoNacional) codigoTribNacional = regraFiscal.codigoTributacaoNacional.replace(/\D/g, '');
-        if(regraFiscal.itemLc) itemLc = regraFiscal.itemLc;
+
+    const infoEstatica = getTributacaoPorCnae(cnaeFinal);
+    if (infoEstatica && infoEstatica.codigoTributacaoNacional !== '01.01.01') {
+         itemLc = infoEstatica.itemLC;
+         codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
-    // 6. INVOCAÇÃO DA ESTRATÉGIA (FACTORY)
-    const strategy = EmissorFactory.getStrategy(prestador);
-    
-    const resultado = await strategy.executar({
+    const regraFiscal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
+    if (regraFiscal) {
+        if (regraFiscal.itemLc) itemLc = regraFiscal.itemLc;
+        if (regraFiscal.codigoTributacaoNacional && regraFiscal.codigoTributacaoNacional.trim() !== '') {
+            codigoTribNacional = regraFiscal.codigoTributacaoNacional.replace(/\D/g, '');
+        }
+    }
+
+    const dadosParaEstrategia = {
         prestador,
         tomador,
         venda,
@@ -93,18 +108,37 @@ export async function POST(request: Request) {
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
         numeroDPS: novoNumeroDPS,
         serieDPS: prestador.serieDPS || '900'
+    };
+
+    // 5. Execução
+    const strategy = EmissorFactory.getStrategy(prestador);
+    const resultado = await strategy.executar(dadosParaEstrategia);
+
+    // --- AQUI ESTÁ O AJUSTE DE LOGS ---
+    
+    // Log "EMISSAO_INICIADA" AGORA com o XML Gerado (se existir) + Payload Limpo
+    // Isso resolve o pedido para o XML aparecer no log de início
+    await createLog({
+        level: 'INFO', action: 'EMISSAO_INICIADA',
+        message: `Iniciando transmissão DPS ${novoNumeroDPS}.`,
+        empresaId: prestador.id,
+        vendaId: venda.id,
+        details: { 
+            payloadOriginal: limparPayloadParaLog(dadosParaEstrategia),
+            xmlGerado: resultado.xmlGerado // <--- XML AQUI
+        }
     });
 
-    // 7. Processamento do Resultado
+    // 6. Tratamento de Resultado
     if (!resultado.sucesso) {
         await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
         
         await createLog({
             level: 'ERRO', action: 'FALHA_EMISSAO',
-            message: resultado.motivo || 'Erro desconhecido',
+            message: resultado.motivo || 'Rejeição da Sefaz',
             empresaId: prestador.id,
             vendaId: venda.id,
-            details: { xml: resultado.xmlGerado, erros: resultado.erros }
+            details: resultado.erros // <--- Apenas o erro da API aqui, fica mais limpo
         });
         
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
@@ -133,10 +167,13 @@ export async function POST(request: Request) {
 
     await createLog({
         level: 'INFO', action: 'NOTA_AUTORIZADA',
-        message: `Nota ${nota.numero} autorizada com sucesso!`,
+        message: `Nota ${nota.numero} autorizada!`,
         empresaId: prestador.id,
         vendaId: venda.id,
-        details: { xmlGerado: resultado.xmlGerado }
+        details: { 
+            chave: resultado.notaGov!.chave,
+            protocolo: resultado.notaGov!.protocolo
+        }
     });
 
     return NextResponse.json({ success: true, nota }, { status: 201 });

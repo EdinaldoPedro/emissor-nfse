@@ -30,7 +30,7 @@ const formatXml = (xml: string) => {
         });
         return formatted.trim();
     } catch (e) {
-        return xml; // Retorna original se falhar
+        return xml;
     }
 };
 
@@ -81,7 +81,7 @@ const formatLogDetails = (rawDetails: any) => {
 };
 
 function LogRow({ log }: { log: any }) {
-    const [expanded, setExpanded] = useState(log.level === 'ERRO'); 
+    const [expanded, setExpanded] = useState(false); 
     const hasDetails = !!log.details;
     const conteudoFormatado = hasDetails ? formatLogDetails(log.details) : null;
     const isXml = conteudoFormatado?.trim().startsWith('<');
@@ -157,12 +157,19 @@ export default function DetalheVendaCompleto() {
             setVenda(data);
             if (!isEditing && !silent) {
                 let cnaeSalvo = data.notas?.[0]?.cnae || '';
-                if (!cnaeSalvo && data.payloadJson) {
+                
+                // Tenta recuperar CNAE do payload se não houver nota
+                if (!cnaeSalvo) {
                     try {
-                        const parsed = typeof data.payloadJson === 'string' ? JSON.parse(data.payloadJson) : data.payloadJson;
-                        cnaeSalvo = parsed?.servico?.codigoCnae || '';
+                        const logComPayload = data.logs.find((l: any) => l.details && (l.details.includes('payloadOriginal') || l.details.includes('codigoCnae')));
+                        if (logComPayload) {
+                            let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
+                            if (raw.payloadOriginal) raw = raw.payloadOriginal;
+                            cnaeSalvo = raw?.servico?.cnae || raw?.servico?.codigoCnae || '';
+                        }
                     } catch(e) {}
                 }
+
                 setFormData({
                     descricao: data.descricao || '',
                     valor: data.valor ? String(data.valor).replace('.', ',') : '',
@@ -226,17 +233,33 @@ export default function DetalheVendaCompleto() {
                       venda.status === 'ERRO_EMISSAO' ? 'bg-red-100 text-red-700 border-red-200' : 
                       venda.status === 'PROCESSANDO' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-700';
 
-  // Logica para extrair XML puro do payload (para download)
+  // --- LÓGICA DE EXTRAÇÃO DO PAYLOAD (JSON) ---
   let prettyPayload = "// Payload indisponível";
   let xmlEnvioParaDownload = null;
 
   try { 
-      const raw = JSON.parse(venda.payloadJson);
-      prettyPayload = JSON.stringify(raw, null, 2); 
-      
-      // Tenta achar o XML dentro do objeto parseado
-      if (raw.xmlGerado) xmlEnvioParaDownload = raw.xmlGerado;
-      else if (raw.dpsXmlGZipB64) xmlEnvioParaDownload = null; // GZIP não baixa direto como XML
+      // Procura nos logs o evento de emissão (sucesso ou falha)
+      const logComPayload = venda.logs.find((l: any) => 
+          (l.action === 'NOTA_AUTORIZADA' || l.action === 'FALHA_EMISSAO' || l.action === 'DPS_GERADA') 
+          && l.details
+      );
+
+      if (logComPayload) {
+          let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
+          
+          // Se tiver o campo novo 'payloadOriginal', usa ele
+          if (raw.payloadOriginal) {
+               raw = raw.payloadOriginal;
+          }
+
+          prettyPayload = JSON.stringify(raw, null, 2); 
+          if (raw?.xmlGerado) xmlEnvioParaDownload = raw.xmlGerado;
+      }
+      // Fallback antigo
+      else if (venda.payloadJson) {
+          const raw = JSON.parse(venda.payloadJson);
+          prettyPayload = JSON.stringify(raw, null, 2);
+      }
       
   } catch(e) {}
 
