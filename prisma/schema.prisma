@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "postgresql" // Ou "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -43,9 +43,9 @@ model User {
   cargo            String?
   avatarUrl        String?
   
-  darkMode         Boolean   @default(false)
-  idioma           String    @default("pt-BR")
-  notificacoesEmail Boolean  @default(true)
+  darkMode          Boolean   @default(false)
+  idioma            String    @default("pt-BR")
+  notificacoesEmail Boolean   @default(true)
   
   ipOrigem         String?
   lastLoginAt      DateTime? 
@@ -58,7 +58,6 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // === CORREÇÃO AQUI: Nomes das relações iguais ao modelo Ticket ===
   ticketsCriados    Ticket[] @relation("SolicitanteTicket")
   ticketsAtendidos  Ticket[] @relation("AtendenteTicket")
   
@@ -71,23 +70,26 @@ model User {
 model Empresa {
   id        String   @id @default(uuid())
   documento String   @unique
-  ambiente  String   @default("PRODUCAO")
+  ambiente  String   @default("HOMOLOGACAO")
   
   // Flag de travamento
   cadastroCompleto Boolean @default(false)
 
+  // === CONTROLE DE EMISSÃO (CAMPOS OBRIGATÓRIOS PARA O DPS) ===
+  serieDPS   String   @default("900")
+  ultimoDPS  Int      @default(0)
+
   email        String?
   razaoSocial  String
   nomeFantasia String?
-  
-  cep        String?
-  logradouro String?
-  numero     String?
-  complemento String?
-  bairro     String?
-  cidade     String?
-  uf         String?
-  codigoIbge String?
+  cep          String?
+  logradouro   String?
+  numero       String?
+  complemento  String?
+  bairro       String?
+  cidade       String?
+  uf           String?
+  codigoIbge   String?
   
   inscricaoMunicipal String?
   regimeTributario   String? @default("MEI")
@@ -109,9 +111,6 @@ model Empresa {
   vendasCompradas  Venda[]      @relation("VendaTomador")
 
   logs             SystemLog[]
-
-  serieDPS   String   @default("900") // Padrão 900 para testes/homolog
-  ultimoDPS  Int      @default(0)     // Começa do zero. O próximo será 1.
   
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime?
@@ -179,8 +178,8 @@ model NotaFiscal {
   
   status          StatusNota @default(RASCUNHO)
   
-  xmlBase64       String? // @db.Text se usar Postgres
-  pdfBase64       String? // @db.Text se usar Postgres
+  xmlBase64       String? 
+  pdfBase64       String? 
   
   chaveAcesso     String?
   protocolo       String?
@@ -266,13 +265,11 @@ model Ticket {
   descricao     String
   status        String   @default("ABERTO")
   
-  // NOVOS CAMPOS
-  clientUnread  Boolean  @default(false) // <--- ADICIONE ISTO (Indica notificação para o cliente)
+  clientUnread  Boolean  @default(false)
 
-  anexoBase64   String? 
+  anexoBase64   String?
   anexoNome     String?
 
-  // ... restante do model Ticket igual ...
   catalogId     String?
   catalogItem   TicketCatalog? @relation(fields: [catalogId], references: [id])
   solicitanteId String
@@ -288,12 +285,10 @@ model TicketMensagem {
   id        String   @id @default(uuid())
   mensagem  String   
   anexos    String?
-  
   interno   Boolean  @default(false)
 
   anexoBase64 String?
   anexoNome   String?
-  
   ticketId  String
   ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   
@@ -319,7 +314,6 @@ model ContadorVinculo {
   @@unique([contadorId, empresaId])
 }
 
-// Novo Modelo de Catálogo
 model TicketCatalog {
   id          String   @id @default(uuid())
   titulo      String   

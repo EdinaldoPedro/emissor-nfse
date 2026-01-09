@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
-  Lock, CheckCircle, Trash2, Info, Upload, FileKey
+  Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -13,9 +13,8 @@ export default function ConfiguracoesEmpresa() {
   const [buscando, setBuscando] = useState(false);
   const [msg, setMsg] = useState<{texto: string, tipo: 'sucesso' | 'erro'} | null>(null);
   
-  // Controle de Bloqueio (CNPJ sempre bloqueado se já existir)
   const [isLocked, setIsLocked] = useState(false);
-  const [isContador, setIsContador] = useState(false); // Para saber se é visualização
+  const [isContador, setIsContador] = useState(false);
   
   const [atividades, setAtividades] = useState<any[]>([]); 
 
@@ -40,7 +39,11 @@ export default function ConfiguracoesEmpresa() {
     cidade: '',
     uf: '',
     codigoIbge: '',
-    email: ''
+    email: '',
+    // === CAMPOS DE CONTROLE DPS ===
+    ambiente: 'HOMOLOGACAO',
+    serieDPS: '900',
+    ultimoDPS: 0
   });
 
   const showMessage = (texto: string, tipo: 'sucesso' | 'erro') => {
@@ -52,7 +55,6 @@ export default function ConfiguracoesEmpresa() {
     const userId = localStorage.getItem('userId');
     if (!userId) { router.push('/login'); return; }
 
-    // --- CORREÇÃO DO CONTEXTO DO CONTADOR ---
     async function carregarDados() {
       try {
         const contextId = localStorage.getItem('empresaContextId');
@@ -61,13 +63,20 @@ export default function ConfiguracoesEmpresa() {
         const res = await fetch('/api/perfil', { 
             headers: { 
                 'x-user-id': userId,
-                'x-empresa-id': contextId || '' // <--- O PULO DO GATO
+                'x-empresa-id': contextId || '' 
             } 
         });
 
         if (res.ok) {
           const dados = await res.json();
-          setEmpresa(prev => ({ ...prev, ...dados }));
+          setEmpresa(prev => ({ 
+              ...prev, 
+              ...dados,
+              // Garante valores padrão se vier nulo do banco
+              serieDPS: dados.serieDPS || '900',
+              ultimoDPS: dados.ultimoDPS || 0,
+              ambiente: dados.ambiente || 'HOMOLOGACAO'
+          }));
           
           if (dados.atividades) setAtividades(dados.atividades);
           
@@ -77,7 +86,6 @@ export default function ConfiguracoesEmpresa() {
           });
 
           if (!dados.temCertificado) setModoEdicaoCertificado(true);
-
           if (dados.cadastroCompleto) setIsLocked(true);
         }
       } catch (error) { console.error("Erro ao carregar perfil"); }
@@ -145,7 +153,7 @@ export default function ConfiguracoesEmpresa() {
     if (e) e.preventDefault();
     setLoading(true);
     const userId = localStorage.getItem('userId');
-    const contextId = localStorage.getItem('empresaContextId'); // <--- Contexto no Salvar também
+    const contextId = localStorage.getItem('empresaContextId');
 
     try {
       const res = await fetch('/api/perfil', {
@@ -153,7 +161,7 @@ export default function ConfiguracoesEmpresa() {
         headers: { 
             'Content-Type': 'application/json', 
             'x-user-id': userId || '',
-            'x-empresa-id': contextId || '' // <--- HEADER IMPORTANTE
+            'x-empresa-id': contextId || ''
         },
         body: JSON.stringify({ 
             ...empresa, 
@@ -192,13 +200,10 @@ export default function ConfiguracoesEmpresa() {
           </div>
         </div>
 
-        {/* ALERTA: CADASTRO JÁ EXISTENTE */}
         {isLocked ? (
             <div className="bg-orange-50 border-l-4 border-orange-400 p-4 mb-8 rounded-r shadow-sm flex flex-col md:flex-row items-start gap-4">
                 <div className="flex items-start gap-3 flex-1">
-                    <div className="text-orange-500 mt-1">
-                        <Info size={24} />
-                    </div>
+                    <div className="text-orange-500 mt-1"><Info size={24} /></div>
                     <div>
                         <h3 className="font-bold text-orange-900">Cadastro Vinculado</h3>
                         <p className="text-sm text-orange-800 mt-1 leading-relaxed">
@@ -207,32 +212,23 @@ export default function ConfiguracoesEmpresa() {
                     </div>
                 </div>
                 {!isContador && (
-                    <button 
-                        onClick={() => consultarCNPJ(true)} 
-                        disabled={buscando} 
-                        className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm"
-                    >
+                    <button onClick={() => consultarCNPJ(true)} disabled={buscando} className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm">
                         {buscando ? 'Buscando...' : '↻ Atualizar Dados da Receita'}
                     </button>
                 )}
             </div>
         ) : (
             <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8 rounded-r shadow-sm flex items-start gap-4">
-                <div className="text-blue-500 mt-1">
-                    <Briefcase size={24} />
-                </div>
+                <div className="text-blue-500 mt-1"><Briefcase size={24} /></div>
                 <div>
                     <h3 className="font-bold text-blue-900">Configuração Inicial</h3>
-                    <p className="text-sm text-blue-800 mt-1">
-                        Informe o <strong>CNPJ</strong> abaixo e clique em buscar para carregar os dados da Receita Federal automaticamente.
-                    </p>
+                    <p className="text-sm text-blue-800 mt-1">Informe o <strong>CNPJ</strong> abaixo e clique em buscar.</p>
                 </div>
             </div>
         )}
 
         <form onSubmit={handleSalvar} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           
-          {/* SEÇÃO 1: DADOS CADASTRAIS */}
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2">
               <Briefcase size={20} /> Dados Cadastrais
@@ -244,15 +240,7 @@ export default function ConfiguracoesEmpresa() {
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Building2 className="absolute left-3 top-3 text-gray-400" size={20} />
-                    <input 
-                        type="text" 
-                        className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} 
-                        placeholder="00000000000191" 
-                        value={empresa.documento || ''} 
-                        onChange={e => setEmpresa({...empresa, documento: e.target.value})} 
-                        maxLength={18} 
-                        disabled={isLocked} 
-                    />
+                    <input type="text" className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} placeholder="00000000000191" value={empresa.documento || ''} onChange={e => setEmpresa({...empresa, documento: e.target.value})} maxLength={18} disabled={isLocked} />
                   </div>
                   {!isLocked && (
                       <button type="button" onClick={() => consultarCNPJ(false)} disabled={buscando} className="bg-blue-100 text-blue-700 px-6 py-2 rounded-lg font-medium hover:bg-blue-200 transition flex items-center gap-2 disabled:opacity-50">
@@ -262,33 +250,17 @@ export default function ConfiguracoesEmpresa() {
                 </div>
               </div>
 
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly />
-              </div>
-              <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label>
-                  <input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly />
-              </div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly /></div>
 
               <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
-                      <input 
-                          type="text" 
-                          className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" 
-                          placeholder="Ex: 12345" 
-                          value={empresa.inscricaoMunicipal || ''} 
-                          onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}
-                      />
+                      <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
                   </div>
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-blue-600 text-xs">(Editável)</span></label>
-                      <select 
-                        className="w-full p-3 border rounded-lg bg-white text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none" 
-                        value={empresa.regimeTributario || 'MEI'} 
-                        onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}
-                      >
+                      <select className="w-full p-3 border rounded-lg bg-white text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.regimeTributario || 'MEI'} onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}>
                           <option value="MEI">Microempreendedor Individual (MEI)</option>
                           <option value="SIMPLES">Simples Nacional</option>
                           <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
@@ -323,6 +295,51 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
+          {/* === AQUI: CONFIGURAÇÃO DE EMISSÃO (DPS) === */}
+          <div className="p-8 border-b border-gray-100 bg-blue-50/30">
+            <h3 className="text-lg font-semibold text-blue-800 mb-6 flex items-center gap-2">
+              <Settings size={20} /> Numeração e Ambiente (DPS)
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Ambiente de Emissão</label>
+                    <select 
+                        className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
+                        value={empresa.ambiente}
+                        onChange={e => setEmpresa({...empresa, ambiente: e.target.value})}
+                    >
+                        <option value="HOMOLOGACAO">Homologação (Teste)</option>
+                        <option value="PRODUCAO">Produção (Valendo)</option>
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">Use "Homologação" para testar sem valor fiscal.</p>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Série do DPS</label>
+                    <input 
+                        type="text" 
+                        className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
+                        value={empresa.serieDPS}
+                        onChange={e => setEmpresa({...empresa, serieDPS: e.target.value})}
+                        placeholder="Ex: 900"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">Geralmente "900" para testes ou "1" para produção.</p>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Usado</label>
+                    <input 
+                        type="number" 
+                        className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                        value={empresa.ultimoDPS}
+                        onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}
+                    />
+                    <p className="text-xs text-slate-500 mt-1">O sistema usará o Próximo (Ex: se 0, emite 1).</p>
+                </div>
+            </div>
+          </div>
+
           {/* SEÇÃO 2: ENDEREÇO */}
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
@@ -354,20 +371,10 @@ export default function ConfiguracoesEmpresa() {
                         </p>
                     </div>
                     <div className="flex gap-2">
-                        <button 
-                            type="button" 
-                            onClick={() => setModoEdicaoCertificado(!modoEdicaoCertificado)} 
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded transition"
-                            title="Atualizar / Substituir"
-                        >
+                        <button type="button" onClick={() => setModoEdicaoCertificado(!modoEdicaoCertificado)} className="p-2 text-blue-600 hover:bg-blue-50 rounded transition" title="Atualizar / Substituir">
                             <FileKey size={20} />
                         </button>
-                        <button 
-                            type="button" 
-                            onClick={handleDeletarCertificado}
-                            className="p-2 text-red-500 hover:bg-red-50 rounded transition"
-                            title="Excluir Certificado"
-                        >
+                        <button type="button" onClick={handleDeletarCertificado} className="p-2 text-red-500 hover:bg-red-50 rounded transition" title="Excluir Certificado">
                             <Trash2 size={20} />
                         </button>
                     </div>
@@ -375,7 +382,7 @@ export default function ConfiguracoesEmpresa() {
             ) : null}
 
             {(modoEdicaoCertificado || !dadosCertificado.ativo) && (
-                <div className="bg-white p-6 rounded-xl border border-dashed border-slate-300 hover:border-blue-400 transition group animate-in fade-in slide-in-from-top-2">
+                <div className="bg-white p-6 rounded-xl border border-dashed border-slate-300 hover:border-blue-400 transition group">
                     <label className="block text-sm font-bold text-slate-700 mb-4 group-hover:text-blue-600 transition flex items-center gap-2">
                         <FileKey size={18}/> {dadosCertificado.ativo ? 'Substituir Certificado Atual' : 'Configurar Novo Certificado'}
                     </label>
@@ -387,25 +394,16 @@ export default function ConfiguracoesEmpresa() {
                         </label>
                         <div className="relative w-full md:w-64">
                             <Lock className="absolute left-3 top-3 text-gray-400" size={16} />
-                            <input 
-                                type="password" 
-                                placeholder="Senha do Certificado" 
-                                value={certSenha} 
-                                onChange={e => setCertSenha(e.target.value)}
-                                className="pl-10 p-3 border rounded-lg w-full text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                            />
+                            <input type="password" placeholder="Senha do Certificado" value={certSenha} onChange={e => setCertSenha(e.target.value)} className="pl-10 p-3 border rounded-lg w-full text-sm focus:ring-2 focus:ring-blue-500 outline-none"/>
                         </div>
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-4 border-t pt-2">
-                        Nota de Segurança: Sua senha é utilizada apenas para validar o certificado e assinar as notas fiscais.
-                    </p>
                 </div>
             )}
           </div>
 
           <div className="bg-gray-50 p-6 flex flex-col items-center gap-4 border-t sticky bottom-0 z-10 shadow-inner">
             {msg && (
-              <div className={`px-6 py-3 rounded-lg text-sm font-bold shadow-md animate-in fade-in slide-in-from-bottom-2 ${msg.tipo === 'sucesso' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+              <div className={`px-6 py-3 rounded-lg text-sm font-bold shadow-md ${msg.tipo === 'sucesso' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                 {msg.texto}
               </div>
             )}

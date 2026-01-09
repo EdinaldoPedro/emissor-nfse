@@ -1,21 +1,27 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Building2, Save, ArrowLeft, Search, MapPin, Briefcase, Lock, Trash2, CheckCircle } from 'lucide-react';
+import { 
+  Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
+  Lock, CheckCircle, Trash2, Info, Upload, FileKey
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function ConfiguracoesEmpresa() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [buscando, setBuscando] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState<{texto: string, tipo: 'sucesso' | 'erro'} | null>(null);
+  
+  const [isLocked, setIsLocked] = useState(false);
+  const [isContador, setIsContador] = useState(false);
   
   const [atividades, setAtividades] = useState<any[]>([]); 
-  
-  // Estado do Certificado
-  const [certFile, setCertFile] = useState<string | null>(null); // Base64
+
+  const [certFile, setCertFile] = useState<string | null>(null);
   const [certSenha, setCertSenha] = useState('');
   const [dadosCertificado, setDadosCertificado] = useState<{ativo: boolean, vencimento: string | null}>({ ativo: false, vencimento: null });
+  const [modoEdicaoCertificado, setModoEdicaoCertificado] = useState(false);
 
   const [empresa, setEmpresa] = useState({
     documento: '',
@@ -32,10 +38,17 @@ export default function ConfiguracoesEmpresa() {
     cidade: '',
     uf: '',
     codigoIbge: '',
-    ambiente: 'HOMOLOGACAO', // Default
+    email: '',
+    // NOVOS CAMPOS
+    ambiente: 'HOMOLOGACAO',
     serieDPS: '900',
     ultimoDPS: 0
   });
+
+  const showMessage = (texto: string, tipo: 'sucesso' | 'erro') => {
+      setMsg({ texto, tipo });
+      setTimeout(() => setMsg(null), 3000);
+  };
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
@@ -43,29 +56,42 @@ export default function ConfiguracoesEmpresa() {
 
     async function carregarDados() {
       try {
-        const res = await fetch('/api/perfil', { headers: { 'x-user-id': userId } });
+        const contextId = localStorage.getItem('empresaContextId');
+        if (contextId) setIsContador(true);
+
+        const res = await fetch('/api/perfil', { 
+            headers: { 
+                'x-user-id': userId,
+                'x-empresa-id': contextId || ''
+            } 
+        });
+
         if (res.ok) {
           const dados = await res.json();
           setEmpresa(prev => ({ ...prev, ...dados }));
           
           if (dados.atividades) setAtividades(dados.atividades);
           
-          // Carrega status do certificado (sem baixar o arquivo)
           setDadosCertificado({
               ativo: dados.temCertificado,
               vencimento: dados.vencimentoCertificado
           });
+
+          if (!dados.temCertificado) setModoEdicaoCertificado(true);
+          if (dados.cadastroCompleto) setIsLocked(true);
         }
       } catch (error) { console.error("Erro ao carregar perfil"); }
     }
     carregarDados();
   }, [router]);
 
-  const consultarCNPJ = async () => {
+  const consultarCNPJ = async (forcarAtualizacao = false) => {
     const docLimpo = empresa.documento.replace(/\D/g, '');
-    if (docLimpo.length !== 14) { alert("Digite um CNPJ válido."); return; }
+    
+    if (isLocked && !forcarAtualizacao) return; 
+    if (docLimpo.length !== 14) { alert("CNPJ inválido."); return; }
+
     setBuscando(true);
-    setMsg('');
     try {
       const res = await fetch('/api/external/cnpj', {
         method: 'POST',
@@ -73,22 +99,35 @@ export default function ConfiguracoesEmpresa() {
         body: JSON.stringify({ cnpj: docLimpo })
       });
       const dados = await res.json();
+
       if (res.ok) {
-        setEmpresa(prev => ({ ...prev, ...dados }));
+        setEmpresa(prev => ({
+          ...prev,
+          razaoSocial: dados.razaoSocial,
+          nomeFantasia: dados.nomeFantasia,
+          cnaePrincipal: dados.cnaePrincipal,
+          cep: dados.cep,
+          logradouro: dados.logradouro,
+          numero: dados.numero,
+          complemento: dados.complemento,
+          bairro: dados.bairro,
+          cidade: dados.cidade,
+          uf: dados.uf,
+          codigoIbge: dados.codigoIbge,
+          email: dados.email || prev.email 
+        }));
         setAtividades(dados.cnaes || []);
-        setMsg('✅ Dados carregados!');
-      } else { setMsg('❌ ' + (dados.error || 'Erro ao buscar.')); }
-    } catch (error) { setMsg('❌ Erro de conexão.'); } 
+        showMessage('✅ Dados atualizados com base na Receita Federal!', 'sucesso');
+      } else { showMessage('❌ ' + (dados.error || 'Erro ao buscar dados.'), 'erro'); }
+    } catch (error) { showMessage('❌ Erro de conexão.', 'erro'); } 
     finally { setBuscando(false); }
   };
 
-  // Converte arquivo para Base64
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
           const reader = new FileReader();
           reader.onloadend = () => {
-              // Remove o prefixo "data:application/x-pkcs12;base64," se existir
               const base64String = (reader.result as string).split(',')[1];
               setCertFile(base64String);
           };
@@ -98,217 +137,268 @@ export default function ConfiguracoesEmpresa() {
 
   const handleDeletarCertificado = async () => {
       if(!confirm("Tem certeza? Sem o certificado você não poderá emitir notas.")) return;
-      
-      // Envia flag para deletar
-      await salvarDados({ deletarCertificado: true });
-      setDadosCertificado({ ativo: false, vencimento: null });
-      setCertFile(null);
-      setCertSenha('');
+      await handleSalvar(null, { deletarCertificado: true });
+      window.location.reload();
   };
 
-  const handleSalvar = (e: React.FormEvent) => {
-      e.preventDefault();
-      // Salva dados normais + certificado se houver novo
-      salvarDados({
-          certificadoArquivo: certFile,
-          certificadoSenha: certSenha
-      });
-  };
-
-  const salvarDados = async (extraData: any = {}) => {
+  const handleSalvar = async (e: React.FormEvent | null, extraData: any = {}) => {
+    if (e) e.preventDefault();
     setLoading(true);
-    setMsg('');
     const userId = localStorage.getItem('userId');
+    const contextId = localStorage.getItem('empresaContextId');
 
     try {
       const res = await fetch('/api/perfil', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+        headers: { 
+            'Content-Type': 'application/json', 
+            'x-user-id': userId || '',
+            'x-empresa-id': contextId || ''
+        },
         body: JSON.stringify({ 
             ...empresa, 
             cnaes: atividades,
-            ...extraData // Injeta certificado ou flag de delete
+            certificadoArquivo: certFile, 
+            certificadoSenha: certSenha,
+            ...extraData
         }),
       });
 
       const resposta = await res.json();
 
       if (res.ok) {
-        setMsg('✅ Cadastro atualizado com sucesso!');
-        // Se enviou certificado, limpa os campos de input por segurança
-        if (extraData.certificadoArquivo) {
-            setCertFile(null);
-            setCertSenha('');
-            // Atualiza visualmente (reload simples ou update state)
-            window.location.reload(); 
+        showMessage('✅ Cadastro salvo com sucesso!', 'sucesso');
+        if (certFile || extraData.deletarCertificado) {
+            setTimeout(() => window.location.reload(), 1500);
         }
-      } else {
-        setMsg(`❌ ${resposta.error || 'Erro ao salvar.'}`);
-      }
-    } catch (error) {
-      setMsg('❌ Erro de conexão.');
-    } finally {
-      setLoading(false);
-    }
+      } else { showMessage(`❌ ${resposta.error || 'Erro ao salvar.'}`, 'erro'); }
+    } catch (error) { showMessage('❌ Erro de conexão.', 'erro'); } 
+    finally { setLoading(false); }
   };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-12">
       <div className="max-w-4xl mx-auto">
+        
         <div className="flex items-center gap-4 mb-8">
           <button onClick={() => router.back()} className="p-2 hover:bg-gray-200 rounded-full transition">
             <ArrowLeft className="text-gray-600" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold text-gray-800">Cadastro da Empresa</h1>
+            <h1 className="text-3xl font-bold text-gray-800">
+                {isContador ? 'Dados da Empresa (Cliente)' : 'Cadastro da Empresa'}
+            </h1>
             <p className="text-gray-500">Dados obrigatórios para emissão de Nota Fiscal (NFS-e).</p>
           </div>
         </div>
 
+        {isLocked ? (
+            <div className="bg-orange-50 border-l-4 border-orange-400 p-4 mb-8 rounded-r shadow-sm flex flex-col md:flex-row items-start gap-4">
+                <div className="flex items-start gap-3 flex-1">
+                    <div className="text-orange-500 mt-1"><Info size={24} /></div>
+                    <div>
+                        <h3 className="font-bold text-orange-900">Cadastro Vinculado</h3>
+                        <p className="text-sm text-orange-800 mt-1 leading-relaxed">
+                            Este cadastro está associado ao CNPJ informado. Para garantir a segurança fiscal, a alteração do documento não é permitida manualmente.
+                        </p>
+                    </div>
+                </div>
+                {!isContador && (
+                    <button onClick={() => consultarCNPJ(true)} disabled={buscando} className="whitespace-nowrap bg-white text-orange-700 border border-orange-200 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-100 transition shadow-sm">
+                        {buscando ? 'Buscando...' : '↻ Atualizar Dados da Receita'}
+                    </button>
+                )}
+            </div>
+        ) : (
+            <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8 rounded-r shadow-sm flex items-start gap-4">
+                <div className="text-blue-500 mt-1"><Briefcase size={24} /></div>
+                <div>
+                    <h3 className="font-bold text-blue-900">Configuração Inicial</h3>
+                    <p className="text-sm text-blue-800 mt-1">Informe o <strong>CNPJ</strong> abaixo e clique em buscar.</p>
+                </div>
+            </div>
+        )}
+
         <form onSubmit={handleSalvar} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           
-          {/* ... CAMPOS NORMAIS (CNPJ, RAZÃO, ENDEREÇO) ... */}
-          {/* MANTIVE O MESMO LAYOUT DA VERSÃO ANTERIOR PARA ESSA PARTE, FOCANDO NO CERTIFICADO ABAIXO */}
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2">
               <Briefcase size={20} /> Dados Cadastrais
             </h3>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">CNPJ</label>
                 <div className="flex gap-2">
-                  <input type="text" className="w-full p-3 border rounded-lg" placeholder="00000000000191" value={empresa.documento} onChange={e => setEmpresa({...empresa, documento: e.target.value})} maxLength={18}/>
-                  <button type="button" onClick={consultarCNPJ} disabled={buscando} className="bg-blue-100 text-blue-700 px-6 py-2 rounded-lg font-medium flex items-center gap-2">
-                    {buscando ? '...' : <Search size={20} />}
-                  </button>
+                  <div className="relative flex-1">
+                    <Building2 className="absolute left-3 top-3 text-gray-400" size={20} />
+                    <input type="text" className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} placeholder="00000000000191" value={empresa.documento || ''} onChange={e => setEmpresa({...empresa, documento: e.target.value})} maxLength={18} disabled={isLocked} />
+                  </div>
+                  {!isLocked && (
+                      <button type="button" onClick={() => consultarCNPJ(false)} disabled={buscando} className="bg-blue-100 text-blue-700 px-6 py-2 rounded-lg font-medium hover:bg-blue-200 transition flex items-center gap-2 disabled:opacity-50">
+                        {buscando ? '...' : <><Search size={20} /> Buscar</>}
+                      </button>
+                  )}
                 </div>
               </div>
-              <input type="text" className="w-full p-3 border rounded-lg bg-gray-50" placeholder="Razão Social" value={empresa.razaoSocial} onChange={e => setEmpresa({...empresa, razaoSocial: e.target.value})}/>
-              <input type="text" className="w-full p-3 border rounded-lg bg-gray-50" placeholder="Nome Fantasia" value={empresa.nomeFantasia} onChange={e => setEmpresa({...empresa, nomeFantasia: e.target.value})}/>
-              <input type="text" className="w-full p-3 border rounded-lg" placeholder="Inscrição Municipal" value={empresa.inscricaoMunicipal} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
-              <select className="w-full p-3 border rounded-lg" value={empresa.regimeTributario} onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}>
-                  <option value="MEI">MEI</option>
-                  <option value="SIMPLES">Simples Nacional</option>
-                  <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
-              </select>
-            </div>
-          </div>
 
-          <div className="p-8 border-b border-gray-100">
-            <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2"><MapPin size={20} /> Endereço</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <input className="p-3 border rounded-lg" placeholder="CEP" value={empresa.cep} onChange={e => setEmpresa({...empresa, cep: e.target.value})}/>
-                <input className="md:col-span-2 p-3 border rounded-lg" placeholder="Logradouro" value={empresa.logradouro} onChange={e => setEmpresa({...empresa, logradouro: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="Número" value={empresa.numero} onChange={e => setEmpresa({...empresa, numero: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="Bairro" value={empresa.bairro} onChange={e => setEmpresa({...empresa, bairro: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="Cidade" value={empresa.cidade} onChange={e => setEmpresa({...empresa, cidade: e.target.value})}/>
-                <input className="p-3 border rounded-lg" placeholder="UF" value={empresa.uf} onChange={e => setEmpresa({...empresa, uf: e.target.value})}/>
-                <input className="p-3 border rounded-lg bg-gray-50" placeholder="IBGE" readOnly value={empresa.codigoIbge}/>
+              <div><label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly /></div>
+
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
+                      <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
+                  </div>
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-blue-600 text-xs">(Editável)</span></label>
+                      <select className="w-full p-3 border rounded-lg bg-white text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.regimeTributario || 'MEI'} onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}>
+                          <option value="MEI">Microempreendedor Individual (MEI)</option>
+                          <option value="SIMPLES">Simples Nacional</option>
+                          <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>
+                      </select>
+                  </div>
+              </div>
+
+              {/* CNAEs */}
+              <div className="md:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-200 mt-2 opacity-80">
+                <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-bold text-gray-600 flex items-center gap-2">📋 Atividades (CNAEs) - Automático</h4>
+                    <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">{atividades.length} atividades</span>
+                </div>
+                {atividades.length === 0 ? (
+                    <p className="text-xs text-gray-500 italic p-2">Nenhuma atividade carregada.</p>
+                ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                        {atividades.map((cnae, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-xs bg-white p-3 rounded border border-gray-200 shadow-sm">
+                                <span className={`font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wide ${cnae.principal ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                    {cnae.principal ? 'Principal' : 'Secundário'}
+                                </span>
+                                <div>
+                                    <span className="font-mono font-bold text-gray-800 text-sm block">{cnae.codigo}</span>
+                                    <span className="text-gray-600 leading-tight">{cnae.descricao}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+              </div>
             </div>
           </div>
 
           {/* === NOVA ÁREA: CONFIGURAÇÃO DE EMISSÃO (DPS) === */}
-            <div className="mt-6 bg-blue-50 p-4 rounded-lg border border-blue-100">
-                <h4 className="text-sm font-bold text-blue-800 mb-3 flex items-center gap-2">
-                    ⚙️ Configuração de Numeração (DPS)
+            <div className="p-8 border-b border-gray-100 bg-blue-50/50">
+                <h4 className="text-lg font-bold text-blue-800 mb-6 flex items-center gap-2">
+                    ⚙️ Configuração de Emissão (DPS)
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-1">Ambiente</label>
+                        <label className="block text-sm font-medium text-slate-600 mb-2">Ambiente</label>
                         <select 
-                            className="w-full p-2 border rounded bg-white text-sm"
+                            className="w-full p-3 border rounded-lg bg-white text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
                             value={empresa.ambiente || 'HOMOLOGACAO'}
                             onChange={e => setEmpresa({...empresa, ambiente: e.target.value})}
                         >
                             <option value="HOMOLOGACAO">Homologação (Teste)</option>
                             <option value="PRODUCAO">Produção (Valendo)</option>
                         </select>
+                        <p className="text-xs text-slate-400 mt-2">Escolha onde as notas serão emitidas.</p>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-1">Série DPS</label>
+                        <label className="block text-sm font-medium text-slate-600 mb-2">Série DPS</label>
                         <input 
                             type="text" 
-                            className="w-full p-2 border rounded text-sm font-mono"
+                            className="w-full p-3 border rounded-lg font-mono text-slate-700"
                             value={empresa.serieDPS || '900'} 
                             onChange={e => setEmpresa({...empresa, serieDPS: e.target.value})}
                             placeholder="Ex: 900"
                         />
-                        <p className="text-[9px] text-slate-400 mt-1">Geralmente 900 p/ Homolog.</p>
+                        <p className="text-xs text-slate-400 mt-2">Série 900 é comum para testes.</p>
                     </div>
                     <div>
-                        <label className="block text-xs font-bold text-slate-500 mb-1">Último Número Usado</label>
+                        <label className="block text-sm font-medium text-slate-600 mb-2">Último Número Usado</label>
                         <input 
                             type="number" 
-                            className="w-full p-2 border rounded text-sm font-mono font-bold text-blue-700"
+                            className="w-full p-3 border rounded-lg font-mono font-bold text-blue-700 bg-white"
                             value={empresa.ultimoDPS} 
                             onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}
                         />
-                        <p className="text-[9px] text-slate-400 mt-1">O sistema usará o Próximo (X + 1).</p>
+                        <p className="text-xs text-slate-400 mt-2">O sistema usará o Próximo (X + 1).</p>
                     </div>
                 </div>
             </div>
 
-          {/* --- ÁREA DO CERTIFICADO DIGITAL --- */}
-          <div className="p-8 bg-slate-50">
+          {/* SEÇÃO 2: ENDEREÇO */}
+          <div className="p-8 border-b border-gray-100">
+            <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <input className="p-3 border rounded-lg" placeholder="CEP" value={empresa.cep || ''} onChange={e => setEmpresa({...empresa, cep: e.target.value})}/>
+                <input className="md:col-span-2 p-3 border rounded-lg" placeholder="Logradouro" value={empresa.logradouro || ''} onChange={e => setEmpresa({...empresa, logradouro: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="Número" value={empresa.numero || ''} onChange={e => setEmpresa({...empresa, numero: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="Bairro" value={empresa.bairro || ''} onChange={e => setEmpresa({...empresa, bairro: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="Cidade" value={empresa.cidade || ''} onChange={e => setEmpresa({...empresa, cidade: e.target.value})}/>
+                <input className="p-3 border rounded-lg" placeholder="UF" value={empresa.uf || ''} onChange={e => setEmpresa({...empresa, uf: e.target.value})}/>
+                <input className="p-3 border rounded-lg bg-gray-50" placeholder="IBGE" readOnly value={empresa.codigoIbge || ''}/>
+            </div>
+          </div>
+
+          {/* SEÇÃO 3: CERTIFICADO DIGITAL */}
+          <div className="p-8 bg-slate-50 border-t border-slate-200">
             <h3 className="text-lg font-semibold text-slate-700 mb-6 flex items-center gap-2">
                 <Lock size={20} /> Certificado Digital A1
             </h3>
 
             {dadosCertificado.ativo ? (
-                <div className="bg-white border-l-4 border-green-500 p-6 rounded shadow-sm flex justify-between items-center">
+                <div className="bg-white border-l-4 border-green-500 p-6 rounded shadow-sm mb-6 flex justify-between items-center">
                     <div>
-                        <h4 className="font-bold text-green-700 flex items-center gap-2">
-                            <CheckCircle size={20}/> Certificado Configurado
+                        <h4 className="font-bold text-green-700 flex items-center gap-2 text-lg">
+                            <CheckCircle size={24}/> Certificado Válido e Configurado
                         </h4>
                         <p className="text-sm text-gray-500 mt-1">
-                            Vencimento: {dadosCertificado.vencimento ? new Date(dadosCertificado.vencimento).toLocaleDateString() : 'Data desconhecida'}
+                            Expira em: <span className="font-mono font-bold text-gray-800">{dadosCertificado.vencimento ? new Date(dadosCertificado.vencimento).toLocaleDateString() : 'Data não identificada'}</span>
                         </p>
-                        <p className="text-xs text-gray-400 mt-2">O arquivo está seguro em nosso servidor.</p>
                     </div>
-                    <div className="flex gap-3">
-                        {/* Botão de Trocar apenas abre o input abaixo */}
-                        <button type="button" onClick={() => setDadosCertificado(prev => ({...prev, ativo: false}))} className="text-blue-600 hover:underline text-sm">Atualizar</button>
-                        <button type="button" onClick={handleDeletarCertificado} className="text-red-500 hover:bg-red-50 p-2 rounded transition" title="Remover"><Trash2 size={20}/></button>
+                    <div className="flex gap-2">
+                        <button type="button" onClick={() => setModoEdicaoCertificado(!modoEdicaoCertificado)} className="p-2 text-blue-600 hover:bg-blue-50 rounded transition" title="Atualizar / Substituir">
+                            <FileKey size={20} />
+                        </button>
+                        <button type="button" onClick={handleDeletarCertificado} className="p-2 text-red-500 hover:bg-red-50 rounded transition" title="Excluir Certificado">
+                            <Trash2 size={20} />
+                        </button>
                     </div>
                 </div>
-            ) : (
-                <div className="bg-white p-6 rounded border border-dashed border-slate-300">
-                    <label className="block text-sm font-medium text-slate-700 mb-3">Upload do Arquivo (.pfx ou .p12)</label>
-                    <div className="flex flex-col md:flex-row gap-4">
-                        <input 
-                            type="file" 
-                            accept=".pfx,.p12"
-                            onChange={handleFileChange}
-                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                        />
-                        <input 
-                            type="password" 
-                            placeholder="Senha do Certificado"
-                            value={certSenha}
-                            onChange={e => setCertSenha(e.target.value)}
-                            className="p-2 border rounded text-sm w-full md:w-48"
-                        />
+            ) : null}
+
+            {(modoEdicaoCertificado || !dadosCertificado.ativo) && (
+                <div className="bg-white p-6 rounded-xl border border-dashed border-slate-300 hover:border-blue-400 transition group">
+                    <label className="block text-sm font-bold text-slate-700 mb-4 group-hover:text-blue-600 transition flex items-center gap-2">
+                        <FileKey size={18}/> {dadosCertificado.ativo ? 'Substituir Certificado Atual' : 'Configurar Novo Certificado'}
+                    </label>
+                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                        <label className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg cursor-pointer transition font-medium w-full md:w-auto border ${certFile ? 'bg-green-50 text-green-700 border-green-200' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}>
+                            {certFile ? <CheckCircle size={18}/> : <Upload size={18} />}
+                            {certFile ? 'Arquivo Selecionado' : 'Escolher Arquivo (.pfx)'}
+                            <input type="file" accept=".pfx,.p12" onChange={handleFileChange} className="hidden"/>
+                        </label>
+                        <div className="relative w-full md:w-64">
+                            <Lock className="absolute left-3 top-3 text-gray-400" size={16} />
+                            <input type="password" placeholder="Senha do Certificado" value={certSenha} onChange={e => setCertSenha(e.target.value)} className="pl-10 p-3 border rounded-lg w-full text-sm focus:ring-2 focus:ring-blue-500 outline-none"/>
+                        </div>
                     </div>
-                    <p className="text-xs text-orange-600 mt-2">
-                        * A senha é validada no momento do envio. Se estiver errada, o arquivo não será salvo.
-                    </p>
                 </div>
             )}
           </div>
 
           {/* RODAPÉ */}
-          <div className="bg-white p-6 flex flex-col items-center gap-4 border-t">
+          <div className="bg-gray-50 p-6 flex flex-col items-center gap-4 border-t sticky bottom-0 z-10 shadow-inner">
             {msg && (
-              <div className={`px-4 py-2 rounded-full text-sm font-medium ${msg.includes('✅') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {msg}
+              <div className={`px-6 py-3 rounded-lg text-sm font-bold shadow-md ${msg.tipo === 'sucesso' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                {msg.texto}
               </div>
             )}
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full md:w-auto px-8 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200"
-            >
-              {loading ? 'Processando...' : <><Save size={20} /> Salvar Tudo</>}
+            <button type="submit" disabled={loading} className="w-full md:w-auto px-12 py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200 transform hover:scale-[1.02]">
+              {loading ? 'Processando...' : <><Save size={20} /> Salvar Configurações</>}
             </button>
           </div>
 

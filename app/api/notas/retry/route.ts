@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { createLog } from '@/app/services/logger'; // Importando o logger explicitamente
 
 const prisma = new PrismaClient();
 
@@ -17,28 +16,9 @@ export async function POST(request: Request) {
 
     if (!venda) throw new Error("Venda não encontrada.");
 
-    // --- NOVO: Grava log visual na timeline ---
-    await createLog({
-        level: 'INFO',
-        action: 'REENVIO_MANUAL',
-        message: 'Solicitação de reenvio iniciada pelo painel administrativo.',
-        empresaId: venda.empresaId,
-        vendaId: venda.id
-    });
-
-    // Atualiza dados
-    await prisma.venda.update({
-        where: { id: vendaId },
-        data: {
-            descricao: dadosAtualizados.descricao,
-            valor: dadosAtualizados.valor ? parseFloat(String(dadosAtualizados.valor)) : venda.valor,
-            status: 'PROCESSANDO'
-        }
-    });
-
     const baseUrl = process.env.URL_API_LOCAL || 'http://localhost:3000';
     
-    // Chama a API de emissão
+    // Chama a API de emissão PASSANDO O vendaId para que ela saiba que é REENVIO
     const resEmissao = await fetch(`${baseUrl}/api/notas`, {
         method: 'POST',
         headers: { 
@@ -47,6 +27,7 @@ export async function POST(request: Request) {
             'x-empresa-id': venda.empresaId 
         },
         body: JSON.stringify({
+            vendaId: venda.id, // <--- CAMPO CHAVE PARA REUTILIZAR A VENDA
             clienteId: venda.clienteId,
             valor: dadosAtualizados.valor || venda.valor,
             descricao: dadosAtualizados.descricao || venda.descricao,
@@ -57,7 +38,6 @@ export async function POST(request: Request) {
     const resultado = await resEmissao.json();
 
     if (!resEmissao.ok) {
-        await prisma.venda.update({ where: { id: vendaId }, data: { status: 'ERRO_EMISSAO' } });
         return NextResponse.json(resultado, { status: 400 });
     }
 

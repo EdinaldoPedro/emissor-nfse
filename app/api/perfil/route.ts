@@ -69,15 +69,12 @@ export async function GET(request: Request) {
     cpf: user.cpf,
     telefone: user.telefone,
     
-    // --- CORREÇÃO AQUI: AGRUPAR PREFERÊNCIAS ---
-    // O frontend espera um objeto 'configuracoes', mas o banco tem campos soltos.
     configuracoes: {
         darkMode: user.darkMode,
         idioma: user.idioma,
         notificacoesEmail: user.notificacoesEmail
     },
     
-    // Flag de contexto
     isContextMode: empresaAlvoId !== user.empresaId
   });
 }
@@ -85,6 +82,7 @@ export async function GET(request: Request) {
 // PUT
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
+  const contextEmpresaId = request.headers.get('x-empresa-id');
   const body = await request.json();
 
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
@@ -95,37 +93,21 @@ export async function PUT(request: Request) {
         include: { empresa: true }
     });
 
-    const isAdmin = ['ADMIN', 'MASTER', 'SUPORTE'].includes(user?.role || '');
-    const empresaExistente = user?.empresa;
-
-    if (empresaExistente?.cadastroCompleto && !isAdmin && body.documento) {
-        const cnpjAtual = empresaExistente.documento;
-        const cnpjNovo = body.documento.replace(/\D/g, '');
-        if (cnpjAtual !== cnpjNovo) {
-            return NextResponse.json({ error: 'CNPJ bloqueado.' }, { status: 403 });
-        }
-    }
-
-    // 1. Atualiza User (Dados Pessoais + Configurações)
+    // 1. Atualiza User
     const userDataToUpdate: any = {
         nome: body.nome,
         telefone: body.telefone
     };
 
-    // --- CORREÇÃO AQUI: DESAGRUPAR PREFERÊNCIAS ---
-    // Se vier o objeto 'configuracoes', salvamos nos campos individuais do banco
     if (body.configuracoes) {
         userDataToUpdate.darkMode = body.configuracoes.darkMode;
         userDataToUpdate.idioma = body.configuracoes.idioma;
         userDataToUpdate.notificacoesEmail = body.configuracoes.notificacoesEmail;
     }
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: userDataToUpdate
-    });
+    await prisma.user.update({ where: { id: userId }, data: userDataToUpdate });
 
-    // 2. Atualiza Empresa (Se houver CNPJ)
+    // 2. Atualiza Empresa
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
       
@@ -143,12 +125,12 @@ export async function PUT(request: Request) {
           codigoIbge: body.codigoIbge,
           email: body.emailComercial || body.email,
           cadastroCompleto: true,
+          // === PERSISTÊNCIA DOS DADOS DE DPS ===
           serieDPS: body.serieDPS, 
           ultimoDPS: body.ultimoDPS ? parseInt(String(body.ultimoDPS)) : undefined,
-          ambiente: body.ambiente // Garante que salva Homologação/Produção
+          ambiente: body.ambiente
       };
 
-      // Tratamento Certificado
       if (body.deletarCertificado) {
           dadosEmpresa.certificadoA1 = null;
           dadosEmpresa.senhaCertificado = null;
@@ -180,11 +162,7 @@ export async function PUT(request: Request) {
           create: { documento: cnpjLimpo, ...dadosEmpresa }
       });
 
-      if (user?.empresaId !== empresaSalva.id) {
-          const donoAtual = await prisma.user.findFirst({ where: { empresaId: empresaSalva.id } });
-          if (donoAtual && donoAtual.id !== userId && !isAdmin) {
-              return NextResponse.json({ error: 'CNPJ já pertence a outro usuário.' }, { status: 409 });
-          }
+      if (user?.empresaId !== empresaSalva.id && !contextEmpresaId) {
           await prisma.user.update({ where: { id: userId }, data: { empresaId: empresaSalva.id } });
       }
 
