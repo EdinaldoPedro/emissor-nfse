@@ -45,7 +45,7 @@ export abstract class BaseStrategy {
         }
     }
 
-    // --- ASSINATURA AJUSTADA (Visual Sefaz + SHA1) ---
+    // --- ASSINATURA C14N CORRIGIDA (Tags Expandidas) ---
     protected assinarXML(xml: string, tagId: string, empresa: any): string {
         try {
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
@@ -55,46 +55,45 @@ export abstract class BaseStrategy {
                 .replace('-----END CERTIFICATE-----', '')
                 .replace(/[\r\n]/g, '');
 
-            // 1. Extrai infDPS
+            // 1. Extrai infDPS (O conteúdo a ser assinado)
             const match = xml.match(/<infDPS[\s\S]*?<\/infDPS>/);
             if (!match) throw new Error("Tag infDPS não encontrada para assinatura.");
             
             let nodeToSign = match[0]; 
 
-            // 2. INJEÇÃO VIRTUAL (Se não tiver namespace, injeta para o hash)
-            // Isso garante que o hash contemple o namespace mesmo se o XML não tiver (herança)
+            // 2. Garante Namespace para o Hash (Canonicalização)
+            // Se o XML não tiver o xmlns na tag infDPS, injetamos para garantir que o hash contemple o namespace
             if (!nodeToSign.includes('xmlns="http://www.sped.fazenda.gov.br/nfse"')) {
                 nodeToSign = nodeToSign.replace('<infDPS', '<infDPS xmlns="http://www.sped.fazenda.gov.br/nfse"');
             }
 
-            // 3. Digest SHA-1
-            const shasum = crypto.createHash('sha1');
+            // 3. Digest SHA-256
+            const shasum = crypto.createHash('sha256');
             shasum.update(nodeToSign, 'utf8');
             const digestValue = shasum.digest('base64');
 
-            // 4. Monta o SignedInfo
-            // MUDANÇA: Usando tags self-closing COM ESPAÇO ( />) igual ao XML válido da Sefaz.
+            // 4. Monta o SignedInfo (CORREÇÃO CRÍTICA: TAGS EXPANDIDAS)
+            // O padrão C14N exige <Tag></Tag> e não <Tag /> para elementos vazios
             const signedInfoContent = 
-`<CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" />` +
-`<SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1" />` +
+`<CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>` +
+`<SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>` +
 `<Reference URI="#${tagId}">` +
 `<Transforms>` +
-`<Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" />` +
-`<Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" />` +
+`<Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>` +
+`<Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></Transform>` +
 `</Transforms>` +
-`<DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1" />` +
+`<DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>` +
 `<DigestValue>${digestValue}</DigestValue>` +
 `</Reference>`;
 
-            // 5. Assina (Com Namespace no SignedInfo para cálculo)
+            // 5. Assina o SignedInfo com Namespace
             const signedInfoToSign = `<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">${signedInfoContent}</SignedInfo>`;
             
-            const signer = crypto.createSign('RSA-SHA1');
+            const signer = crypto.createSign('RSA-SHA256');
             signer.update(signedInfoToSign);
             const signatureValue = signer.sign(credenciais.key, 'base64');
 
-            // 6. Monta o XML Final (Sem namespace redundante no SignedInfo para evitar E999)
-            // AQUI MANTEMOS A ESTRUTURA LIMPA PARA ENVIO
+            // 6. Monta o XML Final
             const signatureXML = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo>${signedInfoContent}</SignedInfo><SignatureValue>${signatureValue}</SignatureValue><KeyInfo><X509Data><X509Certificate>${certClean}</X509Certificate></X509Data></KeyInfo></Signature>`;
 
             return xml.replace('</DPS>', `${signatureXML}</DPS>`);
