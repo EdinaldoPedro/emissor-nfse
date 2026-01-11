@@ -6,7 +6,6 @@ import { getTributacaoPorCnae } from '@/app/utils/tributacao';
 
 const prisma = new PrismaClient();
 
-// ... (getEmpresaContexto e limparPayloadParaLog mantidos iguais) ...
 async function getEmpresaContexto(userId: string, contextId: string | null) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return null;
@@ -29,6 +28,7 @@ function limparPayloadParaLog(payload: any) {
     return copia;
 }
 
+// POST (Mantido igual ao original, sem alterações na emissão)
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextId = request.headers.get('x-empresa-id'); 
@@ -39,7 +39,6 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae, vendaId } = body;
 
-    // 1. Validação de Acesso
     if (!userId) throw new Error("Usuário não identificado.");
     const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
     if (!empresaIdAlvo) throw new Error("Acesso negado.");
@@ -49,16 +48,12 @@ export async function POST(request: Request) {
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!prestador || !tomador) throw new Error("Empresas não encontradas.");
 
-    // 2. Gestão da Venda
     let venda;
     if (vendaId) {
         venda = await prisma.venda.update({
             where: { id: vendaId },
             data: { valor: parseFloat(valor), descricao: descricao, status: "PROCESSANDO" }
         });
-        // 3. Sequencial DPS
-        // Não incrementa no retry para tentar manter o mesmo, OU incrementa se falhou antes
-        // Por segurança fiscal, vamos incrementar sempre que gerar um novo DPS
     } else {
         venda = await prisma.venda.create({
             data: { empresaId: prestador.id, clienteId: tomador.id, valor: parseFloat(valor), descricao: descricao, status: "PROCESSANDO" }
@@ -69,7 +64,6 @@ export async function POST(request: Request) {
     const novoNumeroDPS = (prestador.ultimoDPS || 0) + 1;
     await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: novoNumeroDPS } });
 
-    // 4. Inteligência Fiscal
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
         const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
@@ -110,14 +104,9 @@ export async function POST(request: Request) {
         serieDPS: prestador.serieDPS || '900'
     };
 
-    // 5. Execução
     const strategy = EmissorFactory.getStrategy(prestador);
     const resultado = await strategy.executar(dadosParaEstrategia);
 
-    // --- AQUI ESTÁ O AJUSTE DE LOGS ---
-    
-    // Log "EMISSAO_INICIADA" AGORA com o XML Gerado (se existir) + Payload Limpo
-    // Isso resolve o pedido para o XML aparecer no log de início
     await createLog({
         level: 'INFO', action: 'EMISSAO_INICIADA',
         message: `Iniciando transmissão DPS ${novoNumeroDPS}.`,
@@ -125,26 +114,22 @@ export async function POST(request: Request) {
         vendaId: venda.id,
         details: { 
             payloadOriginal: limparPayloadParaLog(dadosParaEstrategia),
-            xmlGerado: resultado.xmlGerado // <--- XML AQUI
+            xmlGerado: resultado.xmlGerado 
         }
     });
 
-    // 6. Tratamento de Resultado
     if (!resultado.sucesso) {
         await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
-        
         await createLog({
             level: 'ERRO', action: 'FALHA_EMISSAO',
             message: resultado.motivo || 'Rejeição da Sefaz',
             empresaId: prestador.id,
             vendaId: venda.id,
-            details: resultado.erros // <--- Apenas o erro da API aqui, fica mais limpo
+            details: resultado.erros
         });
-        
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
     }
 
-    // Sucesso
     const nota = await prisma.notaFiscal.create({
         data: {
             vendaId: venda.id,
@@ -192,7 +177,7 @@ export async function POST(request: Request) {
   }
 }
 
-// --- API GET (LISTAGEM) ---
+// --- API GET (LISTAGEM ATUALIZADA) ---
 export async function GET(request: Request) {
     const userId = request.headers.get('x-user-id');
     const contextId = request.headers.get('x-empresa-id');
@@ -215,6 +200,7 @@ export async function GET(request: Request) {
               OR: [
                   { cliente: { razaoSocial: { contains: search } } },
                   { cliente: { documento: { contains: search } } },
+                  // Correção para busca numérica segura
                   ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
               ]
           })
@@ -226,18 +212,35 @@ export async function GET(request: Request) {
               where: whereClause, take: limit, skip: skip, orderBy: { createdAt: 'desc' },
               include: {
                   cliente: { select: { razaoSocial: true, documento: true } },
-                  notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, codigoServico: true } },
+                  notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, xmlBase64: true, pdfBase64: true } },
                   logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true, details: true } }
               }
           }),
           prisma.venda.count({ where: whereClause })
       ]);
   
-      const dadosFinais = vendas.map(v => ({
-          ...v,
-          notas: v.notas.map(n => ({ ...n, itemLc: '---' })),
-          motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
-      }));
+      const dadosFinais = vendas.map(v => {
+          // Lógica para preencher o Código Tributação Nacional
+          let codigoTribDisplay = '---';
+          
+          if (v.notas.length > 0 && v.notas[0].cnae) {
+             // Usa o helper existente para descobrir a tributação baseada no CNAE salvo na nota
+             const info = getTributacaoPorCnae(v.notas[0].cnae);
+             if (info && info.codigoTributacaoNacional) {
+                 codigoTribDisplay = info.codigoTributacaoNacional;
+             }
+          }
+
+          return {
+            ...v,
+            notas: v.notas.map(n => ({ 
+                ...n, 
+                // Injeta o código calculado para exibição
+                codigoTribNacional: codigoTribDisplay 
+            })),
+            motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
+          };
+      });
   
       return NextResponse.json({ data: dadosFinais, meta: { total, page, totalPages: Math.ceil(total / limit) } });
     } catch (error) { return NextResponse.json({ error: 'Erro ao buscar notas' }, { status: 500 }); }

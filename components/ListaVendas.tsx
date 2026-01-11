@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, FileText, MoreVertical, Ban, RefreshCcw, Share2, ChevronLeft, ChevronRight, Loader2, AlertCircle, AlertTriangle, FileCode, Download, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Search, FileText, MoreVertical, Ban, RefreshCcw, Share2, ChevronLeft, ChevronRight, Loader2, AlertCircle, AlertTriangle, FileCode, Download, RefreshCw, Printer } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface ListaVendasProps {
@@ -20,11 +20,43 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  // --- FUNÇÕES NOVAS (Download e Consulta) ---
+  // --- FUNÇÃO PARA ABRIR PDF (Base64) EM NOVA ABA ---
+  const openPdfInNewTab = (base64Data: string) => {
+    try {
+        // Converte Base64 para Blob
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const file = new Blob([byteArray], { type: 'application/pdf' });
+        const fileURL = URL.createObjectURL(file);
+        
+        // Abre nova janela com o PDF
+        const pdfWindow = window.open(fileURL);
+        if (pdfWindow) {
+            pdfWindow.focus();
+        } else {
+            alert("Pop-up bloqueado. Permita pop-ups para visualizar o PDF.");
+        }
+    } catch (e) {
+        console.error("Erro ao gerar PDF:", e);
+        alert("Erro ao processar o arquivo PDF.");
+    }
+  };
+
+  // --- FUNÇÃO PARA BAIXAR XML ---
   const downloadBase64 = (base64: string, filename: string, mime: string) => {
     try {
+        let finalBase64 = base64;
+        // Se vier como string XML pura, converte para base64
+        if (base64.trim().startsWith('<')) {
+            finalBase64 = btoa(base64);
+        }
+
         const link = document.createElement('a');
-        link.href = `data:${mime};base64,${base64}`;
+        link.href = `data:${mime};base64,${finalBase64}`;
         link.download = filename;
         document.body.appendChild(link);
         link.click();
@@ -35,7 +67,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   };
 
   const handleConsultarNota = async (notaId: string) => {
-    if(!confirm("Consultar status na Sefaz para atualizar dados?")) return;
+    if(!confirm("Consultar status atualizado na Sefaz?")) return;
     try {
         const res = await fetch('/api/notas/consultar', {
             method: 'POST',
@@ -44,16 +76,15 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
         });
         const data = await res.json();
         if (res.ok) {
-            alert("✅ Nota atualizada!");
-            fetchVendas(); // Recarrega a lista
+            alert("✅ Nota atualizada com sucesso!");
+            fetchVendas(); // Recarrega a lista para mostrar novos dados
         } else {
-            alert("Erro: " + data.error);
+            alert("Erro: " + (data.error || "Falha na consulta"));
         }
     } catch (e) {
         alert("Erro de conexão.");
     }
   };
-  // ---------------------------------------------
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -105,12 +136,10 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
   const handleAction = async (action: string, vendaId: string) => {
       let motivo = '';
-      
-      // Se for cancelar, pede motivo
       if (action === 'cancelar') {
           motivo = prompt("Motivo do cancelamento (mínimo 15 caracteres):") || '';
           if (motivo.length < 15) return alert("Motivo muito curto. O cancelamento exige justificativa.");
-      } else if(!confirm(`Deseja realmente ${action}?`)) {
+      } else if (!confirm(`Deseja realmente ${action}?`)) {
           return;
       }
 
@@ -182,7 +211,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                         return (
                             <tr key={venda.id} className="hover:bg-slate-50 transition">
                                 <td className="p-4 font-mono font-bold text-slate-700">
-                                    {nota?.numero ? `#${nota.numero}` : <span className="text-gray-300">-</span>}
+                                    {/* 1. REMOVIDO O '#' DO NÚMERO DA NOTA */}
+                                    {nota?.numero ? `${nota.numero}` : <span className="text-gray-300">-</span>}
                                 </td>
                                 <td className="p-4">
                                     <p className="font-bold text-slate-800">{venda.cliente.razaoSocial}</p>
@@ -190,9 +220,10 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                 </td>
                                 
                                 <td className="p-4">
-                                    {nota?.itemLc && nota.itemLc !== '---' ? (
+                                    {/* 3. EXIBINDO CÓDIGO TRIBUTAÇÃO NACIONAL */}
+                                    {nota?.codigoTribNacional && nota.codigoTribNacional !== '---' ? (
                                         <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded border border-slate-200">
-                                            {nota.itemLc}
+                                            {nota.codigoTribNacional}
                                         </span>
                                     ) : (
                                         <span className="text-gray-300 text-xs italic">...</span>
@@ -244,45 +275,18 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                     ) : venda.status === 'CONCLUIDA' && (
                                         <div className="flex items-center justify-end gap-2">
                                             
-                                            {/* BOTÕES NOVOS: CONSULTAR / XML / PDF */}
-                                            {nota ? (
-                                                <>
-                                                    {/* Se status ok mas sem número ou XML -> Botão Atualizar */}
-                                                    {(nota.numero === 0 || !nota.xmlBase64) && (
-                                                        <button 
-                                                            onClick={() => handleConsultarNota(nota.id)}
-                                                            className="p-1.5 text-orange-600 hover:bg-orange-50 rounded border border-orange-200 transition"
-                                                            title="Atualizar da Sefaz"
-                                                        >
-                                                            <RefreshCw size={16}/>
-                                                        </button>
-                                                    )}
+                                            {/* Botão de Atualizar/Consultar se necessário */}
+                                            {nota && (nota.numero === 0 || !nota.xmlBase64) && (
+                                                <button 
+                                                    onClick={() => handleConsultarNota(nota.id)}
+                                                    className="p-1.5 text-orange-600 hover:bg-orange-50 rounded border border-orange-200 transition"
+                                                    title="Atualizar da Sefaz"
+                                                >
+                                                    <RefreshCw size={16}/>
+                                                </button>
+                                            )}
 
-                                                    {/* Se tem XML -> Download XML */}
-                                                    {nota.xmlBase64 && (
-                                                        <button 
-                                                            onClick={() => downloadBase64(nota.xmlBase64, `nota-${nota.numero}.xml`, 'text/xml')}
-                                                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded border border-blue-200 transition"
-                                                            title="Baixar XML"
-                                                        >
-                                                            <FileCode size={16}/>
-                                                        </button>
-                                                    )}
-
-                                                    {/* Se tem PDF -> Download PDF */}
-                                                    {nota.pdfBase64 && (
-                                                        <button 
-                                                            onClick={() => downloadBase64(nota.pdfBase64, `nota-${nota.numero}.pdf`, 'application/pdf')}
-                                                            className="p-1.5 text-red-600 hover:bg-red-50 rounded border border-red-200 transition"
-                                                            title="Baixar PDF"
-                                                        >
-                                                            <Download size={16}/>
-                                                        </button>
-                                                    )}
-                                                </>
-                                            ) : null}
-
-                                            {/* Menu de Ações Extras (Cancelar/Compartilhar) */}
+                                            {/* 2. MENU DE AÇÕES: PDF/XML MOVIDOS PARA DENTRO */}
                                             <div className="relative inline-block">
                                                 <button onClick={() => setOpenMenuId(openMenuId === venda.id ? null : venda.id)} className="p-2 hover:bg-slate-200 rounded-full transition">
                                                     <MoreVertical size={16} className="text-slate-500"/>
@@ -290,9 +294,31 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                                 
                                                 {openMenuId === venda.id && (
                                                     <div className="absolute right-0 mt-2 w-48 bg-white border rounded-lg shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                                        
+                                                        {/* Visualizar PDF */}
+                                                        {nota?.pdfBase64 ? (
+                                                            <button onClick={() => openPdfInNewTab(nota.pdfBase64)} className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2">
+                                                                <Printer size={14} className="text-red-500"/> Visualizar PDF
+                                                            </button>
+                                                        ) : (
+                                                            <button onClick={() => alert("PDF ainda não processado pela Sefaz. Tente atualizar a nota.")} className="w-full text-left px-4 py-2 text-sm text-gray-400 hover:bg-slate-50 flex items-center gap-2 cursor-not-allowed">
+                                                                <Printer size={14}/> PDF Indisponível
+                                                            </button>
+                                                        )}
+
+                                                        {/* Baixar XML */}
+                                                        {nota?.xmlBase64 && (
+                                                            <button onClick={() => downloadBase64(nota.xmlBase64, `nota-${nota.numero}.xml`, 'text/xml')} className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2">
+                                                                <FileCode size={14} className="text-blue-500"/> Baixar XML
+                                                            </button>
+                                                        )}
+
+                                                        <div className="border-t my-1"></div>
+
                                                         <button onClick={() => alert("Compartilhar em breve!")} className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2">
                                                             <Share2 size={14}/> Compartilhar
                                                         </button>
+                                                        
                                                         <button onClick={() => handleAction('cancelar', venda.id)} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 border-t font-medium">
                                                             <Ban size={14}/> Cancelar Nota
                                                         </button>
