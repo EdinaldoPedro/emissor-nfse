@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory'; 
 import { getTributacaoPorCnae } from '@/app/utils/tributacao'; 
+import { processarRetornoNota } from '@/app/services/notaProcessor';
 
 const prisma = new PrismaClient();
 
@@ -28,7 +29,7 @@ function limparPayloadParaLog(payload: any) {
     return copia;
 }
 
-// POST (Mantido igual ao original, sem alterações na emissão)
+// POST DE EMISSÃO
 export async function POST(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextId = request.headers.get('x-empresa-id'); 
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!prestador || !tomador) throw new Error("Empresas não encontradas.");
 
+    // --- 1. CRIAÇÃO/ATUALIZAÇÃO DA VENDA ---
     let venda;
     if (vendaId) {
         venda = await prisma.venda.update({
@@ -61,6 +63,7 @@ export async function POST(request: Request) {
     }
     vendaIdLog = venda.id;
 
+    // --- 2. PREPARAÇÃO DO DPS ---
     const novoNumeroDPS = (prestador.ultimoDPS || 0) + 1;
     await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: novoNumeroDPS } });
 
@@ -104,6 +107,7 @@ export async function POST(request: Request) {
         serieDPS: prestador.serieDPS || '900'
     };
 
+    // --- 3. ENVIO DO DPS (Strategy) ---
     const strategy = EmissorFactory.getStrategy(prestador);
     const resultado = await strategy.executar(dadosParaEstrategia);
 
@@ -130,6 +134,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
     }
 
+    // --- 4. SUCESSO NA AUTORIZAÇÃO (Cria Nota) ---
     const nota = await prisma.notaFiscal.create({
         data: {
             vendaId: venda.id,
@@ -142,17 +147,17 @@ export async function POST(request: Request) {
             tomadorCnpj: tomador.documento.replace(/\D/g, ''),
             status: 'AUTORIZADA',
             chaveAcesso: resultado.notaGov!.chave,
+            // AQUI ESTAVA O PROBLEMA: FALTAVA O PROTOCOLO
+            protocolo: resultado.notaGov!.protocolo, 
             xmlBase64: resultado.notaGov!.xml,
             cnae: cnaeFinal,
             dataEmissao: new Date()
         }
     });
 
-    await prisma.venda.update({ where: { id: venda.id }, data: { status: 'CONCLUIDA' } });
-
     await createLog({
         level: 'INFO', action: 'NOTA_AUTORIZADA',
-        message: `Nota ${nota.numero} autorizada!`,
+        message: `Nota ${nota.numero} autorizada! Protocolo: ${resultado.notaGov!.protocolo}`,
         empresaId: prestador.id,
         vendaId: venda.id,
         details: { 
@@ -160,6 +165,9 @@ export async function POST(request: Request) {
             protocolo: resultado.notaGov!.protocolo
         }
     });
+
+    // --- 5. DISPARO DO FLUXO DE PROCESSAMENTO (XML + BOT PDF) ---
+    await processarRetornoNota(nota.id, prestador.id, venda.id);
 
     return NextResponse.json({ success: true, nota }, { status: 201 });
 
@@ -177,7 +185,7 @@ export async function POST(request: Request) {
   }
 }
 
-// --- API GET (LISTAGEM ATUALIZADA) ---
+// GET (Mantido igual)
 export async function GET(request: Request) {
     const userId = request.headers.get('x-user-id');
     const contextId = request.headers.get('x-empresa-id');
@@ -200,7 +208,6 @@ export async function GET(request: Request) {
               OR: [
                   { cliente: { razaoSocial: { contains: search } } },
                   { cliente: { documento: { contains: search } } },
-                  // Correção para busca numérica segura
                   ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
               ]
           })
@@ -220,24 +227,16 @@ export async function GET(request: Request) {
       ]);
   
       const dadosFinais = vendas.map(v => {
-          // Lógica para preencher o Código Tributação Nacional
           let codigoTribDisplay = '---';
-          
           if (v.notas.length > 0 && v.notas[0].cnae) {
-             // Usa o helper existente para descobrir a tributação baseada no CNAE salvo na nota
              const info = getTributacaoPorCnae(v.notas[0].cnae);
              if (info && info.codigoTributacaoNacional) {
                  codigoTribDisplay = info.codigoTributacaoNacional;
              }
           }
-
           return {
             ...v,
-            notas: v.notas.map(n => ({ 
-                ...n, 
-                // Injeta o código calculado para exibição
-                codigoTribNacional: codigoTribDisplay 
-            })),
+            notas: v.notas.map(n => ({ ...n, codigoTribNacional: codigoTribDisplay })),
             motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
           };
       });

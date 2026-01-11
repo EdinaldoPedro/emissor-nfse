@@ -14,17 +14,17 @@ export interface IResultadoEmissao {
 export interface IResultadoConsulta {
     sucesso: boolean;
     situacao: 'AUTORIZADA' | 'CANCELADA' | 'PROCESSANDO' | 'ERRO';
-    numeroNota?: string;      // O número real (ex: 125)
-    xmlDistribuicao?: string; // O XML oficial completo (Base64)
-    pdfBase64?: string;       // O PDF (se disponível pela API)
+    numeroNota?: string;      
+    xmlDistribuicao?: string; 
+    pdfBase64?: string;       
+    protocolo?: string; // <--- CAMPO NOVO ADICIONADO
     motivo?: string;
 }
 
-// ADICIONADO: Interface de Cancelamento
 export interface IResultadoCancelamento {
     sucesso: boolean;
     dataCancelamento?: Date;
-    xmlEvento?: string;       // XML do evento registrado
+    xmlEvento?: string;       
     motivo?: string;
 }
 
@@ -46,7 +46,6 @@ export interface IDadosEmissao {
 
 export interface IEmissorStrategy {
     executar(dados: IDadosEmissao): Promise<IResultadoEmissao>;
-    // Novos métodos obrigatórios
     consultar(chave: string, empresa: any): Promise<IResultadoConsulta>;
-    cancelar(chave: string, motivo: string, empresa: any): Promise<IResultadoCancelamento>;
+    cancelar(chave: string, protocolo: string, motivo: string, empresa: any): Promise<IResultadoCancelamento>;
 }
