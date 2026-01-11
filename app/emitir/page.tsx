@@ -115,6 +115,26 @@ export default function EmitirNotaPage() {
     finally { setBuscandoCliente(false); }
   }
 
+  // === MÁSCARA DE MOEDA (NOVO) ===
+  const formatarMoedaInput = (valor: string | number) => {
+    const v = Number(valor) || 0;
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+      minimumFractionDigits: 2
+    }).format(v);
+  };
+
+  const handleValorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const apenasNumeros = e.target.value.replace(/\D/g, "");
+    if (!apenasNumeros) {
+      setNfData({ ...nfData, valor: "0" });
+      return;
+    }
+    const valorNumerico = parseInt(apenasNumeros) / 100;
+    setNfData({ ...nfData, valor: String(valorNumerico) });
+  };
+
   const handleNext = async () => {
     if (step === 1 && modoCliente === 'novo') {
         const userId = localStorage.getItem('userId');
@@ -177,6 +197,9 @@ export default function EmitirNotaPage() {
   };
 
   const valorNumerico = parseFloat(nfData.valor) || 0;
+
+  // Lógica de Bloqueio do Passo 2
+  const isStep2Invalid = step === 2 && (valorNumerico <= 0 || !nfData.servicoDescricao.trim());
 
   if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados...</div>;
 
@@ -303,8 +326,33 @@ export default function EmitirNotaPage() {
                 )}
             </div>
 
-            <div><label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label><input type="number" placeholder="0,00" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={nfData.valor} onChange={(e) => setNfData({...nfData, valor: e.target.value})}/></div>
-            <div><label className="block text-sm font-medium text-slate-700 mb-2">Discriminação</label><textarea rows={4} placeholder="Descrição detalhada..." className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700" value={nfData.servicoDescricao} onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}></textarea></div>
+            {/* === CAMPO DE VALOR COM MÁSCARA === */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label>
+              <input 
+                type="text" 
+                inputMode="numeric"
+                className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" 
+                value={formatarMoedaInput(nfData.valor)} 
+                onChange={handleValorChange}
+                placeholder="R$ 0,00"
+              />
+            </div>
+            
+            {/* === CAMPO DE DESCRIÇÃO COM VALIDAÇÃO === */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação</label>
+              <textarea 
+                rows={4} 
+                placeholder="Descrição detalhada do serviço prestado..." 
+                className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 resize-none" 
+                value={nfData.servicoDescricao} 
+                onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}
+              ></textarea>
+              {nfData.servicoDescricao.trim().length === 0 && (
+                <p className="text-xs text-red-500 mt-1">* Obrigatório informar a descrição.</p>
+              )}
+            </div>
           </div>
         )}
 
@@ -322,8 +370,31 @@ export default function EmitirNotaPage() {
         )}
 
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-100">
-          {step > 1 ? <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded"><ArrowLeft size={18} /> Voltar</button> : <div></div>}
-          {step < 3 ? <button onClick={handleNext} disabled={(modoCliente === 'existente' && !nfData.clienteId) || (modoCliente === 'novo' && !novoCliente.nome)} className="bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50">{step === 1 && modoCliente === 'novo' ? 'Salvar e Avançar' : 'Próximo'} <ArrowRight size={18} /></button> : <button onClick={handleEmitir} disabled={loading} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold">{loading ? 'Enviando...' : <><CheckCircle size={20} /> EMITIR NOTA</>}</button>}
+          {step > 1 ? (
+            <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded">
+                <ArrowLeft size={18} /> Voltar
+            </button>
+          ) : (
+            <div></div>
+          )}
+          
+          {step < 3 ? (
+            <button 
+                onClick={handleNext} 
+                // TRAVA DE NAVEGAÇÃO: Passo 1 (Cliente) ou Passo 2 (Valor e Descrição)
+                disabled={
+                    (step === 1 && ((modoCliente === 'existente' && !nfData.clienteId) || (modoCliente === 'novo' && !novoCliente.nome))) ||
+                    isStep2Invalid
+                }
+                className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+                {step === 1 && modoCliente === 'novo' ? 'Salvar e Avançar' : 'Próximo'} <ArrowRight size={18} />
+            </button>
+          ) : (
+            <button onClick={handleEmitir} disabled={loading} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold">
+                {loading ? 'Enviando...' : <><CheckCircle size={20} /> EMITIR NOTA</>}
+            </button>
+          )}
         </div>
 
       </div>

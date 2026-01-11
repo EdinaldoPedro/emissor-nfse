@@ -6,7 +6,7 @@ import zlib from 'zlib';
 
 const prisma = new PrismaClient();
 
-// === FLUXO DE EMISSÃO (MANTIDO) ===
+// === FLUXO DE EMISSÃO (CORRIGIDO: ATUALIZA NÚMERO DA NOTA) ===
 export async function processarRetornoNota(notaId: string, empresaId: string, vendaId: string) {
     try {
         const nota = await prisma.notaFiscal.findUnique({
@@ -23,14 +23,29 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
         const consultaRes = await strategy.consultar(nota.chaveAcesso, nota.empresa);
 
         if (consultaRes.sucesso && consultaRes.xmlDistribuicao) {
-            await prisma.notaFiscal.update({ where: { id: notaId }, data: { xmlBase64: consultaRes.xmlDistribuicao } });
+            
+            // === AQUI ESTAVA FALTANDO: ATUALIZAR O NÚMERO ===
+            const dadosUpdate: any = { 
+                xmlBase64: consultaRes.xmlDistribuicao 
+            };
+
+            // Se a consulta retornou um número válido (diferente de 0), atualiza no banco
+            if (consultaRes.numeroNota && parseInt(consultaRes.numeroNota) > 0) {
+                dadosUpdate.numero = parseInt(consultaRes.numeroNota);
+            }
+
+            await prisma.notaFiscal.update({ 
+                where: { id: notaId }, 
+                data: dadosUpdate 
+            });
+
             await createLog({ 
                 level: 'INFO', 
                 action: 'XML_ATUALIZADO', 
-                message: 'XML Oficial salvo no banco.', 
+                message: `XML Oficial salvo. Nota atualizada para Nº ${dadosUpdate.numero || nota.numero}`, 
                 empresaId, 
                 vendaId,
-                details: { xml: consultaRes.xmlDistribuicao } // Adicionado para download
+                details: { xml: consultaRes.xmlDistribuicao, numeroRecuperado: dadosUpdate.numero } 
             });
         }
 
@@ -54,7 +69,7 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
                 message: 'PDF Oficial salvo com sucesso!', 
                 empresaId, 
                 vendaId,
-                details: { pdf: pdfBase64 } // Adicionado para download
+                details: { pdf: pdfBase64 } 
             });
 
         } catch (errBot: any) {
@@ -71,7 +86,7 @@ export async function processarRetornoNota(notaId: string, empresaId: string, ve
     }
 }
 
-// === FLUXO DE CANCELAMENTO (CORRIGIDO PARA LOGS VISUAIS) ===
+// === FLUXO DE CANCELAMENTO (MANTIDO IGUAL AO ÚLTIMO SUCESSO) ===
 export async function processarCancelamentoNota(notaId: string, empresaId: string, vendaId: string) {
     try {
         const nota = await prisma.notaFiscal.findUnique({
@@ -98,12 +113,11 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
                 data: { xmlBase64: consultaRes.xmlDistribuicao }
             });
 
-            // LOG COM O ARQUIVO PARA DOWNLOAD
             await createLog({
                 level: 'INFO', action: 'XML_SUBSTITUIDO',
                 message: 'XML Autorizado substituído pelo XML de Cancelamento.',
                 empresaId, vendaId,
-                details: { xml: consultaRes.xmlDistribuicao } // <--- AGORA APARECE O BOTÃO NO LOG
+                details: { xml: consultaRes.xmlDistribuicao }
             });
         }
 
@@ -131,12 +145,11 @@ export async function processarCancelamentoNota(notaId: string, empresaId: strin
                 data: { pdfBase64: pdfBase64 }
             });
 
-            // LOG FINAL DE SUCESSO DO PDF
             await createLog({
                 level: 'INFO', action: 'PDF_ATUALIZADO',
                 message: 'PDF atualizado com a tarja de CANCELAMENTO.',
                 empresaId, vendaId,
-                details: { pdf: pdfBase64 } // <--- NOVO LOG COM O ARQUIVO PDF NOVO
+                details: { pdf: pdfBase64 } 
             });
 
         } catch (errBot: any) {
