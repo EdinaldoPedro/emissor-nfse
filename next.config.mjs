@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Aqui você pode colocar configurações futuras
+    experimental: {
+        serverComponentsExternalPackages: ['puppeteer', '@prisma/client']
+    }
 };
 
 export default nextConfig;
