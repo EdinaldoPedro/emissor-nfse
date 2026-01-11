@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, FileText, MoreVertical, Ban, RefreshCcw, Share2, ChevronLeft, ChevronRight, Loader2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Search, FileText, MoreVertical, Ban, RefreshCcw, Share2, ChevronLeft, ChevronRight, Loader2, AlertCircle, AlertTriangle, FileCode, Download, RefreshCw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface ListaVendasProps {
@@ -20,7 +20,40 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const isFirstRender = useRef(true);
+  // --- FUNÇÕES NOVAS (Download e Consulta) ---
+  const downloadBase64 = (base64: string, filename: string, mime: string) => {
+    try {
+        const link = document.createElement('a');
+        link.href = `data:${mime};base64,${base64}`;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (e) {
+        alert("Erro ao baixar arquivo.");
+    }
+  };
+
+  const handleConsultarNota = async (notaId: string) => {
+    if(!confirm("Consultar status na Sefaz para atualizar dados?")) return;
+    try {
+        const res = await fetch('/api/notas/consultar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notaId })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert("✅ Nota atualizada!");
+            fetchVendas(); // Recarrega a lista
+        } else {
+            alert("Erro: " + data.error);
+        }
+    } catch (e) {
+        alert("Erro de conexão.");
+    }
+  };
+  // ---------------------------------------------
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -33,10 +66,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const fetchVendas = useCallback(() => {
     setLoading(true);
     const userId = localStorage.getItem('userId');
-    
-    // --- CORREÇÃO: PEGAR O CONTEXTO DO CONTADOR ---
     const contextId = localStorage.getItem('empresaContextId');
-    // ----------------------------------------------
 
     const limit = compact ? 10 : 10; 
     const typeFilter = onlyValid ? 'valid' : 'all';
@@ -44,7 +74,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
         headers: { 
             'x-user-id': userId || '',
-            'x-empresa-id': contextId || '' // <--- ENVIANDO O CONTEXTO
+            'x-empresa-id': contextId || ''
         }
     })
     .then(r => r.json())
@@ -66,41 +96,42 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
   const getFriendlyError = (rawMessage: string | null) => {
       if (!rawMessage) return "Erro desconhecido. Tente novamente.";
-      
       const msg = rawMessage.toLowerCase();
-
-      if (msg.includes('certificado') || msg.includes('pfx')) {
-          return (
-              <span>
-                  <strong>Certificado Digital ausente.</strong><br/>
-                  Vá em <em>Configurações {'>'} Minha Empresa</em> e faça o upload do seu e-CNPJ (A1).
-              </span>
-          );
-      }
-      if (msg.includes('cnpj') || msg.includes('cpf') || msg.includes('documento')) {
-          return "Dados do cliente inválidos. Verifique o CPF/CNPJ no cadastro do cliente.";
-      }
-      if (msg.includes('tributação') || msg.includes('serviço')) {
-          return "Configuração fiscal incompleta. Verifique se o CNAE e códigos estão corretos.";
-      }
-      if (msg.includes('conexão') || msg.includes('timeout')) {
-          return "Instabilidade na Sefaz. Tente novamente em alguns minutos.";
-      }
-
+      if (msg.includes('certificado') || msg.includes('pfx')) return "Certificado Digital ausente. Verifique as configurações.";
+      if (msg.includes('cnpj') || msg.includes('cpf') || msg.includes('documento')) return "Dados do cliente inválidos.";
+      if (msg.includes('tributação') || msg.includes('serviço')) return "Configuração fiscal incompleta.";
       return rawMessage.length > 100 ? rawMessage.substring(0, 100) + '...' : rawMessage;
   };
 
   const handleAction = async (action: string, vendaId: string) => {
-      if(!confirm(`Deseja realmente ${action}?`)) return;
+      let motivo = '';
+      
+      // Se for cancelar, pede motivo
+      if (action === 'cancelar') {
+          motivo = prompt("Motivo do cancelamento (mínimo 15 caracteres):") || '';
+          if (motivo.length < 15) return alert("Motivo muito curto. O cancelamento exige justificativa.");
+      } else if(!confirm(`Deseja realmente ${action}?`)) {
+          return;
+      }
+
       const userId = localStorage.getItem('userId');
       try {
           const res = await fetch('/api/notas/gerenciar', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
-              body: JSON.stringify({ acao: action === 'cancelar' ? 'CANCELAR' : 'CORRIGIR', vendaId })
+              body: JSON.stringify({ 
+                  acao: action === 'cancelar' ? 'CANCELAR' : 'CORRIGIR', 
+                  vendaId,
+                  motivo 
+              })
           });
-          if(res.ok) { alert("Solicitação enviada!"); fetchVendas(); }
-          else { alert("Erro ao processar."); }
+          const data = await res.json();
+          if(res.ok) { 
+              alert(data.message); 
+              fetchVendas(); 
+          } else { 
+              alert("Erro: " + data.error); 
+          }
       } catch(e) { alert("Erro de conexão."); }
       setOpenMenuId(null);
   };
@@ -178,7 +209,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                             <span className="cursor-help px-2 py-1 rounded text-[10px] font-bold uppercase border bg-red-50 text-red-700 border-red-200 flex items-center gap-1">
                                                 FALHOU <AlertCircle size={10}/>
                                             </span>
-                                            
+                                            {/* Tooltip de Erro */}
                                             <div className="absolute bottom-full mb-2 w-72 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition pointer-events-none z-20 text-left border border-slate-600">
                                                 <div className="flex items-start gap-2">
                                                     <AlertTriangle size={16} className="text-red-400 shrink-0 mt-0.5"/>
@@ -189,7 +220,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-800"></div>
                                             </div>
                                         </div>
                                     ) : (
@@ -212,25 +242,64 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                             <RefreshCcw size={12}/> Corrigir
                                         </button>
                                     ) : venda.status === 'CONCLUIDA' && (
-                                        <div className="relative inline-block">
-                                            <button onClick={() => setOpenMenuId(openMenuId === venda.id ? null : venda.id)} className="p-2 hover:bg-slate-200 rounded-full transition">
-                                                <MoreVertical size={16} className="text-slate-500"/>
-                                            </button>
+                                        <div className="flex items-center justify-end gap-2">
                                             
-                                            {openMenuId === venda.id && (
-                                                <div className="absolute right-0 mt-2 w-48 bg-white border rounded-lg shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                                                    <button onClick={() => alert("Compartilhar em breve!")} className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2">
-                                                        <Share2 size={14}/> Compartilhar
-                                                    </button>
-                                                    <button onClick={() => handleAction('cancelar', venda.id)} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 border-t">
-                                                        <Ban size={14}/> Cancelar Nota
-                                                    </button>
-                                                </div>
-                                            )}
-                                            
-                                            {openMenuId === venda.id && (
-                                                <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)}></div>
-                                            )}
+                                            {/* BOTÕES NOVOS: CONSULTAR / XML / PDF */}
+                                            {nota ? (
+                                                <>
+                                                    {/* Se status ok mas sem número ou XML -> Botão Atualizar */}
+                                                    {(nota.numero === 0 || !nota.xmlBase64) && (
+                                                        <button 
+                                                            onClick={() => handleConsultarNota(nota.id)}
+                                                            className="p-1.5 text-orange-600 hover:bg-orange-50 rounded border border-orange-200 transition"
+                                                            title="Atualizar da Sefaz"
+                                                        >
+                                                            <RefreshCw size={16}/>
+                                                        </button>
+                                                    )}
+
+                                                    {/* Se tem XML -> Download XML */}
+                                                    {nota.xmlBase64 && (
+                                                        <button 
+                                                            onClick={() => downloadBase64(nota.xmlBase64, `nota-${nota.numero}.xml`, 'text/xml')}
+                                                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded border border-blue-200 transition"
+                                                            title="Baixar XML"
+                                                        >
+                                                            <FileCode size={16}/>
+                                                        </button>
+                                                    )}
+
+                                                    {/* Se tem PDF -> Download PDF */}
+                                                    {nota.pdfBase64 && (
+                                                        <button 
+                                                            onClick={() => downloadBase64(nota.pdfBase64, `nota-${nota.numero}.pdf`, 'application/pdf')}
+                                                            className="p-1.5 text-red-600 hover:bg-red-50 rounded border border-red-200 transition"
+                                                            title="Baixar PDF"
+                                                        >
+                                                            <Download size={16}/>
+                                                        </button>
+                                                    )}
+                                                </>
+                                            ) : null}
+
+                                            {/* Menu de Ações Extras (Cancelar/Compartilhar) */}
+                                            <div className="relative inline-block">
+                                                <button onClick={() => setOpenMenuId(openMenuId === venda.id ? null : venda.id)} className="p-2 hover:bg-slate-200 rounded-full transition">
+                                                    <MoreVertical size={16} className="text-slate-500"/>
+                                                </button>
+                                                
+                                                {openMenuId === venda.id && (
+                                                    <div className="absolute right-0 mt-2 w-48 bg-white border rounded-lg shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                                        <button onClick={() => alert("Compartilhar em breve!")} className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2">
+                                                            <Share2 size={14}/> Compartilhar
+                                                        </button>
+                                                        <button onClick={() => handleAction('cancelar', venda.id)} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 border-t font-medium">
+                                                            <Ban size={14}/> Cancelar Nota
+                                                        </button>
+                                                    </div>
+                                                )}
+                                                {openMenuId === venda.id && <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)}></div>}
+                                            </div>
                                         </div>
                                     )}
                                 </td>
