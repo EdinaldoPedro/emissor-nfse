@@ -43,6 +43,10 @@ model User {
   cargo            String?
   avatarUrl        String?
   
+  // === RECUPERAÇÃO DE SENHA (NOVOS CAMPOS) ===
+  resetToken       String?   @unique
+  resetExpires     DateTime?
+  
   darkMode          Boolean   @default(false)
   idioma            String    @default("pt-BR")
   notificacoesEmail Boolean   @default(true)
@@ -72,12 +76,11 @@ model Empresa {
   documento String   @unique
   ambiente  String   @default("HOMOLOGACAO")
   
-  // Flag de travamento
   cadastroCompleto Boolean @default(false)
 
-  // === CONTROLE DE EMISSÃO (CAMPOS OBRIGATÓRIOS PARA O DPS) ===
-  serieDPS   String   @default("900")
-  ultimoDPS  Int      @default(0)
+  // Controle de Emissão (DPS)
+  serieDPS    String   @default("900")
+  ultimoDPS   Int      @default(0)
 
   email        String?
   razaoSocial  String
@@ -117,8 +120,7 @@ model Empresa {
   contadoresLink    ContadorVinculo[] @relation("EmpresaContabil")
 }
 
-
-// --- VENDAS (A Transação) ---
+// --- VENDAS ---
 model Venda {
   id              String   @id @default(uuid())
   
@@ -131,7 +133,6 @@ model Venda {
   valor           Decimal  @db.Decimal(10, 2)
   descricao       String
   
-  // Status da Venda
   status          String   @default("PENDENTE") // PENDENTE, CONCLUIDA, ERRO_EMISSAO, CANCELADA
   
   notas           NotaFiscal[]
@@ -178,7 +179,7 @@ model NotaFiscal {
   
   status          StatusNota @default(RASCUNHO)
   
-  xmlBase64       String? 
+  xmlBase64       String?
   pdfBase64       String? 
   
   chaveAcesso     String?
@@ -202,6 +203,14 @@ model ConfiguracaoSistema {
   modeloDpsJson  String?
   versaoApi      String @default("1.00")
   ambiente       String @default("HOMOLOGACAO")
+  
+  // === NOVOS CAMPOS OBRIGATÓRIOS PARA O E-MAIL ===
+  smtpHost       String?
+  smtpPort       Int?    @default(587)
+  smtpUser       String?
+  smtpPass       String?
+  smtpSecure     Boolean @default(false)
+  emailRemetente String?
 }
 
 model GlobalCnae {
@@ -248,23 +257,19 @@ model SystemLog {
   details   String?
   empresaId String?
   empresa   Empresa? @relation(fields: [empresaId], references: [id])
-  
   vendaId   String?
   venda     Venda?   @relation(fields: [vendaId], references: [id])
-  
   createdAt DateTime @default(now())
 }
 
 model Ticket {
   id            String   @id @default(uuid())
   protocolo     Int      @default(autoincrement())
-  
   assunto       String
   categoria     String?
   prioridade    String   @default("MEDIA")
   descricao     String
   status        String   @default("ABERTO")
-  
   clientUnread  Boolean  @default(false)
 
   anexoBase64   String?

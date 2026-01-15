@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw } from 'lucide-react';
+import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, KeyRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function GestaoClientes() {
@@ -14,11 +14,15 @@ export default function GestaoClientes() {
 
   useEffect(() => {
     carregarUsuarios();
-    fetch('/api/admin/plans').then(r => r.json()).then(setPlanosDisponiveis);
+    fetch('/api/admin/plans', {
+         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    }).then(r => r.json()).then(setPlanosDisponiveis);
   }, []);
 
   const carregarUsuarios = () => {
-    fetch('/api/admin/users').then(r => r.json()).then(data => {
+    fetch('/api/admin/users', {
+         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    }).then(r => r.json()).then(data => {
         // Filtra apenas COMUM (Clientes) e outros cargos baixos
         const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
         setClientes(listaClientes);
@@ -30,7 +34,10 @@ export default function GestaoClientes() {
 
       const res = await fetch('/api/admin/users', {
           method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + localStorage.getItem('token')
+          },
           body: JSON.stringify({ 
               id: editingUser.id, 
               plano: slug,
@@ -51,7 +58,10 @@ export default function GestaoClientes() {
 
       const res = await fetch('/api/admin/users', {
           method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + localStorage.getItem('token')
+          },
           body: JSON.stringify({ id: editingUser.id, unlinkCompany: true })
       });
 
@@ -69,7 +79,10 @@ export default function GestaoClientes() {
       
       const res = await fetch('/api/admin/users', {
           method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + localStorage.getItem('token')
+          },
           body: JSON.stringify({ 
               id: editingUser.id, 
               empresaId: editingUser.empresa?.id,
@@ -85,6 +98,23 @@ export default function GestaoClientes() {
       } else {
           alert(data.error || "Erro ao processar.");
       }
+  };
+  
+  // === NOVA FUNÇÃO DE RESET ===
+  const handleSendReset = async () => {
+      if(!confirm(`Enviar e-mail de redefinição de senha para ${editingUser.email}?`)) return;
+
+      try {
+          const res = await fetch('/api/auth/forgot-password', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: editingUser.email })
+          });
+          
+          if(res.ok) alert("E-mail enviado com sucesso!");
+          else alert("Erro ao enviar e-mail.");
+
+      } catch (e) { alert("Erro de conexão."); }
   };
 
   const abrirEdicao = (user: any) => {
@@ -137,11 +167,16 @@ export default function GestaoClientes() {
                 </div>
                 
                 <div className="space-y-6">
-                    {/* DADOS PESSOAIS (SIMPLIFICADO - SEM CARGO) */}
+                    {/* DADOS PESSOAIS (COM BOTÃO DE RESET) */}
                     <div className="bg-gray-50 p-3 rounded border">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Dados Pessoais</label>
                         <p className="font-bold text-slate-700">{editingUser.nome}</p>
                         <p className="text-xs text-slate-500">{editingUser.email}</p>
+                        
+                        {/* === BOTÃO ADICIONADO AQUI === */}
+                        <button onClick={handleSendReset} className="mt-3 w-full bg-white border border-blue-200 text-blue-600 text-xs font-bold py-2 rounded hover:bg-blue-50 flex items-center justify-center gap-2 transition shadow-sm">
+                            <KeyRound size={14}/> Enviar Redefinição de Senha
+                        </button>
                     </div>
 
                     {/* ÁREA DA EMPRESA */}

@@ -85,7 +85,7 @@ export default function Login() {
                 {/* BOTÃO ESQUECI MINHA SENHA RESTAURADO */}
                 <button 
                     type="button" 
-                    onClick={() => alert('Em breve: Funcionalidade de recuperação de senha via email.')}
+                    onClick={() => router.push('/recuperar-senha')}
                     className="text-xs text-blue-600 hover:underline"
                 >
                     Esqueceu a senha?
