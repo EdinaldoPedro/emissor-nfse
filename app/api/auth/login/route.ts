@@ -1,41 +1,48 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { signJWT } from '@/app/utils/auth';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
   try {
-    const { login, senha } = await request.json(); // Recebemos 'login' em vez de 'email'
+    const { login, senha } = await request.json();
 
     if (!login || !senha) {
         return NextResponse.json({ error: 'Preencha login e senha.' }, { status: 400 });
     }
 
-    // Limpa caracteres não numéricos para tentar comparar com CPF
-    // (Caso o usuário digite CPF com pontos e traços)
     const loginLimpo = login.replace(/\D/g, ''); 
 
-    // Busca usuário onde o login bate com Email OU CPF
     const user = await prisma.user.findFirst({
         where: {
             OR: [
-                { email: login }, // Tenta achar pelo email exato
-                { cpf: loginLimpo } // Tenta achar pelo CPF limpo (só números)
+                { email: login },
+                { cpf: loginLimpo }
             ]
-        }
+        },
+        include: { empresa: true } // Trazemos empresa para facilitar o front
     });
 
     if (!user || !(await bcrypt.compare(senha, user.senha))) {
       return NextResponse.json({ error: 'Credenciais inválidas.' }, { status: 401 });
     }
 
-    // Retorna dados para o frontend
+    // === GERAÇÃO DO TOKEN JWT (Item 3) ===
+    const token = await signJWT({ sub: user.id, role: user.role });
+
+    // Retorna dados + token
     return NextResponse.json({
-      id: user.id,
-      nome: user.nome,
-      email: user.email,
-      role: user.role, 
+      success: true,
+      token, // O frontend deve salvar isso
+      user: {
+          id: user.id,
+          nome: user.nome,
+          email: user.email,
+          role: user.role,
+          empresaId: user.empresaId
+      }
     });
   } catch (error) {
     console.error(error);

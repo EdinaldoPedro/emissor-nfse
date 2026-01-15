@@ -82,7 +82,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
     const typeFilter = onlyValid ? 'valid' : 'all';
 
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
-        headers: { 'x-user-id': userId || '', 'x-empresa-id': contextId || '' }
+        headers: {   'Authorization': 'Bearer ' + localStorage.getItem('token'),  'x-empresa-id': localStorage.getItem('empresaContextId') || ''
+        }
     })
     .then(r => r.json())
     .then(res => { setVendas(res.data || []); setTotalPages(res.meta?.totalPages || 1); })

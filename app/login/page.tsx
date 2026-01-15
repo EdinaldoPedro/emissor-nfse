@@ -2,16 +2,15 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link'; // Import para links
+import Link from 'next/link';
 
 export default function Login() {
   const router = useRouter();
-  // Mudamos de 'email' para 'login'
   const [form, setForm] = useState({ login: '', senha: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-const handleSubmit = async (e: any) => {
+  const handleSubmit = async (e: any) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -31,20 +30,20 @@ const handleSubmit = async (e: any) => {
         return;
       }
 
-      // === LIMPEZA TOTAL DE SESSÃO ANTERIOR ===
-      localStorage.clear(); // Limpa tudo para garantir
-      // Ou remova especificamente se preferir não limpar tudo:
-      // localStorage.removeItem('isSupportMode'); 
-      // localStorage.removeItem('adminBackUpId');
-      // localStorage.removeItem('empresaContextId'); // <--- O CULPADO ESTAVA AQUI
-
-      // Seta os novos dados
-      localStorage.setItem('userId', dados.id); 
-      localStorage.setItem('userRole', dados.role);
-
-      if (dados.role === 'ADMIN' || dados.role === 'MASTER' || dados.role === 'SUPORTE') {
+      // === SEGURANÇA: LIMPEZA E ARMAZENAMENTO DO TOKEN ===
+      localStorage.clear();
+      
+      // Salva o Token JWT (Essencial para as próximas requisições)
+      localStorage.setItem('token', dados.token);
+      
+      // Mantemos os IDs para facilitar a UI
+      localStorage.setItem('userId', dados.user.id); 
+      localStorage.setItem('userRole', dados.user.role);
+      
+      // Redirecionamento baseado no cargo
+      if (['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI'].includes(dados.user.role)) {
         router.push('/admin/dashboard');
-      } else if (dados.role === 'CONTADOR') {
+      } else if (dados.user.role === 'CONTADOR') {
         router.push('/contador');
       } else {
         router.push('/cliente/dashboard');
@@ -83,7 +82,7 @@ const handleSubmit = async (e: any) => {
           <div>
             <div className="flex justify-between items-center mb-1">
                 <label className="block text-sm font-medium text-gray-700">Senha</label>
-                {/* BOTÃO ESQUECI MINHA SENHA */}
+                {/* BOTÃO ESQUECI MINHA SENHA RESTAURADO */}
                 <button 
                     type="button" 
                     onClick={() => alert('Em breve: Funcionalidade de recuperação de senha via email.')}

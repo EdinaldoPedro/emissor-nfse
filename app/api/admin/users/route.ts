@@ -1,21 +1,37 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
-// GET
-export async function GET() {
+// GET: Lista usuários (Protegido)
+export async function GET(request: Request) {
+  // 1. Autenticação Robusta
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+
+  // 2. Autorização (Apenas Staff)
+  const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+  if (!isStaff) return forbidden();
+
   const users = await prisma.user.findMany({
     include: { empresa: true },
     orderBy: { createdAt: 'desc' }
   });
+  
   // @ts-ignore
   const safeUsers = users.map(u => { const { senha, ...rest } = u; return rest; });
   return NextResponse.json(safeUsers);
 }
 
-// PUT: Edição Simples e Segura
+// PUT: Edição (Protegido)
 export async function PUT(request: Request) {
+  const userAuth = await getAuthenticatedUser(request);
+  if (!userAuth) return unauthorized();
+
+  // Apenas Admin/Master pode editar outros usuários dessa forma
+  if (!['MASTER', 'ADMIN'].includes(userAuth.role)) return forbidden();
+
   try {
     const body = await request.json();
     
@@ -33,39 +49,33 @@ export async function PUT(request: Request) {
         const cnpjLimpo = body.newCnpj.replace(/\D/g, '');
         if(cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ Inválido' }, { status: 400 });
 
-        // Verifica se a empresa já existe no banco
         const empresaExistente = await prisma.empresa.findUnique({ 
             where: { documento: cnpjLimpo },
-            include: { donoUser: true } // Volta a ser donoUser (singular)
+            include: { donoUser: true } 
         });
 
         if (empresaExistente) {
-            // Se já tem dono e não é o usuário atual -> ERRO (Bloqueio Total)
             if (empresaExistente.donoUser && empresaExistente.donoUser.id !== body.id) {
                 return NextResponse.json({ 
-                    error: `Este CNPJ já pertence ao cliente ${empresaExistente.donoUser.nome}. Não é possível duplicar.` 
+                    error: `Este CNPJ já pertence ao cliente ${empresaExistente.donoUser.nome}.` 
                 }, { status: 409 });
             }
 
-            // Se a empresa existe mas está órfã (sem dono), vincula a este usuário
             await prisma.user.update({
                 where: { id: body.id },
                 data: { empresaId: empresaExistente.id }
             });
 
-            return NextResponse.json({ success: true, message: "Usuário vinculado à empresa existente." });
-
+            return NextResponse.json({ success: true, message: "Usuário vinculado." });
         } else {
-            // CENÁRIO: CNPJ Novo (Não existe na base)
-            // Se o usuário já tem uma empresa ID, atualizamos o número dela.
             if (body.empresaId) {
                 await prisma.empresa.update({
                     where: { id: body.empresaId },
                     data: { documento: cnpjLimpo }
                 });
-                return NextResponse.json({ success: true, message: "CNPJ atualizado com sucesso." });
+                return NextResponse.json({ success: true, message: "CNPJ atualizado." });
             } else {
-                return NextResponse.json({ error: "Empresa não encontrada. O cliente precisa completar o cadastro." }, { status: 400 });
+                return NextResponse.json({ error: "Empresa não encontrada." }, { status: 400 });
             }
         }
     }
@@ -84,11 +94,7 @@ export async function PUT(request: Request) {
     return NextResponse.json(updated);
 
   } catch (e: any) {
-    console.error(e);
-    // Tratamento para erro de duplicidade do Prisma
-    if (e.code === 'P2002') {
-        return NextResponse.json({ error: "Conflito: Este dado já está em uso (Email, CPF ou Empresa)." }, { status: 409 });
-    }
+    if (e.code === 'P2002') return NextResponse.json({ error: "Conflito de dados." }, { status: 409 });
     return NextResponse.json({ error: e.message || 'Erro ao atualizar' }, { status: 500 });
   }
 }

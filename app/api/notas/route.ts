@@ -4,18 +4,25 @@ import { createLog } from '@/app/services/logger';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory'; 
 import { getTributacaoPorCnae } from '@/app/utils/tributacao'; 
 import { processarRetornoNota } from '@/app/services/notaProcessor';
+import { getAuthenticatedUser, unauthorized, forbidden } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
-async function getEmpresaContexto(userId: string, contextId: string | null) {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return null;
+// Função auxiliar refatorada para usar o user já autenticado
+async function getEmpresaContexto(user: any, contextId: string | null) {
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+    
+    // Se for Staff, pode assumir qualquer contexto
     if (isStaff && contextId && contextId !== 'null' && contextId !== 'undefined') return contextId; 
+    
+    // Se não tem contexto específico, usa a empresa do próprio usuário
     if (!contextId || contextId === 'null' || contextId === 'undefined') return user.empresaId;
+    
+    // Se for Contador/Outros tentando acessar outra empresa, verifica vínculo
     const vinculo = await prisma.contadorVinculo.findUnique({
-        where: { contadorId_empresaId: { contadorId: userId, empresaId: contextId } }
+        where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
     });
+    
     return (vinculo && vinculo.status === 'APROVADO') ? contextId : null;
 }
 
@@ -31,8 +38,13 @@ function limparPayloadParaLog(payload: any) {
 
 // POST DE EMISSÃO
 export async function POST(request: Request) {
-  const userId = request.headers.get('x-user-id');
+  // 1. Autenticação via JWT
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+
+  // Pega o ID da empresa do header (se houver contexto)
   const contextId = request.headers.get('x-empresa-id'); 
+  
   let vendaIdLog = null;
   let empresaIdLog = null;
 
@@ -40,16 +52,16 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae, vendaId } = body;
 
-    if (!userId) throw new Error("Usuário não identificado.");
-    const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
-    if (!empresaIdAlvo) throw new Error("Acesso negado.");
+    // 2. Validação de Permissão de Empresa
+    const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+    if (!empresaIdAlvo) return forbidden();
     empresaIdLog = empresaIdAlvo;
 
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!prestador || !tomador) throw new Error("Empresas não encontradas.");
 
-    // --- 1. CRIAÇÃO/ATUALIZAÇÃO DA VENDA ---
+    // --- LÓGICA DE EMISSÃO MANTIDA IGUAL ---
     let venda;
     if (vendaId) {
         venda = await prisma.venda.update({
@@ -63,7 +75,6 @@ export async function POST(request: Request) {
     }
     vendaIdLog = venda.id;
 
-    // --- 2. PREPARAÇÃO DO DPS ---
     const novoNumeroDPS = (prestador.ultimoDPS || 0) + 1;
     await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: novoNumeroDPS } });
 
@@ -107,7 +118,6 @@ export async function POST(request: Request) {
         serieDPS: prestador.serieDPS || '900'
     };
 
-    // --- 3. ENVIO DO DPS (Strategy) ---
     const strategy = EmissorFactory.getStrategy(prestador);
     const resultado = await strategy.executar(dadosParaEstrategia);
 
@@ -134,7 +144,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
     }
 
-    // --- 4. SUCESSO NA AUTORIZAÇÃO (Cria Nota) ---
     const nota = await prisma.notaFiscal.create({
         data: {
             vendaId: venda.id,
@@ -147,7 +156,6 @@ export async function POST(request: Request) {
             tomadorCnpj: tomador.documento.replace(/\D/g, ''),
             status: 'AUTORIZADA',
             chaveAcesso: resultado.notaGov!.chave,
-            // AQUI ESTAVA O PROBLEMA: FALTAVA O PROTOCOLO
             protocolo: resultado.notaGov!.protocolo, 
             xmlBase64: resultado.notaGov!.xml,
             cnae: cnaeFinal,
@@ -166,7 +174,6 @@ export async function POST(request: Request) {
         }
     });
 
-    // --- 5. DISPARO DO FLUXO DE PROCESSAMENTO (XML + BOT PDF) ---
     await processarRetornoNota(nota.id, prestador.id, venda.id);
 
     return NextResponse.json({ success: true, nota }, { status: 201 });
@@ -185,9 +192,12 @@ export async function POST(request: Request) {
   }
 }
 
-// GET (Mantido igual)
+// GET
 export async function GET(request: Request) {
-    const userId = request.headers.get('x-user-id');
+    // 1. Auth JWT
+    const user = await getAuthenticatedUser(request);
+    if (!user) return unauthorized();
+
     const contextId = request.headers.get('x-empresa-id');
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
@@ -195,10 +205,8 @@ export async function GET(request: Request) {
     const search = searchParams.get('search') || '';
     const type = searchParams.get('type') || 'all';
   
-    if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
-  
     try {
-      const empresaIdAlvo = await getEmpresaContexto(userId, contextId);
+      const empresaIdAlvo = await getEmpresaContexto(user, contextId);
       if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0, page: 1, totalPages: 1 } });
   
       const skip = (page - 1) * limit;
