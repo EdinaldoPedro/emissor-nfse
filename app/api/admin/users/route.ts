@@ -34,6 +34,17 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json();
+
+    if (body.resetEmail) {
+        // Gera um email temporário único para não quebrar a constraint @unique do banco
+        const tempPlaceholder = `reset_${Date.now()}_${body.id.substring(0,5)}@sistema.temp`;
+        
+        await prisma.user.update({
+            where: { id: body.id },
+            data: { email: tempPlaceholder }
+        });
+        return NextResponse.json({ success: true, message: "E-mail resetado. O usuário deverá cadastrar um novo ao logar." });
+    }
     
     // --- 1. DESVINCULAR EMPRESA ---
     if (body.unlinkCompany) {

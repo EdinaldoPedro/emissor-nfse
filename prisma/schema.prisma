@@ -68,6 +68,11 @@ model User {
   mensagensTicket   TicketMensagem[]
 
   empresasContabeis ContadorVinculo[] @relation("ContadorUser")
+
+  // === VALIDAÇÃO DE TROCA DE E-MAIL ===
+  tempEmail         String?    // O novo e-mail que ele quer cadastrar
+  verificationCode  String?    // O código de 6 dígitos
+  verificationExpires DateTime? // Validade do código
 }
 
 // --- EMPRESAS ---

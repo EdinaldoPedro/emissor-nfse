@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, KeyRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { AtSign } from 'lucide-react'; // Adicione AtSign aos imports
 
 export default function GestaoClientes() {
   const router = useRouter();
@@ -145,6 +146,30 @@ export default function GestaoClientes() {
     } catch (error) { alert("Erro ao acessar."); }
   };
 
+  const handleResetEmail = async () => {
+    if(!confirm(`ATENÇÃO: O e-mail atual (${editingUser.email}) será removido.\n\nNo próximo login (via CPF), o sistema pedirá obrigatoriamente que o usuário cadastre um novo e-mail.\n\nDeseja continuar?`)) return;
+
+    try {
+        const res = await fetch('/api/admin/users', {
+            method: 'PUT',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            },
+            body: JSON.stringify({ id: editingUser.id, resetEmail: true })
+        });
+        
+        if(res.ok) {
+            alert("E-mail resetado! O usuário deverá cadastrar um novo ao entrar.");
+            setEditingUser(null);
+            carregarUsuarios();
+        } else {
+            alert("Erro ao resetar e-mail.");
+        }
+    } catch (e) { alert("Erro de conexão."); }
+    };
+
+
   const filtered = clientes.filter(c => c.nome.toLowerCase().includes(term.toLowerCase()) || c.email.includes(term));
 
   return (
@@ -176,6 +201,9 @@ export default function GestaoClientes() {
                         {/* === BOTÃO ADICIONADO AQUI === */}
                         <button onClick={handleSendReset} className="mt-3 w-full bg-white border border-blue-200 text-blue-600 text-xs font-bold py-2 rounded hover:bg-blue-50 flex items-center justify-center gap-2 transition shadow-sm">
                             <KeyRound size={14}/> Enviar Redefinição de Senha
+                        </button>
+                        <button onClick={handleResetEmail} className="mt-2 w-full bg-white border border-orange-200 text-orange-600 text-xs font-bold py-2 rounded hover:bg-orange-50 flex items-center justify-center gap-2 transition shadow-sm">
+                            <AtSign size={14}/> Forçar Troca de E-mail
                         </button>
                     </div>
 

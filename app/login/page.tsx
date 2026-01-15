@@ -39,6 +39,11 @@ export default function Login() {
       // Mantemos os IDs para facilitar a UI
       localStorage.setItem('userId', dados.user.id); 
       localStorage.setItem('userRole', dados.user.role);
+
+      if (dados.user.email.startsWith('reset_')) {
+          router.push('/verificar-email'); // Redireciona para a página de cadastro de e-mail
+          return;
+      }
       
       // Redirecionamento baseado no cargo
       if (['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI'].includes(dados.user.role)) {

@@ -95,4 +95,20 @@ export class EmailService {
             </div>
         `;
     }
+
+    getTemplateVerificacaoEmail(nome: string, codigo: string) {
+        return `
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+                <h2 style="color: #2563eb;">Confirmação de E-mail</h2>
+                <p>Olá, <strong>${nome}</strong>.</p>
+                <p>Recebemos uma solicitação para atualizar seu e-mail de acesso.</p>
+                <p>Seu código de verificação é:</p>
+                <div style="background-color: #f3f4f6; padding: 15px; font-size: 24px; font-weight: bold; text-align: center; letter-spacing: 5px; margin: 20px 0; border-radius: 5px;">
+                    ${codigo}
+                </div>
+                <p style="font-size: 12px; color: #666;">Este código expira em 15 minutos.</p>
+                <p style="font-size: 12px; color: #666;">Se não foi você, altere sua senha imediatamente.</p>
+            </div>
+        `;
+    }
 }
