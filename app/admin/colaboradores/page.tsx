@@ -2,8 +2,11 @@
 import { useEffect, useState } from 'react';
 import { Shield, UserPlus, Trash2, Search, X, UserCog } from 'lucide-react';
 import { checkIsStaff, ROLE_LABELS } from '@/app/utils/permissions';
+// 1. Importar
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function GestaoColaboradores() {
+  const dialog = useDialog(); // 2. Init
   const [colabs, setColabs] = useState<any[]>([]);
   const [candidatos, setCandidatos] = useState<any[]>([]); 
   const [modalOpen, setModalOpen] = useState(false);
@@ -14,7 +17,6 @@ export default function GestaoColaboradores() {
   const [filtroCandidato, setFiltroCandidato] = useState('');
 
   const carregarDados = () => {
-    // === CORREÇÃO: Adicionado Header de Autorização ===
     const token = localStorage.getItem('token');
     
     fetch('/api/admin/users', {
@@ -40,7 +42,7 @@ export default function GestaoColaboradores() {
   useEffect(() => { carregarDados(); }, []);
 
   const handlePromover = async () => {
-    if (!selectedUser) return alert("Selecione um usuário.");
+    if (!selectedUser) return dialog.showAlert("Selecione um usuário.");
     const token = localStorage.getItem('token');
 
     try {
@@ -48,24 +50,32 @@ export default function GestaoColaboradores() {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` // <--- Auth aqui também
+                'Authorization': `Bearer ${token}` 
             },
             body: JSON.stringify({ id: selectedUser, role: selectedRole })
         });
 
         if (res.ok) {
-            alert("Usuário adicionado ao time!");
+            dialog.showAlert({ type: 'success', description: "Usuário adicionado ao time!" });
             setModalOpen(false);
             carregarDados();
             setSelectedUser('');
         } else {
-            alert("Erro ao promover.");
+            dialog.showAlert({ type: 'danger', description: "Erro ao promover." });
         }
-    } catch (error) { alert("Erro de conexão."); }
+    } catch (error) { dialog.showAlert("Erro de conexão."); }
   };
 
   const handleDemitir = async (id: string) => {
-      if(!confirm("Remover este usuário do time interno? Ele voltará a ser um cliente comum.")) return;
+      // PROMPT CONFIRM
+      const confirmed = await dialog.showConfirm({
+          title: 'Remover Colaborador',
+          description: 'Este usuário perderá o acesso administrativo e voltará a ser um cliente comum.',
+          type: 'danger',
+          confirmText: 'Remover Acesso'
+      });
+      
+      if(!confirmed) return;
       
       const token = localStorage.getItem('token');
 
@@ -73,14 +83,14 @@ export default function GestaoColaboradores() {
           method: 'PUT',
           headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}` // <--- Auth aqui também
+              'Authorization': `Bearer ${token}` 
           },
-          body: JSON.stringify({ id, role: 'COMUM' }) // Rebaixa para cliente
+          body: JSON.stringify({ id, role: 'COMUM' }) 
       });
       carregarDados();
   }
 
-  // Filtra o dropdown de candidatos
+  // ... (RESTO IGUAL) ...
   const candidatosFiltrados = candidatos.filter(c => 
       c.nome.toLowerCase().includes(filtroCandidato.toLowerCase()) || 
       c.email.includes(filtroCandidato)

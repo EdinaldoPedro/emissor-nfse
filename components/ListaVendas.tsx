@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { Search, FileText, MoreVertical, Ban, RefreshCcw, Loader2, AlertCircle, FileCode, Printer, AlertTriangle, X } from 'lucide-react';
+import { Search, FileText, MoreVertical, Ban, RefreshCcw, Loader2, AlertCircle, FileCode, Printer, AlertTriangle, X, LifeBuoy } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 interface ListaVendasProps {
   compact?: boolean; 
@@ -10,6 +11,8 @@ interface ListaVendasProps {
 
 export default function ListaVendas({ compact = false, onlyValid = false }: ListaVendasProps) {
   const router = useRouter();
+  const dialog = useDialog();
+  
   const [vendas, setVendas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -53,7 +56,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-      } catch (e: any) { alert("Erro: " + e.message); } 
+      } catch (e: any) { dialog.showAlert({ type: 'danger', description: "Erro: " + e.message }); } 
       finally { setDownloadingPdfId(null); }
   };
 
@@ -65,7 +68,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-    } catch (e) { alert("Erro ao baixar arquivo."); }
+    } catch (e) { dialog.showAlert("Erro ao baixar arquivo."); }
   };
 
   // --- BUSCA E PAGINAÇÃO ---
@@ -77,22 +80,90 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const fetchVendas = useCallback(() => {
     setLoading(true);
     const userId = localStorage.getItem('userId');
-    const contextId = localStorage.getItem('empresaContextId');
+    const contextId = localStorage.getItem('empresaContextId'); // Importante para o contador
     const limit = compact ? 5 : 10;
     const typeFilter = onlyValid ? 'valid' : 'all';
 
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
-        headers: {   'Authorization': 'Bearer ' + localStorage.getItem('token'),  'x-empresa-id': localStorage.getItem('empresaContextId') || ''
+        headers: { 
+            'Authorization': 'Bearer ' + localStorage.getItem('token'),
+            'x-empresa-id': contextId || '',
+            'x-user-id': userId || ''
         }
     })
     .then(r => r.json())
     .then(res => { setVendas(res.data || []); setTotalPages(res.meta?.totalPages || 1); })
+    .catch(() => setVendas([]))
     .finally(() => setLoading(false));
   }, [page, debouncedSearch, compact, onlyValid]);
 
   useEffect(() => { fetchVendas(); }, [fetchVendas]);
 
-  // --- FUNÇÕES DO MODAL ---
+  // --- FUNÇÕES DE AÇÃO ---
+  
+const handlePedirAjuda = async (vendaId: string, motivoErro: string) => {
+      // 1. TENTA CRIAR O TICKET COM CHECAGEM DE DUPLICIDADE
+      const criarTicket = async (force = false) => {
+          const userId = localStorage.getItem('userId');
+          try {
+              const res = await fetch('/api/suporte/tickets', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+                  body: JSON.stringify({ 
+                      assuntoId: 'AUTO_ERROR_REPORT', 
+                      tituloManual: `Falha na Emissão - Venda #${vendaId.split('-')[0]}`,
+                      descricao: `O cliente solicitou ajuda para a venda ${vendaId}.\n\nErro reportado: ${motivoErro || 'Não especificado'}.\n\nPor favor, verifique os logs do sistema.`,
+                      prioridade: 'ALTA',
+                      // NOVOS CAMPOS PARA VALIDAÇÃO
+                      checkDuplicity: !force, 
+                      vendaIdReferencia: vendaId
+                  })
+              });
+
+              const data = await res.json();
+
+              // CASO 1: TICKET CRIADO COM SUCESSO
+              if (res.ok) {
+                  dialog.showAlert({ 
+                      type: 'success', 
+                      title: 'Chamado Aberto!', 
+                      description: `O ticket #${data.protocolo} foi criado. Você será notificado sobre o andamento.` 
+                  });
+                  // NÃO REDIRECIONA MAIS
+              } 
+              // CASO 2: JÁ EXISTE TICKET (CONFLITO)
+              else if (res.status === 409) {
+                  const desejaContinuar = await dialog.showConfirm({
+                      type: 'warning',
+                      title: 'Chamado em Aberto',
+                      description: `${data.message}\n\nDeseja abrir um novo chamado mesmo assim?`,
+                      confirmText: 'Sim, abrir outro',
+                      cancelText: 'Cancelar'
+                  });
+
+                  if (desejaContinuar) {
+                      criarTicket(true); // Chama de novo forçando (sem checagem)
+                  }
+              } 
+              // CASO 3: ERRO GENÉRICO
+              else {
+                  dialog.showAlert({ type: 'danger', description: data.error || "Erro ao abrir chamado." });
+              }
+          } catch (e) { dialog.showAlert("Erro de conexão."); }
+      };
+
+      // Inicia o fluxo com o primeiro confirm
+      const confirmado = await dialog.showConfirm({
+          title: 'Abrir Chamado de Suporte?',
+          description: 'Nossa equipe analisará o erro desta venda.',
+          confirmText: 'Sim, Solicitar Ajuda',
+          type: 'info'
+      });
+
+      if (confirmado) {
+          criarTicket();
+      }
+  };
   const abrirModalCancelamento = (vendaId: string) => {
       setCancelData({ vendaId, tipo: '', detalhe: '' });
       setCancelModalOpen(true);
@@ -101,10 +172,18 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
   const confirmarCancelamento = async () => {
       const justificativaCompleta = `${cancelData.tipo}: ${cancelData.detalhe}`;
-      if (!cancelData.tipo) return alert("Selecione um motivo.");
-      if (justificativaCompleta.length < 15) return alert("A justificativa deve ter no mínimo 15 caracteres.");
+      if (!cancelData.tipo) return dialog.showAlert("Selecione um motivo.");
+      if (justificativaCompleta.length < 15) return dialog.showAlert("A justificativa deve ter no mínimo 15 caracteres.");
 
-      if(!confirm("Atenção: O cancelamento é irreversível. Deseja continuar?")) return;
+      const confirmado = await dialog.showConfirm({
+          title: 'Cancelar Nota Fiscal?',
+          description: 'Esta ação é irreversível e enviará o evento para a Sefaz imediatamente.',
+          confirmText: 'Sim, Cancelar',
+          cancelText: 'Voltar',
+          type: 'danger'
+      });
+
+      if (!confirmado) return;
 
       setCancelando(true);
       const userId = localStorage.getItem('userId');
@@ -116,13 +195,13 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
           });
           const data = await res.json();
           if(res.ok) { 
-              alert("✅ Sucesso! Nota cancelada e arquivos atualizados."); 
+              await dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Nota cancelada e arquivos atualizados!" });
               setCancelModalOpen(false);
               fetchVendas(); 
           } else { 
-              alert("Erro: " + data.error); 
+              dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error }); 
           }
-      } catch(e) { alert("Erro de conexão."); }
+      } catch(e) { dialog.showAlert("Erro de conexão."); }
       finally { setCancelando(false); }
   };
 
@@ -199,10 +278,17 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                 ) : vendas.length === 0 ? (
                     <tr><td colSpan={6} className="p-8 text-center text-slate-400">Nenhuma venda encontrada.</td></tr>
                 ) : (
-                    vendas.map(venda => {
+                    vendas.map((venda, index) => {
                         const nota = venda.notas[0]; 
                         const isCancelada = venda.status === 'CANCELADA' || nota?.status === 'CANCELADA';
                         const isAutorizada = venda.status === 'CONCLUIDA' || isCancelada;
+
+                        // === LÓGICA DE POSIÇÃO DO MENU ===
+                        // Se for um dos últimos 2 itens, abre pra cima. Senão, pra baixo.
+                        const isNearBottom = index >= vendas.length - 2;
+                        const menuPositionClass = isNearBottom 
+                            ? 'bottom-full mb-2 origin-bottom-right' 
+                            : 'top-full mt-2 origin-top-right';
 
                         return (
                             <tr key={venda.id} className="hover:bg-slate-50 transition">
@@ -214,7 +300,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                     <div className="text-xs text-slate-400">{venda.cliente.documento}</div>
                                 </td>
                                 
-                                {/* === ALTERAÇÃO AQUI: MOSTRAR ITEM EM VEZ DE DESCRIÇÃO === */}
                                 <td className="p-4">
                                     {nota?.codigoTribNacional ? (
                                         <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded border border-slate-200" title={venda.descricao}>
@@ -243,9 +328,20 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                 </td>
                                 <td className="p-4 text-right relative">
                                     {venda.status === 'ERRO_EMISSAO' ? (
-                                        <button onClick={() => handleCorrigir(venda.id)} className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg inline-flex items-center gap-1">
-                                            <RefreshCcw size={12}/> Corrigir
-                                        </button>
+                                        <div className="flex justify-end gap-2">
+                                            {/* BOTÃO PEDIR AJUDA */}
+                                            <button 
+                                                onClick={() => handlePedirAjuda(venda.id, venda.motivoErro)} 
+                                                className="text-xs font-bold text-orange-600 bg-orange-50 hover:bg-orange-100 border border-orange-200 px-3 py-1.5 rounded-lg inline-flex items-center gap-1 transition"
+                                                title="Reportar ao Suporte"
+                                            >
+                                                <LifeBuoy size={14}/> Ajuda
+                                            </button>
+
+                                            <button onClick={() => handleCorrigir(venda.id)} className="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg inline-flex items-center gap-1 shadow-sm transition">
+                                                <RefreshCcw size={12}/> Corrigir
+                                            </button>
+                                        </div>
                                     ) : isAutorizada && (
                                         <div className="relative inline-block">
                                             <button onClick={() => setOpenMenuId(openMenuId === venda.id ? null : venda.id)} 
@@ -254,9 +350,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                             </button>
                                             
                                             {openMenuId === venda.id && (
-                                                <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-100 rounded-lg shadow-xl z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                                <div className={`absolute right-0 w-48 bg-white border border-slate-100 rounded-lg shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 ${menuPositionClass}`}>
                                                     
-                                                    {/* === BOTÕES INTELIGENTES === */}
                                                     <button onClick={() => handleDownloadPdf(nota.id, nota.numero, isCancelada)} disabled={downloadingPdfId === nota.id} 
                                                         className={`w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 border-b border-slate-50 ${isCancelada ? 'text-red-600 font-medium' : 'text-slate-700'}`}>
                                                         {downloadingPdfId === nota.id ? <Loader2 size={16} className="animate-spin"/> : <Printer size={16}/>} 
@@ -278,7 +373,8 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                                     )}
                                                 </div>
                                             )}
-                                            {openMenuId === venda.id && <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)}></div>}
+                                            {/* O overlay transparente para fechar ao clicar fora */}
+                                            {openMenuId === venda.id && <div className="fixed inset-0 z-40" onClick={() => setOpenMenuId(null)}></div>}
                                         </div>
                                     )}
                                 </td>

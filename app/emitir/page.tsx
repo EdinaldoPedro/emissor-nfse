@@ -1,13 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, MapPin, Briefcase, XCircle, Loader2 } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, MapPin, Briefcase, Loader2, User, Building, Home, Check } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useDialog } from "@/app/contexts/DialogContext";
+import { validarCPF } from "@/app/utils/cpf";
 
 interface ClienteDB {
   id: string;
   nome: string;
   documento: string;
+  email?: string;
+  nomeFantasia?: string;
+  inscricaoMunicipal?: string;
+  cep?: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  codigoIbge?: string;
 }
 
 interface CnaeDB {
@@ -21,23 +33,27 @@ export default function EmitirNotaPage() {
   const router = useRouter();
   const searchParams = useSearchParams(); 
   const retryId = searchParams.get('retry');
+  const dialog = useDialog(); 
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingRetry, setLoadingRetry] = useState(false);
   
-  const [feedback, setFeedback] = useState<{ show: boolean; type: 'success' | 'error'; title: string; msg: string }>({
-    show: false, type: 'success', title: '', msg: ''
-  });
-
   const [clientes, setClientes] = useState<ClienteDB[]>([]);
   const [meusCnaes, setMeusCnaes] = useState<CnaeDB[]>([]);
   const [modoCliente, setModoCliente] = useState<'existente' | 'novo'>('existente');
-  const [buscandoCliente, setBuscandoCliente] = useState(false);
+  
+  const [buscandoDoc, setBuscandoDoc] = useState(false);
+  const [buscandoCep, setBuscandoCep] = useState(false);
+  const [clienteEncontrado, setClienteEncontrado] = useState(false); 
 
   const [novoCliente, setNovoCliente] = useState({ 
-    nome: '', email: '', documento: '', cep: '', logradouro: '', numero: '', bairro: '', cidade: '', uf: '', codigoIbge: ''
+    nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', 
+    documento: '', cep: '', logradouro: '', numero: '', 
+    bairro: '', cidade: '', uf: '', codigoIbge: ''
   });
+
+  const isPJ = novoCliente.documento.replace(/\D/g, '').length > 11;
 
   const [nfData, setNfData] = useState({
     clienteId: "", clienteNome: "", servicoDescricao: "", valor: "", retencoes: false, codigoCnae: "" 
@@ -45,16 +61,14 @@ export default function EmitirNotaPage() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
+    const contextId = localStorage.getItem('empresaContextId');
     if(!userId) { router.push('/login'); return; }
 
-    // 1. CARREGAR PERFIL E CNAES
     fetch('/api/perfil', { headers: { 'x-user-id': userId } })
       .then(res => res.json())
       .then(data => {
          if (data.atividades && Array.isArray(data.atividades)) {
              setMeusCnaes(data.atividades);
-             
-             // CORREÇÃO: Define padrão se estiver vazio (mesmo em retry, se falhar a recuperação)
              setNfData(prev => {
                  if (!prev.codigoCnae && data.atividades.length > 0) {
                      const principal = data.atividades.find((c: CnaeDB) => c.principal);
@@ -63,74 +77,163 @@ export default function EmitirNotaPage() {
                  return prev;
              });
          }
-      })
-      .catch(console.error);
+      }).catch(console.error);
 
-    // 2. CARREGAR CLIENTES
-    fetch('/api/clientes', { headers: { 'x-user-id': userId } })
+    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
       .then(res => res.json())
-      .then(data => setClientes(data))
-      .catch(console.error);
+      .then(data => setClientes(data)).catch(console.error);
 
-    // 3. MODO CORREÇÃO (RETRY)
     if (retryId) {
         setLoadingRetry(true);
         fetch(`/api/vendas/${retryId}`, { headers: { 'x-user-id': userId } })
             .then(async res => {
                 if (res.ok) {
                     const venda = await res.json();
-                    
-                    // Tenta usar o CNAE recuperado pelo backend, ou da nota, ou mantém o que já estava
                     const cnaeParaUsar = venda.cnaeRecuperado || venda.notas?.[0]?.cnae || "";
-
                     setNfData(prev => ({
                         ...prev,
                         clienteId: venda.clienteId,
                         clienteNome: venda.cliente?.razaoSocial || "Cliente",
                         valor: venda.valor,
                         servicoDescricao: venda.descricao,
-                        // Se recuperou algo, usa. Se não, deixa quieto (o fetch do perfil vai preencher o padrão)
                         codigoCnae: cnaeParaUsar || prev.codigoCnae 
                     }));
                     setStep(2);
                 }
             })
-            .catch(() => alert("Erro ao recuperar dados da venda."))
+            .catch(() => dialog.showAlert({ type: 'danger', description: "Erro ao recuperar dados da venda." }))
             .finally(() => setLoadingRetry(false));
     }
 
   }, [router, retryId]);
 
-  const buscarClienteCNPJ = async () => {
+  // === FUNÇÃO AUXILIAR DE PREENCHIMENTO ===
+  const preencherFormulario = (dados: any) => {
+      setNovoCliente(prev => ({
+          ...prev,
+          nome: dados.nome || dados.razaoSocial,
+          nomeFantasia: dados.nomeFantasia || '',
+          inscricaoMunicipal: dados.inscricaoMunicipal || '',
+          email: dados.email || '',
+          cep: dados.cep || '',
+          logradouro: dados.logradouro || '',
+          numero: dados.numero || '',
+          bairro: dados.bairro || '',
+          cidade: dados.cidade || '',
+          uf: dados.uf || '',
+          codigoIbge: dados.codigoIbge || ''
+      }));
+      setClienteEncontrado(true);
+      setTimeout(() => setClienteEncontrado(false), 3000);
+  };
+
+  // === FUNÇÃO PARA BUSCAR NO BANCO GLOBAL ===
+  const buscarNaBaseGlobal = async (docLimpo: string) => {
+      setBuscandoDoc(true);
+      try {
+          const userId = localStorage.getItem('userId');
+          const res = await fetch('/api/clientes/check', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+              body: JSON.stringify({ documento: docLimpo })
+          });
+          
+          if (res.ok) {
+              const dados = await res.json(); 
+              if (dados) {
+                  preencherFormulario(dados);
+                  // REMOVIDO O ALERT AQUI
+                  return true;
+              }
+          }
+      } catch (e) { console.error(e); } 
+      finally { setBuscandoDoc(false); }
+      return false;
+  };
+
+  // === EFEITO: MONITORAR DIGITAÇÃO ===
+  useEffect(() => {
     const docLimpo = novoCliente.documento.replace(/\D/g, '');
-    if(docLimpo.length !== 14) { alert("Digite um CNPJ válido."); return; }
-    setBuscandoCliente(true);
-    try {
-      const res = await fetch('/api/external/cnpj', { method: 'POST', body: JSON.stringify({ cnpj: docLimpo }) });
-      const dados = await res.json();
-      if(res.ok) {
-        setNovoCliente(prev => ({ ...prev, ...dados, nome: dados.razaoSocial }));
-      } else { alert("CNPJ não encontrado."); }
-    } catch (e) { alert("Erro de conexão."); }
-    finally { setBuscandoCliente(false); }
+    
+    if (docLimpo.length === 11 || docLimpo.length === 14) {
+        // 1. Tenta achar na lista local (meus clientes)
+        const local = clientes.find(c => c.documento && c.documento.replace(/\D/g, '') === docLimpo);
+        if (local) {
+            preencherFormulario(local);
+        } else {
+            // 2. Se não achar, busca no banco global
+            buscarNaBaseGlobal(docLimpo);
+        }
+    }
+  }, [novoCliente.documento, clientes]);
+
+  // === BUSCA MANUAL (BOTÃO LUPA) ===
+  const buscarDocumentoNovo = async () => {
+    const docLimpo = novoCliente.documento.replace(/\D/g, '');
+    
+    // 1. Verifica Local
+    const local = clientes.find(c => c.documento.replace(/\D/g, '') === docLimpo);
+    if (local) {
+        preencherFormulario(local);
+        // Aqui também removi o alert para ser consistente (opcional)
+        // dialog.showAlert({ type: 'info', description: 'Cliente já vinculado a você!' });
+        return;
+    }
+
+    // 2. Verifica Global 
+    const achouGlobal = await buscarNaBaseGlobal(docLimpo);
+    if (achouGlobal) return;
+
+    // 3. Validações e Busca Externa (Só para CNPJ)
+    if(docLimpo.length === 11) {
+        if(validarCPF(novoCliente.documento)) dialog.showAlert({ type: 'success', title: 'CPF Válido', description: 'Novo cadastro: preencha os dados.' });
+        else dialog.showAlert({ type: 'warning', description: 'CPF Inválido.' });
+        return;
+    }
+
+    if(docLimpo.length === 14) {
+        setBuscandoDoc(true);
+        try {
+            const res = await fetch('/api/external/cnpj', { method: 'POST', body: JSON.stringify({ cnpj: docLimpo }) });
+            const dados = await res.json();
+            if(res.ok) {
+                setNovoCliente(prev => ({ 
+                    ...prev, ...dados, 
+                    nome: dados.razaoSocial, nomeFantasia: dados.nomeFantasia, codigoIbge: dados.codigoIbge || ''
+                }));
+                dialog.showAlert({ type: 'success', description: 'Dados encontrados na Receita!' });
+            } else { dialog.showAlert("CNPJ não encontrado na base pública."); }
+        } catch (e) { dialog.showAlert("Erro de conexão."); }
+        finally { setBuscandoDoc(false); }
+        return;
+    }
+    dialog.showAlert("Digite um CPF ou CNPJ válido.");
   }
 
-  // === MÁSCARA DE MOEDA (NOVO) ===
+  const buscarCepNovo = async () => {
+      const cepLimpo = novoCliente.cep.replace(/\D/g, '');
+      if (cepLimpo.length !== 8) return;
+      setBuscandoCep(true);
+      try {
+          const res = await fetch('/api/external/cep', { method: 'POST', body: JSON.stringify({ cep: cepLimpo }) });
+          const dados = await res.json();
+          if (res.ok) {
+              setNovoCliente(prev => ({
+                  ...prev, logradouro: dados.logradouro, bairro: dados.bairro, cidade: dados.localidade || dados.cidade, uf: dados.uf, codigoIbge: dados.codigoIbge
+              }));
+          } else { dialog.showAlert({ type: 'warning', description: 'CEP não encontrado.' }); }
+      } catch (e) { console.error(e); }
+      finally { setBuscandoCep(false); }
+  }
+
   const formatarMoedaInput = (valor: string | number) => {
     const v = Number(valor) || 0;
-    return new Intl.NumberFormat("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-      minimumFractionDigits: 2
-    }).format(v);
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 }).format(v);
   };
 
   const handleValorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const apenasNumeros = e.target.value.replace(/\D/g, "");
-    if (!apenasNumeros) {
-      setNfData({ ...nfData, valor: "0" });
-      return;
-    }
+    if (!apenasNumeros) { setNfData({ ...nfData, valor: "0" }); return; }
     const valorNumerico = parseInt(apenasNumeros) / 100;
     setNfData({ ...nfData, valor: String(valorNumerico) });
   };
@@ -138,6 +241,16 @@ export default function EmitirNotaPage() {
   const handleNext = async () => {
     if (step === 1 && modoCliente === 'novo') {
         const userId = localStorage.getItem('userId');
+        const docLimpo = novoCliente.documento.replace(/\D/g, '');
+
+        if (docLimpo.length === 11 && !validarCPF(novoCliente.documento)) {
+            return dialog.showAlert({ type: 'danger', title: 'Erro', description: "CPF Inválido." });
+        }
+        if (!novoCliente.nome) return dialog.showAlert("Informe o Nome/Razão Social.");
+        if (!novoCliente.codigoIbge) return dialog.showAlert("Informe o CEP para preencher a cidade (Obrigatório).");
+        if (!novoCliente.numero) return dialog.showAlert("Informe o número do endereço.");
+
+        setLoading(true); 
         try {
             const res = await fetch('/api/clientes', {
                 method: 'POST',
@@ -148,26 +261,29 @@ export default function EmitirNotaPage() {
                 const criado = await res.json();
                 setNfData({ ...nfData, clienteId: criado.id, clienteNome: criado.nome });
                 setStep(step + 1);
-            } else { alert("Erro ao cadastrar cliente."); }
-        } catch (e) { alert("Erro de conexão."); }
+            } else { 
+                const erro = await res.json();
+                dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao cadastrar cliente." }); 
+            }
+        } catch (e) { dialog.showAlert("Erro de conexão."); }
+        finally { setLoading(false); }
+
     } else { setStep(step + 1); }
   };
 
   const handleBack = () => setStep(step - 1);
-
+  
   const getFriendlyFeedback = (errorMsg: string) => {
       const msg = errorMsg.toLowerCase();
-      if (msg.includes('certificado')) return "Certificado Digital não encontrado. Para emitir notas, vá em 'Configurações' e faça o upload do seu e-CNPJ.";
-      if (msg.includes('cnpj') || msg.includes('cpf')) return "CPF/CNPJ do cliente inválido ou não informado. Verifique o cadastro.";
+      if (msg.includes('certificado')) return "Certificado Digital não encontrado. Vá em Configurações.";
+      if (msg.includes('cnpj') || msg.includes('cpf')) return "Documento do cliente inválido.";
       return errorMsg;
   }
 
   const handleEmitir = async () => {
-    if (!nfData.codigoCnae) { alert("Selecione uma Atividade (CNAE)."); return; }
-
+    if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     setLoading(true);
     const userId = localStorage.getItem('userId');
-
     try {
       const res = await fetch('/api/notas', {
         method: 'POST',
@@ -179,26 +295,18 @@ export default function EmitirNotaPage() {
           codigoCnae: nfData.codigoCnae
         })
       });
-
       const resposta = await res.json();
-
       if (res.ok) {
-        setFeedback({ show: true, type: 'success', title: 'Sucesso!', msg: 'A nota foi enviada para processamento.' });
+        await dialog.showAlert({ type: 'success', title: 'Processando', description: 'Nota enviada para autorização.' });
+        router.push('/cliente/dashboard');
       } else {
-        setFeedback({ show: true, type: 'error', title: 'Não foi possível emitir', msg: getFriendlyFeedback(resposta.error || 'Erro desconhecido.') });
+        dialog.showAlert({ type: 'danger', title: 'Falha', description: getFriendlyFeedback(resposta.error || 'Erro.') });
       }
-
-    } catch (error) {
-      setFeedback({ show: true, type: 'error', title: 'Erro de Conexão', msg: 'Verifique sua internet.' });
-    } finally {
-      setLoading(false);
-      setTimeout(() => { router.push('/cliente/dashboard'); }, 3500);
-    }
+    } catch (error) { dialog.showAlert("Erro de Conexão."); } 
+    finally { setLoading(false); }
   };
 
   const valorNumerico = parseFloat(nfData.valor) || 0;
-
-  // Lógica de Bloqueio do Passo 2
   const isStep2Invalid = step === 2 && (valorNumerico <= 0 || !nfData.servicoDescricao.trim());
 
   if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados...</div>;
@@ -206,23 +314,17 @@ export default function EmitirNotaPage() {
   return (
     <div className="max-w-4xl mx-auto py-10 relative">
       
-      {/* MODAL DE FEEDBACK */}
-      {feedback.show && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in duration-300">
-            <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center border border-slate-100">
-                <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6 ${feedback.type === 'success' ? 'bg-green-100 text-green-600' : 'bg-red-50 text-red-500'}`}>
-                    {feedback.type === 'success' ? <CheckCircle size={48} /> : <XCircle size={48} />}
-                </div>
-                <h3 className={`text-2xl font-bold mb-3 ${feedback.type === 'success' ? 'text-slate-800' : 'text-red-700'}`}>
-                    {feedback.title}
-                </h3>
-                <p className="text-slate-600 mb-8 text-base leading-relaxed px-4">{feedback.msg}</p>
-                <div className="flex items-center justify-center gap-2 text-xs text-blue-600 font-bold uppercase tracking-wide animate-pulse">
-                    <Loader2 size={14} className="animate-spin"/> Redirecionando...
-                </div>
+      <div className="mb-6">
+        <button 
+            onClick={() => router.push('/cliente/dashboard')} 
+            className="flex items-center gap-2 text-slate-500 hover:text-blue-600 transition font-medium text-sm group"
+        >
+            <div className="p-2 bg-white rounded-full border border-slate-200 group-hover:border-blue-200 group-hover:bg-blue-50 transition">
+                <Home size={18} />
             </div>
-        </div>
-      )}
+            Voltar ao Início
+        </button>
+      </div>
 
       <div className="flex justify-between items-center mb-8">
           <h2 className="text-2xl font-bold text-slate-800">
@@ -231,7 +333,6 @@ export default function EmitirNotaPage() {
           {retryId && <span className="bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold">MODO CORREÇÃO</span>}
       </div>
 
-      {/* Steps */}
       <div className="flex justify-between mb-8 relative">
         <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-10 transform -translate-y-1/2"></div>
         {[{ id: 1, label: "Tomador", icon: Building2 }, { id: 2, label: "Serviço", icon: Calculator }, { id: 3, label: "Revisão", icon: FileCheck }].map((s) => (
@@ -246,7 +347,6 @@ export default function EmitirNotaPage() {
 
       <div className="bg-white p-8 rounded-xl shadow-lg border border-slate-200">
         
-        {/* PASSO 1 */}
         {step === 1 && (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Quem é o cliente?</h3>
@@ -277,27 +377,74 @@ export default function EmitirNotaPage() {
                     </select>
                 </div>
             ) : (
-                <div className="bg-blue-50 p-6 rounded-lg border border-blue-100 space-y-4">
+                <div className="bg-blue-50 p-6 rounded-lg border border-blue-100 space-y-4 animate-in fade-in">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-1">CPF / CNPJ</label>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="block text-xs font-bold text-slate-500 uppercase">CPF / CNPJ</label>
+                                {clienteEncontrado && (
+                                    <span className="text-xs text-green-600 font-bold flex items-center gap-1 animate-pulse">
+                                        <Check size={12}/> Cliente carregado da base!
+                                    </span>
+                                )}
+                            </div>
                             <div className="flex gap-2">
-                                <input className="w-full p-2 border rounded bg-white" placeholder="000.000.000-00" value={novoCliente.documento} onChange={e => setNovoCliente({...novoCliente, documento: e.target.value})}/>
-                                <button onClick={buscarClienteCNPJ} disabled={buscandoCliente} className="bg-blue-600 text-white px-4 rounded hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50">
-                                    {buscandoCliente ? '...' : <Search size={18} />}
+                                <input className="w-full p-2 border rounded bg-white font-mono" placeholder="Apenas números" 
+                                    value={novoCliente.documento} onChange={e => setNovoCliente({...novoCliente, documento: e.target.value})}
+                                />
+                                <button onClick={buscarDocumentoNovo} disabled={buscandoDoc} className="bg-blue-600 text-white px-4 rounded hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50">
+                                    {buscandoDoc ? <Loader2 className="animate-spin" size={18}/> : <Search size={18} />}
                                 </button>
                             </div>
                         </div>
-                        <div className="md:col-span-2"><label className="block text-sm font-medium text-slate-700 mb-1">Nome</label><input className="w-full p-2 border rounded bg-white" value={novoCliente.nome} onChange={e => setNovoCliente({...novoCliente, nome: e.target.value})} /></div>
-                        <div><label className="block text-sm font-medium text-slate-700 mb-1">Email</label><input className="w-full p-2 border rounded bg-white" value={novoCliente.email} onChange={e => setNovoCliente({...novoCliente, email: e.target.value})} /></div>
-                        <div><label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1"><MapPin size={14} /> Cidade/UF</label><input className="w-full p-2 border rounded bg-gray-100 text-gray-600" readOnly value={novoCliente.cidade ? `${novoCliente.cidade}/${novoCliente.uf}` : ''} placeholder="Automático..." /></div>
+                        <div className="md:col-span-2">
+                            <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
+                                {isPJ ? <><Building size={12} className="inline"/> Razão Social</> : <><User size={12} className="inline"/> Nome Completo</>}
+                            </label>
+                            <input className="w-full p-2 border rounded bg-white" value={novoCliente.nome} onChange={e => setNovoCliente({...novoCliente, nome: e.target.value})} />
+                        </div>
+                        {isPJ && (
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Nome Fantasia</label>
+                                <input className="w-full p-2 border rounded bg-white" value={novoCliente.nomeFantasia} onChange={e => setNovoCliente({...novoCliente, nomeFantasia: e.target.value})} />
+                            </div>
+                        )}
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Email</label>
+                            <input type="email" className="w-full p-2 border rounded bg-white" value={novoCliente.email} onChange={e => setNovoCliente({...novoCliente, email: e.target.value})} />
+                        </div>
+                        <div className="md:col-span-2 bg-white p-3 rounded border border-blue-200 grid grid-cols-3 gap-3">
+                            <div className="col-span-1 relative">
+                                <label className="block text-[10px] font-bold text-slate-400 mb-1">CEP</label>
+                                <input placeholder="00000000" className="w-full p-2 border rounded text-sm font-bold text-blue-700" 
+                                    value={novoCliente.cep} onChange={e => setNovoCliente({...novoCliente, cep: e.target.value})}
+                                    onBlur={buscarCepNovo}
+                                />
+                                {buscandoCep && <Loader2 className="absolute right-2 top-8 animate-spin text-blue-500" size={14}/>}
+                            </div>
+                            <div className="col-span-2">
+                                <label className="block text-[10px] font-bold text-slate-400 mb-1">Logradouro</label>
+                                <input className="w-full p-2 border rounded bg-gray-100 text-sm" readOnly value={novoCliente.logradouro} />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-400 mb-1">Número</label>
+                                <input placeholder="Nº" className="w-full p-2 border rounded text-sm" value={novoCliente.numero} onChange={e => setNovoCliente({...novoCliente, numero: e.target.value})}/>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-400 mb-1">Bairro</label>
+                                <input className="w-full p-2 border rounded bg-gray-100 text-sm" readOnly value={novoCliente.bairro} />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-400 mb-1">Cidade/UF</label>
+                                <input className="w-full p-2 border rounded bg-gray-100 text-sm" readOnly value={novoCliente.cidade ? `${novoCliente.cidade}/${novoCliente.uf}` : ''} />
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
           </div>
         )}
 
-        {/* PASSO 2 */}
         {step === 2 && (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Detalhes do Serviço</h3>
@@ -314,9 +461,7 @@ export default function EmitirNotaPage() {
                         value={nfData.codigoCnae}
                         onChange={(e) => setNfData({...nfData, codigoCnae: e.target.value})}
                     >
-                        {/* Se estiver vazio, força uma opção de instrução, mas o useEffect tenta preencher */}
                         {!nfData.codigoCnae && <option value="">Selecione uma atividade...</option>}
-                        
                         {meusCnaes.map(cnae => (
                             <option key={cnae.id} value={cnae.codigo}>
                                 {cnae.codigo} - {cnae.descricao} {cnae.principal ? '(Principal)' : ''}
@@ -326,7 +471,6 @@ export default function EmitirNotaPage() {
                 )}
             </div>
 
-            {/* === CAMPO DE VALOR COM MÁSCARA === */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label>
               <input 
@@ -339,7 +483,6 @@ export default function EmitirNotaPage() {
               />
             </div>
             
-            {/* === CAMPO DE DESCRIÇÃO COM VALIDAÇÃO === */}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação</label>
               <textarea 
@@ -356,7 +499,6 @@ export default function EmitirNotaPage() {
           </div>
         )}
 
-        {/* PASSO 3 */}
         {step === 3 && (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Revisão</h3>
@@ -381,14 +523,14 @@ export default function EmitirNotaPage() {
           {step < 3 ? (
             <button 
                 onClick={handleNext} 
-                // TRAVA DE NAVEGAÇÃO: Passo 1 (Cliente) ou Passo 2 (Valor e Descrição)
                 disabled={
+                    loading || 
                     (step === 1 && ((modoCliente === 'existente' && !nfData.clienteId) || (modoCliente === 'novo' && !novoCliente.nome))) ||
                     isStep2Invalid
                 }
                 className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}
             >
-                {step === 1 && modoCliente === 'novo' ? 'Salvar e Avançar' : 'Próximo'} <ArrowRight size={18} />
+                {loading ? <Loader2 className="animate-spin" size={18}/> : (step === 1 && modoCliente === 'novo' ? 'Cadastrar e Avançar' : 'Próximo')} <ArrowRight size={18} />
             </button>
           ) : (
             <button onClick={handleEmitir} disabled={loading} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold">

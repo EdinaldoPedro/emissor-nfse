@@ -6,6 +6,7 @@ import {
     DollarSign, Activity, RefreshCw, Trash2, Code, AlertTriangle, 
     CheckCircle, Copy, Loader2, ChevronDown, ChevronRight, Terminal, Download
 } from 'lucide-react';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 // --- HELPER: Formata XML (Pretty Print) ---
 const formatXml = (xml: string) => {
@@ -148,6 +149,7 @@ export default function DetalheVendaCompleto() {
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<'dados' | 'xml' | 'logs'>('dados');
   const [formData, setFormData] = useState({ descricao: '', valor: '', cnae: '' });
+  const dialog = useDialog();
 
   const fetchVenda = (silent = false) => {
     if (!silent && !venda) setLoading(true);
@@ -204,26 +206,46 @@ export default function DetalheVendaCompleto() {
               const resRetry = await fetch('/api/notas/retry', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: JSON.stringify({ vendaId: id, dadosAtualizados: payloadEnvio }) });
               const dataRetry = await resRetry.json();
               if(!resRetry.ok) throw new Error(dataRetry.error || "Erro no processamento.");
+              await dialog.showAlert({ type: 'success', title: 'Processando', description: "🚀 Reenvio iniciado! Acompanhe na aba de Logs." });
               alert("🚀 Reenvio iniciado! Acompanhe na aba de Logs.");
               setIsEditing(false);
               setVenda((prev: any) => ({ ...prev, status: 'PROCESSANDO' }));
               setActiveTab('logs');
               setTimeout(() => fetchVenda(true), 1000);
           } else {
+            await dialog.showAlert({ type: 'success', title: 'Salvo', description: "Dados atualizados com sucesso." });
               alert("✅ Salvo.");
               setIsEditing(false);
               fetchVenda();
           }
-      } catch (error: any) { alert("❌ " + error.message); setTimeout(() => fetchVenda(true), 1000); } finally { setProcessing(false); }
+      } catch (error: any) { 
+        dialog.showAlert({ type: 'danger', title: 'Erro', description: error.message });
+        alert("❌ " + error.message); setTimeout(() => fetchVenda(true), 1000); } finally { setProcessing(false); 
+        }
   };
 
   const handleDelete = async () => {
-      if(prompt("Digite 'DELETAR'") !== 'DELETAR') return;
-      setProcessing(true);
-      try {
-          const res = await fetch(`/api/admin/vendas/${id}`, { method: 'DELETE' });
-          if (res.ok) { alert("Excluída."); router.push('/admin/emissoes'); } else alert("Erro ao excluir.");
-      } catch (e) { alert("Erro de conexão."); } finally { setProcessing(false); }
+    const confirmacao = await dialog.showPrompt({
+            type: 'danger',
+            title: 'Zona de Perigo',
+            description: 'Esta ação apagará permanentemente a venda e as notas. Digite DELETAR para confirmar.',
+            validationText: 'DELETAR',
+            placeholder: "Digite 'DELETAR'"
+        });
+
+        if (confirmacao !== 'DELETAR') return;
+
+        setProcessing(true);
+        try {
+            const res = await fetch(`/api/admin/vendas/${id}`, { method: 'DELETE' });
+            if (res.ok) { 
+                await dialog.showAlert({ type: 'success', description: "Venda excluída." }); 
+                router.push('/admin/emissoes'); 
+            } else {
+                dialog.showAlert({ type: 'danger', description: "Erro ao excluir." });
+            }
+        } catch (e) { dialog.showAlert("Erro de conexão."); } 
+        finally { setProcessing(false); }
   };
 
   if (loading && !venda) return <div className="h-screen flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> Carregando...</div>;

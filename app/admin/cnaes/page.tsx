@@ -1,8 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Search, Edit, Save, X, ChevronLeft, ChevronRight } from 'lucide-react';
+// 1. Importar Dialog
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function AdminCnaes() {
+  const dialog = useDialog(); // 2. Inicializar
   const [cnaes, setCnaes] = useState<any[]>([]);
   
   // Paginação e Busca
@@ -14,7 +17,7 @@ export default function AdminCnaes() {
 
   const [editing, setEditing] = useState<any>(null);
 
-  // Efeito Debounce: Busca 0.5s após parar de digitar
+  // Efeito Debounce
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       carregar(page, termoBusca);
@@ -40,12 +43,16 @@ export default function AdminCnaes() {
     });
     if (res.ok) {
         setEditing(null);
-        carregar(page, termoBusca); // Recarrega mantendo a página
+        carregar(page, termoBusca);
+        dialog.showAlert({ type: 'success', description: "Tributação atualizada!" });
     } else {
-        alert('Erro ao salvar');
+        dialog.showAlert({ type: 'danger', description: "Erro ao salvar." });
     }
   };
 
+  // ... (RESTO DO CÓDIGO PERMANECE IGUAL, POIS SÓ MUDOU O ALERTA DO SAVE)
+  // ... (Copie o return do seu código original a partir daqui, ele já está certo)
+  
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">

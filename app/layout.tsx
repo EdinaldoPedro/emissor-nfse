@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-// IMPORTAR O PROVIDER
 import { AppConfigProvider } from "@/app/contexts/AppConfigContext";
+import { DialogProvider } from "@/app/contexts/DialogContext"; // <--- 1. IMPORTAR
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -19,9 +19,11 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className={inter.className}>
-        {/* ENVOLVER TUDO COM O PROVIDER */}
         <AppConfigProvider>
+          {/* 2. ENVOLVER A APLICAÇÃO */}
+          <DialogProvider>
             {children}
+          </DialogProvider>
         </AppConfigProvider>
       </body>
     </html>

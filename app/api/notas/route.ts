@@ -8,24 +8,24 @@ import { getAuthenticatedUser, unauthorized, forbidden } from '@/app/utils/api-m
 
 const prisma = new PrismaClient();
 
-// Função auxiliar refatorada para usar o user já autenticado
+// === FUNÇÕES AUXILIARES ===
+
+// Define qual empresa está sendo operada (Contexto do Contador ou Admin)
 async function getEmpresaContexto(user: any, contextId: string | null) {
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
     
-    // Se for Staff, pode assumir qualquer contexto
-    if (isStaff && contextId && contextId !== 'null' && contextId !== 'undefined') return contextId; 
+    if (contextId && contextId !== 'null' && contextId !== 'undefined') {
+        const vinculo = await prisma.contadorVinculo.findUnique({
+            where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
+        });
+        if (vinculo && vinculo.status === 'APROVADO') return contextId;
+        if (isStaff) return contextId; 
+    }
     
-    // Se não tem contexto específico, usa a empresa do próprio usuário
-    if (!contextId || contextId === 'null' || contextId === 'undefined') return user.empresaId;
-    
-    // Se for Contador/Outros tentando acessar outra empresa, verifica vínculo
-    const vinculo = await prisma.contadorVinculo.findUnique({
-        where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
-    });
-    
-    return (vinculo && vinculo.status === 'APROVADO') ? contextId : null;
+    return user.empresaId;
 }
 
+// Remove dados sensíveis dos logs
 function limparPayloadParaLog(payload: any) {
     const copia = JSON.parse(JSON.stringify(payload));
     if (copia.prestador) {
@@ -36,13 +36,28 @@ function limparPayloadParaLog(payload: any) {
     return copia;
 }
 
-// POST DE EMISSÃO
+// Permite que Admin/Suporte "seja" o cliente (header x-user-id)
+async function resolveUser(request: Request) {
+    let user = await getAuthenticatedUser(request);
+    if (!user) return null;
+
+    const headerUserId = request.headers.get('x-user-id');
+    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+
+    if (isStaff && headerUserId && headerUserId !== user.id) {
+        const targetUser = await prisma.user.findUnique({ where: { id: headerUserId } });
+        if (targetUser) {
+            return { ...targetUser, isImpersonating: true }; 
+        }
+    }
+    return user;
+}
+
+// === POST: EMISSÃO DE NOTA ===
 export async function POST(request: Request) {
-  // 1. Autenticação via JWT
-  const user = await getAuthenticatedUser(request);
+  const user = await resolveUser(request);
   if (!user) return unauthorized();
 
-  // Pega o ID da empresa do header (se houver contexto)
   const contextId = request.headers.get('x-empresa-id'); 
   
   let vendaIdLog = null;
@@ -52,16 +67,15 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae, vendaId } = body;
 
-    // 2. Validação de Permissão de Empresa
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
     empresaIdLog = empresaIdAlvo;
 
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
-    if (!prestador || !tomador) throw new Error("Empresas não encontradas.");
+    if (!prestador || !tomador) throw new Error("Empresas (Prestador ou Tomador) não encontradas.");
 
-    // --- LÓGICA DE EMISSÃO MANTIDA IGUAL ---
+    // Cria ou Atualiza a Venda
     let venda;
     if (vendaId) {
         venda = await prisma.venda.update({
@@ -75,25 +89,31 @@ export async function POST(request: Request) {
     }
     vendaIdLog = venda.id;
 
+    // Incrementa DPS
     const novoNumeroDPS = (prestador.ultimoDPS || 0) + 1;
     await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: novoNumeroDPS } });
 
+    // Trata CNAE
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
         const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
         if (cnaeBanco) cnaeFinal = cnaeBanco.codigo.replace(/\D/g, '');
     }
-    if (!cnaeFinal) throw new Error("CNAE é obrigatório.");
+    if (!cnaeFinal) throw new Error("CNAE é obrigatório para emissão.");
 
-    let codigoTribNacional = '010101';
-    let itemLc = '01.01';
+    // === LÓGICA DE TRIBUTAÇÃO (FISCAL) ===
+    // Define padrão INVÁLIDO para forçar erro se não achar mapeamento
+    let codigoTribNacional = '000000'; 
+    let itemLc = '00.00';
 
+    // 1. Tenta Lista Estática (Arquivo utils)
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
-    if (infoEstatica && infoEstatica.codigoTributacaoNacional !== '01.01.01') {
+    if (infoEstatica && infoEstatica.codigoTributacaoNacional) {
          itemLc = infoEstatica.itemLC;
          codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
+    // 2. Tenta Banco de Dados Global (Prioridade Máxima)
     const regraFiscal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
     if (regraFiscal) {
         if (regraFiscal.itemLc) itemLc = regraFiscal.itemLc;
@@ -102,6 +122,13 @@ export async function POST(request: Request) {
         }
     }
 
+    // 3. TRAVA DE SEGURANÇA
+    // Impede o envio se o código ainda for o padrão inválido
+    if (codigoTribNacional === '000000') {
+        throw new Error(`Erro Fiscal: O CNAE ${cnaeFinal} não possui 'Código de Tributação Nacional' configurado no sistema. Contate o suporte para cadastrar este De-Para.`);
+    }
+
+    // Prepara dados para a Factory
     const dadosParaEstrategia = {
         prestador,
         tomador,
@@ -192,10 +219,9 @@ export async function POST(request: Request) {
   }
 }
 
-// GET
+// === GET: LISTAGEM DE NOTAS ===
 export async function GET(request: Request) {
-    // 1. Auth JWT
-    const user = await getAuthenticatedUser(request);
+    const user = await resolveUser(request);
     if (!user) return unauthorized();
 
     const contextId = request.headers.get('x-empresa-id');
@@ -207,7 +233,10 @@ export async function GET(request: Request) {
   
     try {
       const empresaIdAlvo = await getEmpresaContexto(user, contextId);
-      if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0, page: 1, totalPages: 1 } });
+      
+      if (!empresaIdAlvo) {
+          return NextResponse.json({ data: [], meta: { total: 0, page: 1, totalPages: 1 } });
+      }
   
       const skip = (page - 1) * limit;
       const whereClause: any = {

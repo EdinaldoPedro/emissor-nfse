@@ -1,11 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, KeyRound } from 'lucide-react';
+import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, KeyRound, AtSign } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { AtSign } from 'lucide-react'; // Adicione AtSign aos imports
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function GestaoClientes() {
   const router = useRouter();
+  const dialog = useDialog();
+  
   const [clientes, setClientes] = useState<any[]>([]);
   const [planosDisponiveis, setPlanosDisponiveis] = useState<any[]>([]);
   const [term, setTerm] = useState('');
@@ -24,7 +26,8 @@ export default function GestaoClientes() {
     fetch('/api/admin/users', {
          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     }).then(r => r.json()).then(data => {
-        // Filtra apenas COMUM (Clientes) e outros cargos baixos
+        // Filtra apenas COMUM (Clientes) e outros cargos baixos, se desejar
+        // Aqui removi o filtro rígido para você ver todos, ou você pode manter:
         const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
         setClientes(listaClientes);
     });
@@ -48,14 +51,20 @@ export default function GestaoClientes() {
       if(res.ok) {
           setEditingUser(null);
           carregarUsuarios();
-          alert("Dados salvos!");
+          dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Dados do cliente salvos!" });
       } else {
-          alert("Erro ao salvar.");
+          dialog.showAlert({ type: 'danger', title: 'Erro', description: "Não foi possível salvar os dados." });
       }
   };
 
   const handleUnlinkCompany = async () => {
-      if(!confirm("Tem certeza? O usuário perderá o acesso à empresa.")) return;
+      const confirmed = await dialog.showConfirm({
+          title: 'Desvincular Empresa',
+          description: 'O usuário perderá o acesso à empresa atual. Tem certeza?',
+          confirmText: 'Sim, desvincular',
+          type: 'warning'
+      });
+      if (!confirmed) return;
 
       const res = await fetch('/api/admin/users', {
           method: 'PUT',
@@ -67,16 +76,16 @@ export default function GestaoClientes() {
       });
 
       if(res.ok) {
-          alert("Empresa desvinculada.");
+          dialog.showAlert("Empresa desvinculada com sucesso.");
           setEditingUser(null);
           carregarUsuarios();
       } else {
-          alert("Erro ao desvincular.");
+          dialog.showAlert({ type: 'danger', title: 'Erro', description: "Erro ao desvincular." });
       }
   };
 
   const handleUpdateCnpj = async () => {
-      if(!novoCnpj || novoCnpj.length < 14) return alert("Digite um CNPJ válido.");
+      if(!novoCnpj || novoCnpj.length < 14) return dialog.showAlert({ type: 'warning', description: "Digite um CNPJ válido (14 dígitos)." });
       
       const res = await fetch('/api/admin/users', {
           method: 'PUT',
@@ -93,17 +102,21 @@ export default function GestaoClientes() {
 
       const data = await res.json();
       if(res.ok) {
-          alert(data.message);
+          dialog.showAlert({ type: 'success', description: data.message });
           setEditingUser(null);
           carregarUsuarios();
       } else {
-          alert(data.error || "Erro ao processar.");
+          dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error || "Erro ao processar." });
       }
   };
   
-  // === NOVA FUNÇÃO DE RESET ===
   const handleSendReset = async () => {
-      if(!confirm(`Enviar e-mail de redefinição de senha para ${editingUser.email}?`)) return;
+      const confirmed = await dialog.showConfirm({
+          title: 'Resetar Senha',
+          description: `Enviar e-mail de redefinição para ${editingUser.email}?`,
+          confirmText: 'Enviar E-mail'
+      });
+      if(!confirmed) return;
 
       try {
           const res = await fetch('/api/auth/forgot-password', {
@@ -112,10 +125,39 @@ export default function GestaoClientes() {
               body: JSON.stringify({ email: editingUser.email })
           });
           
-          if(res.ok) alert("E-mail enviado com sucesso!");
-          else alert("Erro ao enviar e-mail.");
+          if(res.ok) dialog.showAlert({ type: 'success', description: "E-mail de recuperação enviado!" });
+          else dialog.showAlert({ type: 'danger', description: "Erro ao enviar e-mail." });
 
-      } catch (e) { alert("Erro de conexão."); }
+      } catch (e) { dialog.showAlert("Erro de conexão."); }
+  };
+
+  const handleResetEmail = async () => {
+    const confirmed = await dialog.showConfirm({
+        title: 'Forçar Troca de E-mail',
+        description: `O e-mail atual (${editingUser.email}) será removido. No próximo login (via CPF), o usuário será obrigado a cadastrar um novo.\n\nDeseja continuar?`,
+        type: 'danger',
+        confirmText: 'Sim, Resetar E-mail'
+    });
+    if(!confirmed) return;
+
+    try {
+        const res = await fetch('/api/admin/users', {
+            method: 'PUT',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+            },
+            body: JSON.stringify({ id: editingUser.id, resetEmail: true })
+        });
+        
+        if(res.ok) {
+            dialog.showAlert({ type: 'success', title: 'Feito', description: "E-mail resetado com sucesso." });
+            setEditingUser(null);
+            carregarUsuarios();
+        } else {
+            dialog.showAlert({ type: 'danger', description: "Erro ao resetar e-mail." });
+        }
+    } catch (e) { dialog.showAlert("Erro de conexão."); }
   };
 
   const abrirEdicao = (user: any) => {
@@ -129,46 +171,38 @@ export default function GestaoClientes() {
       setNovoCnpj(user.empresa ? user.empresa.documento : '');
   }
 
+  // === CORREÇÃO DA FUNÇÃO DE ACESSO (IMPERSONATE) ===
   const acessarSuporte = async (targetId: string) => {
     const adminId = localStorage.getItem('userId');
+    
+    // Salva o ID do admin para poder voltar depois
     if (adminId) localStorage.setItem('adminBackUpId', adminId);
+
     try {
         const res = await fetch('/api/admin/impersonate', {
             method: 'POST', body: JSON.stringify({ targetUserId: targetId })
         });
         const data = await res.json();
+        
         if (data.success) {
+            // 1. LIMPEZA CRÍTICA: Remove qualquer contexto de empresa/contador anterior
+            // Isso evita que o admin tente acessar a empresa errada ao trocar de cliente
+            localStorage.removeItem('empresaContextId'); 
+            
+            // 2. Define os dados da sessão falsa
             localStorage.setItem('userId', data.fakeSession.id);
             localStorage.setItem('userRole', data.fakeSession.role);
             localStorage.setItem('isSupportMode', 'true');
+            
+            // 3. Redireciona
             router.push('/cliente/dashboard');
-        }
-    } catch (error) { alert("Erro ao acessar."); }
-  };
-
-  const handleResetEmail = async () => {
-    if(!confirm(`ATENÇÃO: O e-mail atual (${editingUser.email}) será removido.\n\nNo próximo login (via CPF), o sistema pedirá obrigatoriamente que o usuário cadastre um novo e-mail.\n\nDeseja continuar?`)) return;
-
-    try {
-        const res = await fetch('/api/admin/users', {
-            method: 'PUT',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + localStorage.getItem('token')
-            },
-            body: JSON.stringify({ id: editingUser.id, resetEmail: true })
-        });
-        
-        if(res.ok) {
-            alert("E-mail resetado! O usuário deverá cadastrar um novo ao entrar.");
-            setEditingUser(null);
-            carregarUsuarios();
         } else {
-            alert("Erro ao resetar e-mail.");
+             dialog.showAlert({ type: 'danger', description: "Falha ao iniciar sessão." });
         }
-    } catch (e) { alert("Erro de conexão."); }
-    };
-
+    } catch (error) { 
+        dialog.showAlert({ type: 'danger', description: "Erro ao acessar conta do cliente." }); 
+    }
+  };
 
   const filtered = clientes.filter(c => c.nome.toLowerCase().includes(term.toLowerCase()) || c.email.includes(term));
 
@@ -184,7 +218,7 @@ export default function GestaoClientes() {
 
       {/* MODAL DE EDIÇÃO */}
       {editingUser && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between mb-4">
                     <h3 className="font-bold text-lg text-slate-800">Gerenciar Cliente</h3>
@@ -192,19 +226,20 @@ export default function GestaoClientes() {
                 </div>
                 
                 <div className="space-y-6">
-                    {/* DADOS PESSOAIS (COM BOTÃO DE RESET) */}
+                    {/* DADOS PESSOAIS */}
                     <div className="bg-gray-50 p-3 rounded border">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Dados Pessoais</label>
                         <p className="font-bold text-slate-700">{editingUser.nome}</p>
                         <p className="text-xs text-slate-500">{editingUser.email}</p>
                         
-                        {/* === BOTÃO ADICIONADO AQUI === */}
-                        <button onClick={handleSendReset} className="mt-3 w-full bg-white border border-blue-200 text-blue-600 text-xs font-bold py-2 rounded hover:bg-blue-50 flex items-center justify-center gap-2 transition shadow-sm">
-                            <KeyRound size={14}/> Enviar Redefinição de Senha
-                        </button>
-                        <button onClick={handleResetEmail} className="mt-2 w-full bg-white border border-orange-200 text-orange-600 text-xs font-bold py-2 rounded hover:bg-orange-50 flex items-center justify-center gap-2 transition shadow-sm">
-                            <AtSign size={14}/> Forçar Troca de E-mail
-                        </button>
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                             <button onClick={handleSendReset} className="bg-white border border-blue-200 text-blue-600 text-xs font-bold py-2 rounded hover:bg-blue-50 flex items-center justify-center gap-2 transition">
+                                <KeyRound size={14}/> Reset Senha
+                            </button>
+                            <button onClick={handleResetEmail} className="bg-white border border-orange-200 text-orange-600 text-xs font-bold py-2 rounded hover:bg-orange-50 flex items-center justify-center gap-2 transition">
+                                <AtSign size={14}/> Reset Email
+                            </button>
+                        </div>
                     </div>
 
                     {/* ÁREA DA EMPRESA */}
@@ -316,6 +351,7 @@ export default function GestaoClientes() {
                             <button 
                                 onClick={() => acessarSuporte(cli.id)}
                                 className="bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200 px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 transition"
+                                title="Acessar como este cliente"
                             >
                                 <LogIn size={14}/>
                             </button>
