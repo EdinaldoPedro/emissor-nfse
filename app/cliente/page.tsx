@@ -214,11 +214,18 @@ export default function MeusClientes() {
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
+        {/* CABEÇALHO ATUALIZADO COM BOTÃO VOLTAR */}
         <div className="flex justify-between items-center">
-            <div>
-                <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> Meus Clientes</h1>
-                <p className="text-slate-500 text-sm">Gerencie tomadores PF e PJ.</p>
+            <div className="flex items-center gap-4">
+                <button onClick={() => router.back()} className="p-2 hover:bg-slate-200 rounded-full transition text-slate-600">
+                    <ArrowLeft size={24} />
+                </button>
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> Meus Clientes</h1>
+                    <p className="text-slate-500 text-sm">Gerencie tomadores PF e PJ.</p>
+                </div>
             </div>
+            
             {!isFormOpen && (
                 <button onClick={abrirNovoCadastro} className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 font-medium shadow-md">
                     <Plus size={20} /> Novo Cliente
@@ -268,7 +275,7 @@ export default function MeusClientes() {
                                     className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${isPJ ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : 'bg-white'}`}
                                     value={clienteAtual.nome} 
                                     onChange={e => setClienteAtual({...clienteAtual, nome: e.target.value})}
-                                    readOnly={isPJ} // <--- TRAVA A EDIÇÃO SE FOR PJ
+                                    readOnly={isPJ} 
                                 />
                             </div>
                             
@@ -368,9 +375,7 @@ export default function MeusClientes() {
                         <tr>
                             <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Cliente</th>
                             <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Documento</th>
-                            {/* COLUNA TIPO RESTAURADA */}
                             <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Tipo</th>
-                            {/* COLUNA LOCALIZAÇÃO */}
                             <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Localização</th>
                             <th className="px-6 py-4 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Ações</th>
                         </tr>
@@ -390,7 +395,6 @@ export default function MeusClientes() {
                                     <td className="px-6 py-4 font-mono text-xs text-slate-600">
                                         {cliente.documento}
                                     </td>
-                                    {/* COLUNA TIPO EM CÉLULA SEPARADA */}
                                     <td className="px-6 py-4">
                                         {cliente.documento.replace(/\D/g, '').length > 11 ? (
                                             <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200 flex items-center gap-1 w-fit"><Building size={10}/> PJ</span>
@@ -398,7 +402,6 @@ export default function MeusClientes() {
                                             <span className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded border border-green-200 flex items-center gap-1 w-fit"><User size={10}/> PF</span>
                                         )}
                                     </td>
-                                    {/* COLUNA LOCALIZAÇÃO RESTAURADA */}
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
                                         {cliente.cidade ? `${cliente.cidade}/${cliente.uf}` : <span className="text-slate-300 italic">--</span>}
                                     </td>
