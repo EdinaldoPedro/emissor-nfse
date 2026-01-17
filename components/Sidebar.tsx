@@ -164,8 +164,8 @@ export default function Sidebar() {
                 <Link href="/cliente" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded dark:text-gray-300 dark:hover:bg-slate-800">
                     <FileText size={18} /> {t('menu', 'clients')} {/* TRADUZIDO */}
                 </Link>
-                <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded opacity-50 cursor-not-allowed dark:text-gray-300 dark:hover:bg-slate-800">
-                    <FileText size={18} /> Relatórios (Em breve)
+                <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded dark:text-gray-300 dark:hover:bg-slate-800">
+                    <FileText size={18} /> Relatórios
                 </Link>
             </div>
           </section>
