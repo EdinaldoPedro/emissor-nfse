@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X, RefreshCcw } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X, RefreshCcw, Calendar, TrendingUp } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 
@@ -16,15 +16,16 @@ export default function MinhaContaPage() {
   const [showPlans, setShowPlans] = useState(false);
 
   const [data, setData] = useState({
-    nome: '',
-    email: '',
-    cpf: '',
-    telefone: '',
-    plano: { tipo: 'GRATUITO', status: 'active', expiresAt: null, ciclo: 'MENSAL' }, 
+    nome: '', email: '', cpf: '', telefone: '',
     perfil: { cargo: '', empresa: '', avatarUrl: '' },
     configuracoes: { darkMode: false, idioma: 'pt-BR', notificacoesEmail: true },
     metadata: { createdAt: '', lastLoginAt: '', ipOrigem: '' },
-    planoSlug: 'GRATUITO', 
+    // Campos detalhados
+    planoDetalhado: { 
+        nome: '', slug: '', status: '', 
+        usoEmissoes: 0, limiteEmissoes: 0, 
+        dataInicio: '', dataFim: '' 
+    },
     planoCiclo: 'MENSAL'
   });
 
@@ -35,24 +36,11 @@ export default function MinhaContaPage() {
     fetch('/api/perfil', { headers: { 'x-user-id': userId } })
       .then(res => res.json())
       .then(apiData => {
-        const planoObj = apiData.plano || {};
-        const slugReal = planoObj.tipo || 'GRATUITO'; 
-        const cicloReal = apiData.planoCiclo || 'MENSAL';
-
         setData(prev => ({
             ...prev,
             ...apiData,
-            planoSlug: slugReal,
-            planoCiclo: cicloReal,
-            plano: { 
-                tipo: slugReal, 
-                status: planoObj.status, 
-                expiresAt: planoObj.expiresAt,
-                ciclo: cicloReal
-            },
-            perfil: apiData.perfil || prev.perfil,
-            configuracoes: apiData.configuracoes || prev.configuracoes,
-            metadata: apiData.metadata || prev.metadata
+            planoDetalhado: apiData.planoDetalhado || prev.planoDetalhado,
+            planoCiclo: apiData.planoCiclo || 'MENSAL'
         }));
 
         if (apiData.configuracoes) {
@@ -64,46 +52,32 @@ export default function MinhaContaPage() {
       .catch(err => { console.error(err); setLoading(false); });
   }, [router]);
 
-  // === AÇÃO DE RESET INSTANTÂNEA ===
   const handleResetTutorial = async () => {
       const userId = localStorage.getItem('userId');
       if(!userId) return;
-
-      // Sem confirmação (confirm), apenas executa
       try {
-          // 1. Zera o passo no banco
           await fetch('/api/perfil/tutorial', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
               body: JSON.stringify({ step: 0 }) 
           });
-          
-          // 2. Recarrega para iniciar o tutorial
           window.location.reload(); 
-      } catch (e) {
-          // Silencioso ou log
-      }
+      } catch (e) {}
   };
 
   const handlePlanChange = async (newSlug: string, newCiclo: string) => {
     const userId = localStorage.getItem('userId');
     try {
-        const res = await fetch('/api/perfil', {
+        const res = await fetch('/api/admin/users', { // Usa a rota admin para processar a troca com a lógica de histórico
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
-            body: JSON.stringify({ plano: newSlug, planoCiclo: newCiclo }) 
+            body: JSON.stringify({ id: userId, plano: newSlug, planoCiclo: newCiclo }) 
         });
 
         if(res.ok) {
-            setData(prev => ({ 
-                ...prev, 
-                planoSlug: newSlug, 
-                planoCiclo: newCiclo, 
-                plano: { ...prev.plano, tipo: newSlug, ciclo: newCiclo } 
-            }));
             setShowPlans(false);
-            setMsg('✅ Plano alterado com sucesso!');
-            setTimeout(() => setMsg(''), 3000);
+            setMsg('✅ Plano atualizado! Recarregando...');
+            setTimeout(() => window.location.reload(), 1500);
         } else {
             alert("Erro ao alterar plano.");
         }
@@ -115,7 +89,7 @@ export default function MinhaContaPage() {
       setSaving(true);
       const userId = localStorage.getItem('userId');
       try {
-        const { planoSlug, planoCiclo, ...restData } = data;
+        const { planoDetalhado, planoCiclo, ...restData } = data;
         const payload = {
             ...restData,
             configuracoes: {
@@ -133,6 +107,12 @@ export default function MinhaContaPage() {
         if (res.ok) { setMsg('✅ Salvo!'); setTimeout(() => setMsg(''), 3000); }
       } catch(e) {} finally { setSaving(false); }
   };
+
+  // Cálculos visuais
+  const p = data.planoDetalhado;
+  const isIlimitado = p.limiteEmissoes === 0;
+  const percentUso = isIlimitado ? 0 : Math.min(100, (p.usoEmissoes / p.limiteEmissoes) * 100);
+  const dataFimFormatada = p.dataFim ? new Date(p.dataFim).toLocaleDateString() : 'Vitalício / Recorrente';
 
   if (loading) return <div className="p-10 text-center text-gray-500">Carregando perfil...</div>;
 
@@ -153,7 +133,7 @@ export default function MinhaContaPage() {
                 </div>
                 <div className="p-8 bg-gray-50 dark:bg-slate-900">
                     <PlanSelector 
-                        currentPlan={data.planoSlug} 
+                        currentPlan={p.slug} 
                         currentCycle={data.planoCiclo}
                         onSelectPlan={handlePlanChange}
                     />
@@ -163,8 +143,6 @@ export default function MinhaContaPage() {
       )}
 
       <div className="max-w-4xl mx-auto">
-        
-        {/* Header */}
         <div className="flex justify-between items-center mb-8">
             <div className="flex items-center gap-4">
                 <button onClick={() => router.back()} className="p-2 hover:bg-gray-200 rounded-full transition dark:hover:bg-slate-800">
@@ -178,45 +156,70 @@ export default function MinhaContaPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             <div className="md:col-span-1 space-y-6">
-              {/* Card Perfil */}
+              
+              {/* CARD DE PERFIL */}
               <div className="tour-perfil-card bg-white p-6 rounded-xl shadow-sm border border-gray-100 text-center dark:bg-slate-800 dark:border-slate-700">
-                <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600 overflow-hidden">
-                  {data.perfil.avatarUrl ? (
-                      <img src={data.perfil.avatarUrl} alt="Avatar" className="w-full h-full object-cover"/>
-                  ) : (
-                      <User size={40} />
-                  )}
+                <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600 overflow-hidden text-2xl font-bold">
+                   {data.nome.charAt(0)}
                 </div>
                 <h2 className="font-bold text-lg text-gray-800 dark:text-white">{data.nome}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{data.perfil.cargo || 'Sem cargo definido'}</p>
-                <p className="text-xs text-blue-600 font-medium mt-1">{data.perfil.empresa}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{data.perfil.cargo || 'Cliente'}</p>
               </div>
 
-              {/* Card Plano */}
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden dark:bg-slate-800 dark:border-slate-700">
+              {/* CARD DE ASSINATURA DETALHADO */}
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden dark:bg-slate-800 dark:border-slate-700 flex flex-col gap-4">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500"></div>
-                <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex items-center gap-2 dark:text-gray-500">
-                    <CreditCard size={14}/> Assinatura Atual
-                </h3>
-                <div className="text-center">
-                    <p className="text-2xl font-black text-slate-800 dark:text-white">{data.planoSlug}</p>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{data.planoCiclo}</p>
-                    <button type="button" onClick={() => setShowPlans(true)} className="w-full py-2 bg-blue-50 text-blue-600 font-bold text-sm rounded-lg hover:bg-blue-100 transition border border-blue-200 dark:bg-slate-700 dark:text-blue-400 dark:border-slate-600 dark:hover:bg-slate-600">
-                        Trocar de Plano
-                    </button>
+                
+                <div className="flex justify-between items-center">
+                    <h3 className="text-sm font-bold text-gray-400 uppercase flex items-center gap-2 dark:text-gray-500">
+                        <CreditCard size={14}/> Assinatura
+                    </h3>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${p.status === 'ATIVO' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {p.status}
+                    </span>
                 </div>
+
+                <div>
+                    <p className="text-2xl font-black text-slate-800 dark:text-white">{p.nome}</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{data.planoCiclo}</p>
+                </div>
+
+                {/* INFO DE USO */}
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-sm space-y-3 dark:bg-slate-900 dark:border-slate-700">
+                    <div>
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><TrendingUp size={12}/> Emissões</span>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                {p.usoEmissoes} / {isIlimitado ? '∞' : p.limiteEmissoes}
+                            </span>
+                        </div>
+                        {!isIlimitado && (
+                            <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
+                                <div className={`h-2 rounded-full transition-all duration-500 ${percentUso > 80 ? 'bg-red-500' : 'bg-blue-500'}`} style={{width: `${percentUso}%`}}></div>
+                            </div>
+                        )}
+                    </div>
+                    
+                    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                        <Calendar size={14} className="text-slate-400"/>
+                        <span>Expira em: <strong>{dataFimFormatada}</strong></span>
+                    </div>
+                </div>
+
+                <button type="button" onClick={() => setShowPlans(true)} className="w-full py-2 bg-blue-50 text-blue-600 font-bold text-sm rounded-lg hover:bg-blue-100 transition border border-blue-200 dark:bg-slate-700 dark:text-blue-400 dark:border-slate-600 dark:hover:bg-slate-600">
+                    Trocar de Plano
+                </button>
               </div>
 
               <div className="bg-gray-100 p-4 rounded-lg text-[10px] text-gray-500 space-y-1 font-mono dark:bg-slate-800 dark:text-gray-400">
-                <p>ID: {typeof window !== 'undefined' ? localStorage.getItem('userId') : '...'}</p>
+                <p>ID: {typeof window !== 'undefined' ? localStorage.getItem('userId')?.substring(0,8) : '...'}</p>
                 <p>Criado em: {data.metadata.createdAt ? new Date(data.metadata.createdAt).toLocaleDateString() : '-'}</p>
-                <p>IP: {data.metadata.ipOrigem || 'Não registrado'}</p>
               </div>
             </div>
 
             <div className="md:col-span-2 space-y-6">
               
-              {/* Dados Pessoais */}
+              {/* DADOS PESSOAIS */}
               <div className="tour-dados-pessoais bg-white p-8 rounded-xl shadow-sm border border-gray-100 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2 dark:text-white">
                     <User size={20}/> Dados Pessoais
@@ -256,7 +259,7 @@ export default function MinhaContaPage() {
                 </div>
               </div>
 
-              {/* Preferências */}
+              {/* PREFERÊNCIAS (COM BOTÃO DE RESET DISCRETO) */}
               <div className="tour-preferencias bg-white p-8 rounded-xl shadow-sm border border-gray-100 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2 dark:text-white">
                     <Settings size={20}/> Preferências
@@ -274,17 +277,6 @@ export default function MinhaContaPage() {
                             <div className={`bg-white w-3 h-3 rounded-full shadow-md transform transition-transform duration-300 ${darkMode ? 'translate-x-5' : ''}`}></div>
                         </div>
                     </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition dark:border-slate-600 dark:hover:bg-slate-700">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-gray-100 rounded-full dark:bg-slate-600"><Mail size={18} className="text-gray-600 dark:text-gray-300"/></div>
-                            <div>
-                                <p className="font-medium text-sm text-gray-800 dark:text-white">Notificações por Email</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">Receber alertas sobre notas emitidas.</p>
-                            </div>
-                        </div>
-                        <input type="checkbox" className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 dark:bg-slate-900 dark:border-slate-600"
-                            checked={data.configuracoes.notificacoesEmail} onChange={e => setData({...data, configuracoes: {...data.configuracoes, notificacoesEmail: e.target.checked}})} />
-                    </div>
                     
                     <div className="pt-2">
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Idioma do Sistema</label>
@@ -296,7 +288,7 @@ export default function MinhaContaPage() {
                         </select>
                     </div>
 
-                    {/* BOTÃO RESETAR - SÓ ÍCONE E TEXTO */}
+                    {/* BOTÃO RESETAR - SÓ ÍCONE E TEXTO (DISCRETO) */}
                     <div className="pt-4 mt-4 border-t border-gray-100 dark:border-slate-700">
                         <button 
                             type="button" 
@@ -310,11 +302,10 @@ export default function MinhaContaPage() {
                             Reiniciar Tutorial de Boas-vindas
                         </button>
                     </div>
-
                 </div>
               </div>
 
-              {/* Botão Salvar */}
+              {/* BOTÃO SALVAR */}
               <div className="flex justify-between items-center pt-4">
                 <span className={`text-sm font-medium transition-opacity duration-300 ${msg ? 'opacity-100' : 'opacity-0'} ${msg.includes('✅') ? 'text-green-600' : 'text-red-600'}`}>
                     {msg}

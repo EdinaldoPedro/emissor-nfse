@@ -56,7 +56,7 @@ export default function PlanSelector({ currentPlan, currentCycle, onSelectPlan }
             onClick={() => setCiclo('ANUAL')}
             className={`px-6 py-2 rounded-full text-sm font-bold transition-all z-10 ${ciclo === 'ANUAL' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
-            Anual <span className="text-[10px] text-green-600 ml-1">(-17%)</span>
+            Anual <span className="text-[10px] text-green-600 ml-1">(-25%)</span>
           </button>
         </div>
       </div>

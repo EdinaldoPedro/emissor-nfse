@@ -12,8 +12,6 @@ export async function GET(request: Request) {
 
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
-  let empresaAlvoId = null;
-
   // 1. Busca o usuário logado
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -22,16 +20,66 @@ export async function GET(request: Request) {
 
   if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
-  // 2. Lógica de Contexto
-  if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
-      const vinculo = await prisma.contadorVinculo.findUnique({
-          where: {
-              contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId }
-          }
+  // === NOVA IMPLEMENTAÇÃO: LÓGICA DE PLANOS E STAFF ===
+  const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+  let planoDetalhado = null;
+
+  if (isStaff) {
+      // Se for ADMIN, gera um plano "virtual" ilimitado
+      planoDetalhado = {
+          nome: 'Acesso Administrativo',
+          slug: 'ADMIN_ACCESS',
+          status: 'ATIVO',
+          dataInicio: user.createdAt,
+          dataFim: null, // Vitalício
+          usoEmissoes: 0,
+          limiteEmissoes: 0, // 0 = Ilimitado
+          diasTeste: 0
+      };
+  } else {
+      // Se for CLIENTE, busca o plano real no histórico
+      const planoAtivo = await prisma.planHistory.findFirst({
+          where: { userId: user.id, status: 'ATIVO' },
+          include: { plan: true },
+          orderBy: { createdAt: 'desc' }
       });
 
-      if (vinculo && vinculo.status === 'APROVADO') {
-          empresaAlvoId = contextEmpresaId; 
+      planoDetalhado = planoAtivo ? {
+          nome: planoAtivo.plan.name,
+          slug: planoAtivo.plan.slug,
+          status: planoAtivo.status,
+          dataInicio: planoAtivo.dataInicio,
+          dataFim: planoAtivo.dataFim,
+          usoEmissoes: planoAtivo.notasEmitidas,
+          limiteEmissoes: planoAtivo.plan.maxNotasMensal,
+          diasTeste: planoAtivo.plan.diasTeste
+      } : { 
+          nome: 'Sem Plano Ativo', 
+          slug: 'FREE', 
+          status: 'INATIVO', 
+          usoEmissoes: 0, 
+          limiteEmissoes: 0 
+      };
+  }
+  // ====================================================
+
+  // 2. Lógica de Contexto
+  let empresaAlvoId = null;
+
+  if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
+      // Se for STAFF, permite acesso direto (bypass)
+      if (isStaff) {
+          empresaAlvoId = contextEmpresaId;
+      } else {
+          // Se for cliente/contador, valida o vínculo
+          const vinculo = await prisma.contadorVinculo.findUnique({
+              where: {
+                  contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId }
+              }
+          });
+          if (vinculo && vinculo.status === 'APROVADO') {
+              empresaAlvoId = contextEmpresaId; 
+          }
       }
   }
 
@@ -86,7 +134,7 @@ export async function GET(request: Request) {
     email: user.email,
     cpf: user.cpf,
     telefone: user.telefone,
-    tutorialStep: user.tutorialStep, // <--- ADICIONADO AQUI! OBRIGATÓRIO PARA O TOUR FUNCIONAR
+    tutorialStep: user.tutorialStep, 
     
     configuracoes: {
         darkMode: user.darkMode,
@@ -94,11 +142,18 @@ export async function GET(request: Request) {
         notificacoesEmail: user.notificacoesEmail
     },
     
+    // === DETALHES DO PLANO (IMPLEMENTADO) ===
+    planoDetalhado,
+
+    // Campos legados para compatibilidade
+    planoSlug: user.plano, 
+    planoCiclo: user.planoCiclo,
+    
     isContextMode: empresaAlvoId !== user.empresaId
   });
 }
 
-// PUT (Mantém o mesmo que você já tem, não precisa alterar o PUT se não quiser, mas para garantir, copiei o arquivo original da sua base e mantive a lógica)
+// PUT
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextEmpresaId = request.headers.get('x-empresa-id');

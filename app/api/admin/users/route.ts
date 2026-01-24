@@ -4,13 +4,10 @@ import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-m
 
 const prisma = new PrismaClient();
 
-// GET: Lista usuários (Protegido)
+// GET: Lista usuários (Mantido igual)
 export async function GET(request: Request) {
-  // 1. Autenticação Robusta
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
-
-  // 2. Autorização (Apenas Staff)
   const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
   if (!isStaff) return forbidden();
 
@@ -24,66 +21,46 @@ export async function GET(request: Request) {
   return NextResponse.json(safeUsers);
 }
 
-// PUT: Edição (Protegido)
+// PUT: Edição Inteligente (Acumular Dias e Troca de Plano)
 export async function PUT(request: Request) {
   const userAuth = await getAuthenticatedUser(request);
   if (!userAuth) return unauthorized();
 
-  // Apenas Admin/Master pode editar outros usuários dessa forma
+  // Apenas Admin/Master pode editar
   if (!['MASTER', 'ADMIN'].includes(userAuth.role)) return forbidden();
 
   try {
     const body = await request.json();
 
+    // 1. Resetar E-mail
     if (body.resetEmail) {
-        // Gera um email temporário único para não quebrar a constraint @unique do banco
         const tempPlaceholder = `reset_${Date.now()}_${body.id.substring(0,5)}@sistema.temp`;
-        
-        await prisma.user.update({
-            where: { id: body.id },
-            data: { email: tempPlaceholder }
-        });
-        return NextResponse.json({ success: true, message: "E-mail resetado. O usuário deverá cadastrar um novo ao logar." });
+        await prisma.user.update({ where: { id: body.id }, data: { email: tempPlaceholder } });
+        return NextResponse.json({ success: true, message: "E-mail resetado." });
     }
     
-    // --- 1. DESVINCULAR EMPRESA ---
+    // 2. Desvincular Empresa
     if (body.unlinkCompany) {
-        await prisma.user.update({
-            where: { id: body.id },
-            data: { empresaId: null }
-        });
+        await prisma.user.update({ where: { id: body.id }, data: { empresaId: null } });
         return NextResponse.json({ success: true, message: "Empresa desvinculada." });
     }
 
-    // --- 2. TROCAR/CORRIGIR CNPJ ---
+    // 3. Trocar CNPJ
     if (body.newCnpj) {
         const cnpjLimpo = body.newCnpj.replace(/\D/g, '');
         if(cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ Inválido' }, { status: 400 });
 
-        const empresaExistente = await prisma.empresa.findUnique({ 
-            where: { documento: cnpjLimpo },
-            include: { donoUser: true } 
-        });
+        const empresaExistente = await prisma.empresa.findUnique({ where: { documento: cnpjLimpo }, include: { donoUser: true } });
 
         if (empresaExistente) {
             if (empresaExistente.donoUser && empresaExistente.donoUser.id !== body.id) {
-                return NextResponse.json({ 
-                    error: `Este CNPJ já pertence ao cliente ${empresaExistente.donoUser.nome}.` 
-                }, { status: 409 });
+                return NextResponse.json({ error: `CNPJ pertence a ${empresaExistente.donoUser.nome}.` }, { status: 409 });
             }
-
-            await prisma.user.update({
-                where: { id: body.id },
-                data: { empresaId: empresaExistente.id }
-            });
-
+            await prisma.user.update({ where: { id: body.id }, data: { empresaId: empresaExistente.id } });
             return NextResponse.json({ success: true, message: "Usuário vinculado." });
         } else {
             if (body.empresaId) {
-                await prisma.empresa.update({
-                    where: { id: body.empresaId },
-                    data: { documento: cnpjLimpo }
-                });
+                await prisma.empresa.update({ where: { id: body.empresaId }, data: { documento: cnpjLimpo } });
                 return NextResponse.json({ success: true, message: "CNPJ atualizado." });
             } else {
                 return NextResponse.json({ error: "Empresa não encontrada." }, { status: 400 });
@@ -91,21 +68,106 @@ export async function PUT(request: Request) {
         }
     }
 
-    // --- 3. ATUALIZAR DADOS GERAIS ---
+    // === 4. LÓGICA DE PLANOS (ACUMULATIVA) ===
+    if (body.plano) {
+        const novoPlano = await prisma.plan.findUnique({ where: { slug: body.plano } });
+        if (!novoPlano) return NextResponse.json({ error: 'Plano não encontrado.' }, { status: 404 });
+
+        const ciclo = body.planoCiclo || 'MENSAL';
+        
+        // Verifica se o usuário já tem um histórico ATIVO
+        const historicoAtivo = await prisma.planHistory.findFirst({
+            where: { userId: body.id, status: 'ATIVO' },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        // --- DEFINIR A DURAÇÃO ---
+        let diasParaAdicionar = 0;
+        
+        if (novoPlano.slug === 'PARCEIRO') {
+            diasParaAdicionar = 0; // Vitalício (null)
+        } else if (novoPlano.slug === 'TRIAL') {
+            diasParaAdicionar = novoPlano.diasTeste || 7;
+        } else {
+            // Planos Pagos (Inicial, Intermediário, Livre)
+            diasParaAdicionar = ciclo === 'ANUAL' ? 365 : 30;
+        }
+
+        let dataFimFinal: Date | null = null;
+
+        // CENÁRIO A: É o MESMO plano => ESTENDER (Acumular)
+        if (historicoAtivo && historicoAtivo.planId === novoPlano.id && novoPlano.slug !== 'PARCEIRO') {
+            
+            // Pega a maior data: (Vencimento Atual) ou (Hoje)
+            const baseDate = historicoAtivo.dataFim && historicoAtivo.dataFim > new Date() 
+                ? new Date(historicoAtivo.dataFim) 
+                : new Date();
+            
+            // Soma os dias
+            baseDate.setDate(baseDate.getDate() + diasParaAdicionar);
+            dataFimFinal = baseDate;
+
+            // Atualiza o histórico existente estendendo a data
+            await prisma.planHistory.update({
+                where: { id: historicoAtivo.id },
+                data: { dataFim: dataFimFinal }
+            });
+        } 
+        // CENÁRIO B: É um plano DIFERENTE (Upgrade/Downgrade) ou Novo => TROCAR
+        else {
+            // Fecha o anterior
+            await prisma.planHistory.updateMany({
+                where: { userId: body.id, status: 'ATIVO' },
+                data: { status: 'FINALIZADO', dataFim: new Date() } 
+            });
+
+            // Define nova data fim
+            if (novoPlano.slug !== 'PARCEIRO') {
+                const d = new Date();
+                d.setDate(d.getDate() + diasParaAdicionar);
+                dataFimFinal = d;
+            }
+
+            // Cria novo histórico
+            await prisma.planHistory.create({
+                data: {
+                    userId: body.id,
+                    planId: novoPlano.id,
+                    status: 'ATIVO',
+                    dataInicio: new Date(),
+                    dataFim: dataFimFinal,
+                    notasEmitidas: 0
+                }
+            });
+        }
+
+        // Atualiza Cache do Usuário
+        await prisma.user.update({
+            where: { id: body.id },
+            data: { 
+                plano: novoPlano.slug, 
+                planoStatus: 'active',
+                planoExpiresAt: dataFimFinal,
+                planoCiclo: ciclo
+            }
+        });
+
+        return NextResponse.json({ success: true, message: "Plano atualizado/estendido com sucesso!" });
+    }
+
+    // --- 5. OUTROS DADOS ---
     const dataToUpdate: any = {};
     if (body.role) dataToUpdate.role = body.role;
-    if (body.plano) dataToUpdate.plano = body.plano;
-    if (body.planoCiclo) dataToUpdate.planoCiclo = body.planoCiclo;
 
-    const updated = await prisma.user.update({
-        where: { id: body.id },
-        data: dataToUpdate
-    });
+    if (Object.keys(dataToUpdate).length > 0) {
+        const updated = await prisma.user.update({ where: { id: body.id }, data: dataToUpdate });
+        return NextResponse.json(updated);
+    }
     
-    return NextResponse.json(updated);
+    return NextResponse.json({ success: true });
 
   } catch (e: any) {
-    if (e.code === 'P2002') return NextResponse.json({ error: "Conflito de dados." }, { status: 409 });
-    return NextResponse.json({ error: e.message || 'Erro ao atualizar' }, { status: 500 });
+    if (e.code === 'P2002') return NextResponse.json({ error: "Dados duplicados." }, { status: 409 });
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
