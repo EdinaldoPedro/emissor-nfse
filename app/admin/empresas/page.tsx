@@ -1,21 +1,22 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Building2, Search, User, Loader2, Edit, Save, X, MapPin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Building2, Search, User, Loader2, Edit, Save, X, MapPin, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+// 1. Importamos o Dialog
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function BaseEmpresas() {
+  const dialog = useDialog(); // 2. Inicializamos
+  
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Estados de Controle
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [termo, setTermo] = useState('');
   
-  // Estado para Edição
   const [editingEmpresa, setEditingEmpresa] = useState<any>(null);
 
-  // Debounce na busca para não chamar a API a cada letra
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       carregarEmpresas(page, termo);
@@ -26,7 +27,6 @@ export default function BaseEmpresas() {
 
   const carregarEmpresas = (pagina: number, busca: string) => {
     setLoading(true);
-    // Chama a API com paginação
     fetch(`/api/admin/empresas?page=${pagina}&limit=10&search=${busca}`)
       .then(r => r.json())
       .then(res => {
@@ -47,13 +47,43 @@ export default function BaseEmpresas() {
           });
           
           if(res.ok) {
-              alert("Cadastro atualizado!");
+              // 3. Atualizado para Alert bonito
+              await dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Cadastro atualizado!" });
               setEditingEmpresa(null);
-              carregarEmpresas(page, termo); // Recarrega a página atual
+              carregarEmpresas(page, termo);
           } else {
-              alert("Erro ao salvar.");
+              dialog.showAlert({ type: 'danger', description: "Erro ao salvar." });
           }
-      } catch (e) { alert("Erro de conexão."); }
+      } catch (e) { dialog.showAlert("Erro de conexão."); }
+  };
+
+  // === 4. DELETE COM PROMPT PADRÃO (SEGURANÇA) ===
+  const handleDelete = async (id: string) => {
+      // Usa o showPrompt que exige digitar "EXCLUIR"
+      const confirmacao = await dialog.showPrompt({
+          type: 'danger',
+          title: 'Zona de Perigo: Excluir Empresa',
+          description: 'Esta ação apagará PERMANENTEMENTE a empresa, seus usuários vinculados e todo o histórico de notas emitidas.\n\nPara confirmar, digite a palavra EXCLUIR abaixo:',
+          validationText: 'EXCLUIR',
+          placeholder: "Digite 'EXCLUIR'"
+      });
+      
+      if (confirmacao !== 'EXCLUIR') return;
+
+      try {
+          const res = await fetch(`/api/admin/empresas?id=${id}`, { method: 'DELETE' });
+          const data = await res.json();
+
+          if (res.ok) {
+              await dialog.showAlert({ type: 'success', description: "Empresa removida com sucesso." });
+              setEditingEmpresa(null); // Fecha modal se estiver aberto
+              carregarEmpresas(page, termo);
+          } else {
+              dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error });
+          }
+      } catch (e) {
+          dialog.showAlert("Erro de conexão ao tentar excluir.");
+      }
   };
 
   return (
@@ -73,7 +103,7 @@ export default function BaseEmpresas() {
                 value={termo}
                 onChange={e => {
                     setTermo(e.target.value);
-                    setPage(1); // Volta pra pág 1 ao pesquisar
+                    setPage(1); 
                 }}
             />
         </div>
@@ -109,7 +139,6 @@ export default function BaseEmpresas() {
                         <input className="w-full p-2 border rounded" value={editingEmpresa.inscricaoMunicipal || ''} onChange={e => setEditingEmpresa({...editingEmpresa, inscricaoMunicipal: e.target.value})} />
                     </div>
 
-                    {/* REMOVIDO AMBIENTE - MANTIDO REGIME */}
                     <div className="md:col-span-2">
                         <label className="block font-bold text-slate-500 mb-1">Regime Tributário</label>
                         <select className="w-full p-2 border rounded" value={editingEmpresa.regimeTributario || 'MEI'} onChange={e => setEditingEmpresa({...editingEmpresa, regimeTributario: e.target.value})}>
@@ -146,7 +175,15 @@ export default function BaseEmpresas() {
                     </div>
                 </div>
 
-                <div className="mt-6 flex justify-end gap-2">
+                <div className="mt-6 flex justify-between items-center border-t pt-4">
+                    {/* Botão de Excluir com Estilo Danger */}
+                    <button 
+                        onClick={() => handleDelete(editingEmpresa.id)} 
+                        className="text-red-500 hover:bg-red-50 px-4 py-2 rounded flex items-center gap-2 font-bold transition text-xs border border-transparent hover:border-red-200"
+                    >
+                        <Trash2 size={16}/> Excluir Cadastro
+                    </button>
+
                     <button onClick={handleSave} className="bg-green-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-green-700 font-bold shadow-lg shadow-green-100">
                         <Save size={18}/> Salvar Alterações
                     </button>
@@ -168,8 +205,6 @@ export default function BaseEmpresas() {
         ) : (
             empresas.map(emp => (
                 <div key={emp.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4 hover:border-blue-300 transition group">
-                    
-                    {/* INFO EMPRESA */}
                     <div className="flex items-center gap-4 flex-1 w-full md:w-auto">
                         <div className="p-3 bg-slate-50 border rounded-lg text-slate-500">
                             <Building2 size={24}/>
@@ -179,12 +214,10 @@ export default function BaseEmpresas() {
                             <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 mt-1 font-mono uppercase">
                                 <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">CNPJ: {emp.documento}</span>
                                 {emp.codigoIbge && <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">IBGE: {emp.codigoIbge}</span>}
-                                {emp.inscricaoMunicipal && <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">IM: {emp.inscricaoMunicipal}</span>}
                             </div>
                         </div>
                     </div>
 
-                    {/* RESPONSÁVEL */}
                     <div className="flex items-center gap-3 w-full md:w-1/4 md:border-l md:pl-4 border-slate-100">
                         <div className={`p-2 rounded-full ${emp.donos && emp.donos.length > 0 ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
                             <User size={16}/>
@@ -195,7 +228,6 @@ export default function BaseEmpresas() {
                                 <>
                                     <p className="text-xs text-slate-800 font-bold truncate">{emp.donos[0].nome}</p>
                                     <p className="text-[10px] text-slate-500 truncate">{emp.donos[0].email}</p>
-                                    {emp.donos.length > 1 && <p className="text-[9px] text-blue-500">+ {emp.donos.length - 1} outros</p>}
                                 </>
                             ) : (
                                 <p className="text-xs text-red-400 italic">Nenhum Usuário</p>
@@ -203,7 +235,6 @@ export default function BaseEmpresas() {
                         </div>
                     </div>
 
-                    {/* AÇÃO: APENAS EDITAR */}
                     <div className="flex flex-col items-end gap-2 w-full md:w-auto">
                         <button 
                             onClick={() => setEditingEmpresa(emp)}
@@ -212,7 +243,6 @@ export default function BaseEmpresas() {
                             <Edit size={16}/> Editar Dados
                         </button>
                     </div>
-
                 </div>
             ))
         )}

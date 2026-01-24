@@ -26,7 +26,6 @@ export async function GET(request: Request) {
         skip: skip,
         take: limit,
         include: { 
-            // VOLTA AO ORIGINAL (Singular)
             donoUser: { 
                 select: { nome: true, email: true }
             } 
@@ -36,10 +35,9 @@ export async function GET(request: Request) {
       prisma.empresa.count({ where: whereClause })
     ]);
 
-    // Pequeno ajuste para o frontend ler como lista (compatibilidade)
     const dadosFormatados = empresas.map(emp => ({
         ...emp,
-        donos: emp.donoUser ? [emp.donoUser] : [] // Envia como array de 1 item pro front não quebrar
+        donos: emp.donoUser ? [emp.donoUser] : [] 
     }));
 
     return NextResponse.json({
@@ -57,11 +55,11 @@ export async function GET(request: Request) {
   }
 }
 
-// PUT (Mantém igual)
+// PUT
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { id, donos, donoUser, ...dadosParaAtualizar } = body; // Remove campos de relação
+    const { id, donos, donoUser, ...dadosParaAtualizar } = body; 
 
     const updated = await prisma.empresa.update({
       where: { id: id },
@@ -72,4 +70,48 @@ export async function PUT(request: Request) {
   } catch (e) {
     return NextResponse.json({ error: 'Erro ao atualizar empresa.' }, { status: 500 });
   }
+}
+
+// === DELETE (NOVO) ===
+export async function DELETE(request: Request) {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+
+    if (!id) return NextResponse.json({ error: 'ID necessário' }, { status: 400 });
+
+    try {
+        // 1. Desvincular Usuários (Dono) para não apagar o usuário, apenas soltar a empresa
+        await prisma.user.updateMany({
+            where: { empresaId: id },
+            data: { empresaId: null }
+        });
+
+        // 2. Limpar Tabelas Dependentes (Cascade Manual para garantir)
+        // Remove vínculos de clientes e contadores
+        await prisma.userCliente.deleteMany({ where: { empresaId: id } });
+        await prisma.contadorVinculo.deleteMany({ where: { empresaId: id } });
+        
+        // Remove Logs
+        await prisma.systemLog.deleteMany({ where: { empresaId: id } });
+        
+        // Remove CNAEs
+        await prisma.cnae.deleteMany({ where: { empresaId: id } });
+
+        // Remove Notas e Vendas onde a empresa é PRESTADOR
+        await prisma.notaFiscal.deleteMany({ where: { empresaId: id } });
+        await prisma.venda.deleteMany({ where: { empresaId: id } });
+        
+        // 3. Finalmente deleta a empresa
+        await prisma.empresa.delete({ where: { id } });
+
+        return NextResponse.json({ success: true });
+
+    } catch (e: any) {
+        console.error("Erro ao deletar empresa:", e);
+        // Se falhar (ex: empresa é TOMADOR em notas de outros), avisa
+        if (e.code === 'P2003') {
+            return NextResponse.json({ error: 'Não é possível excluir: Esta empresa está vinculada como Tomador em notas de terceiros.' }, { status: 409 });
+        }
+        return NextResponse.json({ error: 'Erro interno ao excluir.' }, { status: 500 });
+    }
 }
