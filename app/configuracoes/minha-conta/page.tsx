@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X, HelpCircle, RefreshCcw } from 'lucide-react';
+import { User, Save, ArrowLeft, Mail, Phone, CreditCard, Settings, Monitor, X, RefreshCcw } from 'lucide-react';
 import PlanSelector from '@/components/PlanSelector';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 
@@ -64,25 +64,24 @@ export default function MinhaContaPage() {
       .catch(err => { console.error(err); setLoading(false); });
   }, [router]);
 
-  // === BOTÃO DE REINICIAR SIMPLIFICADO ===
+  // === AÇÃO DE RESET INSTANTÂNEA ===
   const handleResetTutorial = async () => {
       const userId = localStorage.getItem('userId');
       if(!userId) return;
 
-      if(!confirm("Reiniciar tutorial?")) return; // Simples e direto
-
+      // Sem confirmação (confirm), apenas executa
       try {
-          // 1. Zera o passo no banco (Importante: step 0 reseta tudo)
+          // 1. Zera o passo no banco
           await fetch('/api/perfil/tutorial', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
               body: JSON.stringify({ step: 0 }) 
           });
           
-          // 2. Força reload para o AppTour ler o banco novamente
-          window.location.href = window.location.href; 
+          // 2. Recarrega para iniciar o tutorial
+          window.location.reload(); 
       } catch (e) {
-          alert("Erro ao reiniciar.");
+          // Silencioso ou log
       }
   };
 
@@ -173,20 +172,13 @@ export default function MinhaContaPage() {
                 </button>
                 <h1 className="text-3xl font-bold text-gray-800 dark:text-white">Minha Conta</h1>
             </div>
-
-            <button 
-                onClick={handleResetTutorial}
-                className="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition border border-blue-200"
-            >
-                <HelpCircle size={16}/> Reiniciar Tutorial
-            </button>
         </div>
 
         <form onSubmit={handleSalvar}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             <div className="md:col-span-1 space-y-6">
-              {/* TOUR ALVO: Perfil */}
+              {/* Card Perfil */}
               <div className="tour-perfil-card bg-white p-6 rounded-xl shadow-sm border border-gray-100 text-center dark:bg-slate-800 dark:border-slate-700">
                 <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600 overflow-hidden">
                   {data.perfil.avatarUrl ? (
@@ -200,6 +192,7 @@ export default function MinhaContaPage() {
                 <p className="text-xs text-blue-600 font-medium mt-1">{data.perfil.empresa}</p>
               </div>
 
+              {/* Card Plano */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 relative overflow-hidden dark:bg-slate-800 dark:border-slate-700">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500"></div>
                 <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex items-center gap-2 dark:text-gray-500">
@@ -222,7 +215,8 @@ export default function MinhaContaPage() {
             </div>
 
             <div className="md:col-span-2 space-y-6">
-              {/* TOUR ALVO: Dados Pessoais */}
+              
+              {/* Dados Pessoais */}
               <div className="tour-dados-pessoais bg-white p-8 rounded-xl shadow-sm border border-gray-100 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2 dark:text-white">
                     <User size={20}/> Dados Pessoais
@@ -262,7 +256,7 @@ export default function MinhaContaPage() {
                 </div>
               </div>
 
-              {/* TOUR ALVO: Preferências */}
+              {/* Preferências */}
               <div className="tour-preferencias bg-white p-8 rounded-xl shadow-sm border border-gray-100 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2 dark:text-white">
                     <Settings size={20}/> Preferências
@@ -291,6 +285,7 @@ export default function MinhaContaPage() {
                         <input type="checkbox" className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 dark:bg-slate-900 dark:border-slate-600"
                             checked={data.configuracoes.notificacoesEmail} onChange={e => setData({...data, configuracoes: {...data.configuracoes, notificacoesEmail: e.target.checked}})} />
                     </div>
+                    
                     <div className="pt-2">
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Idioma do Sistema</label>
                         <select className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white dark:bg-slate-900 dark:border-slate-600 dark:text-white"
@@ -300,10 +295,26 @@ export default function MinhaContaPage() {
                             <option value="es-ES">Español</option>
                         </select>
                     </div>
+
+                    {/* BOTÃO RESETAR - SÓ ÍCONE E TEXTO */}
+                    <div className="pt-4 mt-4 border-t border-gray-100 dark:border-slate-700">
+                        <button 
+                            type="button" 
+                            onClick={handleResetTutorial} 
+                            className="flex items-center gap-2 text-xs font-bold text-gray-400 hover:text-blue-600 transition w-full group"
+                            title="Reiniciar Tutorial"
+                        >
+                            <div className="p-1.5 bg-gray-100 rounded-full group-hover:bg-blue-50 group-hover:text-blue-600 transition dark:bg-slate-700">
+                                <RefreshCcw size={14}/> 
+                            </div>
+                            Reiniciar Tutorial de Boas-vindas
+                        </button>
+                    </div>
+
                 </div>
               </div>
 
-              {/* TOUR ALVO: Botão Salvar */}
+              {/* Botão Salvar */}
               <div className="flex justify-between items-center pt-4">
                 <span className={`text-sm font-medium transition-opacity duration-300 ${msg ? 'opacity-100' : 'opacity-0'} ${msg.includes('✅') ? 'text-green-600' : 'text-red-600'}`}>
                     {msg}
