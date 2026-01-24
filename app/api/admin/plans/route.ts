@@ -54,7 +54,6 @@ export async function GET() {
 
     // Retorna apenas planos públicos para a vitrine
     const plans = await prisma.plan.findMany({
-      where: { active: true, privado: false },
       orderBy: { priceMonthly: 'asc' }
     });
 
