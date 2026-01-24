@@ -98,6 +98,11 @@ model Empresa {
   cidade       String?
   uf           String?
   codigoIbge   String?
+
+  aliquotaPadrao         Decimal? @default(0.00) @db.Decimal(5, 2) 
+  issRetidoPadrao        Boolean  @default(false)
+  tipoTributacaoPadrao   String?  @default("1") // 1=Exigível
+  regimeEspecialTributacao String? @default("0") // 0=Nenhum
   
   inscricaoMunicipal String?
   regimeTributario   String? @default("MEI")
