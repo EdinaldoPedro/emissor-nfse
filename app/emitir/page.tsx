@@ -6,13 +6,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import { validarCPF } from "@/app/utils/cpf";
 
-// 1. Interface atualizada para refletir o Banco de Dados
 interface CnaeDB {
   id: string;
   codigo: string;
   descricao: string;
   principal: boolean;
-  // Novos campos vindos do banco
   codigoNbs?: string;
   temRetencaoInss?: boolean; 
 }
@@ -95,12 +93,10 @@ export default function EmitirNotaPage() {
           const atual = prev[tipo as keyof typeof retencoes];
           const novoEstado = !atual.retido;
           
-          // Se ativou INSS, sugere base = valor da nota e alíquota 11%
           if (tipo === 'inss' && novoEstado) {
               const valNota = nfData.valor || '0';
               return { ...prev, inss: { ...atual, retido: true, base: valNota, aliquota: '11.00', valor: (parseFloat(valNota) * 0.11) } };
           }
-          // Se ativou PIS/COFINS/IR/CSLL, calcula sobre valor total
           if (novoEstado && tipo !== 'inss') {
                const valNota = parseFloat(nfData.valor) || 0;
                const aliq = parseFloat(atual.aliquota) || 0;
@@ -111,7 +107,6 @@ export default function EmitirNotaPage() {
       });
   };
 
-  // Atualiza base do INSS se mudar valor da nota (se já estiver ativo)
   useEffect(() => {
       if (nfData.valor && retencoes.inss.retido) {
           calcularRetencao('inss', nfData.valor, retencoes.inss.aliquota);
@@ -123,8 +118,6 @@ export default function EmitirNotaPage() {
       if (!meusCnaes.length) return;
 
       const cnaeSelecionado = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
-      
-      // Lê a permissão direto do objeto carregado do banco
       const deveReter = cnaeSelecionado?.temRetencaoInss || false;
       
       setPermiteINSS(deveReter);
@@ -159,7 +152,6 @@ export default function EmitirNotaPage() {
                          const principal = data.atividades.find((c: CnaeDB) => c.principal);
                          updates.codigoCnae = principal ? principal.codigo : data.atividades[0].codigo;
                      }
-                     // Se MEI, alíquota 0. Senão, usa padrão.
                      updates.aliquota = data.regimeTributario === 'MEI' ? '0' : (data.aliquotaPadrao || '0');
                      updates.issRetido = data.issRetidoPadrao || false;
                      return { ...prev, ...updates };
@@ -459,36 +451,33 @@ export default function EmitirNotaPage() {
                     </div>
 
                     {/* 2. INSS (Condicionado ao CNAE) */}
-                    <div className={`bg-slate-50 p-3 rounded border mb-4 transition-all ${permiteINSS ? 'opacity-100' : 'opacity-50 grayscale pointer-events-none'}`}>
-                        <div className="flex justify-between items-center mb-2">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={retencoes.inss.retido} onChange={() => toggleRetencao('inss')} disabled={!permiteINSS} />
-                                <span className="text-sm font-bold text-slate-700">Reter INSS?</span>
-                            </label>
-                            {!permiteINSS && (
-                                <span className="text-[10px] text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded flex items-center gap-1">
-                                    <Info size={10}/> Não aplicável a este CNAE
-                                </span>
+                    {permiteINSS && (
+                        <div className="bg-slate-50 p-3 rounded border mb-4 animate-in fade-in slide-in-from-top-2">
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={retencoes.inss.retido} onChange={() => toggleRetencao('inss')} />
+                                    <span className="text-sm font-bold text-slate-700">Reter INSS?</span>
+                                </label>
+                            </div>
+                            
+                            {retencoes.inss.retido && (
+                                <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 uppercase font-bold">Base Cálculo</label>
+                                        <input className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.base} onChange={e => calcularRetencao('inss', e.target.value, retencoes.inss.aliquota)} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 uppercase font-bold">Alíquota (%)</label>
+                                        <input type="number" className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.aliquota} onChange={e => calcularRetencao('inss', retencoes.inss.base, e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 uppercase font-bold">Valor Retido</label>
+                                        <div className="w-full p-2 border rounded text-sm bg-gray-200 text-slate-700 font-bold border-gray-300">R$ {retencoes.inss.valor.toFixed(2)}</div>
+                                    </div>
+                                </div>
                             )}
                         </div>
-                        
-                        {retencoes.inss.retido && (
-                            <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
-                                <div>
-                                    <label className="block text-[10px] text-slate-500 uppercase font-bold">Base Cálculo</label>
-                                    <input className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.base} onChange={e => calcularRetencao('inss', e.target.value, retencoes.inss.aliquota)} />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] text-slate-500 uppercase font-bold">Alíquota (%)</label>
-                                    <input type="number" className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.aliquota} onChange={e => calcularRetencao('inss', retencoes.inss.base, e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] text-slate-500 uppercase font-bold">Valor Retido</label>
-                                    <div className="w-full p-2 border rounded text-sm bg-gray-200 text-slate-700 font-bold border-gray-300">R$ {retencoes.inss.valor.toFixed(2)}</div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    )}
 
                     {/* 3. IMPOSTOS FEDERAIS (Só Lucro Presumido/Real) */}
                     {['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario) && (

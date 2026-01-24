@@ -50,6 +50,32 @@ export async function GET(request: Request) {
       if (emp) dadosEmpresa = emp;
   }
 
+  // === INÍCIO DA INTELIGÊNCIA GLOBAL ===
+  // Cruzamos os dados locais do cliente com a tabela Mestra (Admin)
+  let atividadesEnriquecidas = dadosEmpresa.atividades || [];
+  
+  if (atividadesEnriquecidas.length > 0) {
+      // Pega os códigos dos CNAEs da empresa
+      const codigos = atividadesEnriquecidas.map((c: any) => c.codigo);
+      
+      // Busca as regras globais para esses códigos
+      const globais = await prisma.globalCnae.findMany({
+          where: { codigo: { in: codigos } }
+      });
+
+      // Mescla os dados: A regra Global tem prioridade sobre a Local antiga
+      atividadesEnriquecidas = atividadesEnriquecidas.map((local: any) => {
+          const global = globais.find((g: any) => g.codigo === local.codigo);
+          return {
+              ...local,
+              // Se existir regra global definida, usa ela. Senão usa a local.
+              temRetencaoInss: global ? global.temRetencaoInss : local.temRetencaoInss,
+              codigoNbs: global?.codigoNbs || local.codigoNbs
+          };
+      });
+  }
+  // === FIM DA INTELIGÊNCIA GLOBAL ===
+
   // @ts-ignore
   const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
 
@@ -60,7 +86,7 @@ export async function GET(request: Request) {
     temCertificado: !!certificadoA1,
     vencimentoCertificado: dadosEmpresa.certificadoVencimento,
     cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
-    atividades: dadosEmpresa.atividades || [],
+    atividades: atividadesEnriquecidas, // <--- Devolvemos a lista com as regras atualizadas
 
     // Dados do Usuário
     role: user.role,
@@ -175,6 +201,7 @@ export async function PUT(request: Request) {
                       codigo: String(c.codigo).replace(/\D/g, ''),
                       descricao: c.descricao,
                       principal: c.principal,
+                      // Salva localmente também para garantir
                       codigoNbs: c.codigoNbs,
                       temRetencaoInss: c.temRetencaoInss || false
                   }))
