@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, Users, Building, Shield, Activity, 
-  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings // <--- Adicionado Settings
+  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map // <--- 1. Importado ícone Map
 } from 'lucide-react'; 
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -37,13 +37,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' },
     { icon: MapPin, label: 'Trib. Municipal', href: '/admin/tributacao-municipal' },
     
+    // === 2. NOVO ITEM ADICIONADO AQUI ===
+    { icon: Map, label: 'Mapa de Cobertura', href: '/admin/cobertura' },
+    
     // Suporte
     { icon: LifeBuoy, label: 'Helpdesk / Suporte', href: '/admin/suporte' },
 
     // Time
     { icon: Shield, label: 'Colaboradores', href: '/admin/colaboradores' }, 
 
-    // === NOVO ITEM ADICIONADO ===
+    // Configurações
     { icon: Settings, label: 'Configurações', href: '/admin/configuracoes' },
   ];
 

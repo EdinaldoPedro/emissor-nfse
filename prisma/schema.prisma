@@ -345,3 +345,13 @@ model TicketCatalog {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+model MunicipioHomologado {
+  id        String   @id @default(uuid())
+  uf        String
+  nome      String
+  status    Int      @default(2) // 0=Verde, 1=Azul, 2=Ambar, 3=Cinza
+  regime    String   @default("SN") // "SN" (Simples) ou "LP" (Lucro Presumido)
+  
+  createdAt DateTime @default(now())
+}
