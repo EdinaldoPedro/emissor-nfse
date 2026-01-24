@@ -1,5 +1,6 @@
 import { BaseStrategy } from './BaseStrategy';
-import { IEmissorStrategy, IDadosEmissao, IResultadoEmissao, IResultadoConsulta, IResultadoCancelamento } from '../../interfaces/IEmissorStrategy';
+// CORREÇÃO: O caminho correto é '../' (apenas um nível acima)
+import { IEmissorStrategy, IDadosEmissao, IResultadoEmissao, IResultadoConsulta, IResultadoCancelamento } from '../interfaces/IEmissorStrategy';
 import axios from 'axios';
 import https from 'https';
 import crypto from 'crypto';

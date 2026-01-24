@@ -81,7 +81,7 @@ export default function EmitirNotaPage() {
                          const principal = data.atividades.find((c: CnaeDB) => c.principal);
                          updates.codigoCnae = principal ? principal.codigo : data.atividades[0].codigo;
                      }
-                     // Inteligência: Se MEI, alíquota 0. Senão, usa padrão.
+                     // Se for MEI, alíquota é 0. Senão, usa padrão.
                      updates.aliquota = data.regimeTributario === 'MEI' ? '0' : (data.aliquotaPadrao || '0');
                      updates.issRetido = data.issRetidoPadrao || false;
                      return { ...prev, ...updates };
@@ -90,20 +90,13 @@ export default function EmitirNotaPage() {
          }
       }).catch(console.error);
 
-    // CARREGA CLIENTES (COM PROTEÇÃO)
+    // CARREGA CLIENTES
     fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
       .then(res => res.json())
       .then(data => {
-          if (Array.isArray(data)) {
-              setClientes(data);
-          } else {
-              console.error("API Clientes retornou formato inválido:", data);
-              setClientes([]); // Evita quebra do .map
-          }
-      }).catch(err => {
-          console.error(err);
-          setClientes([]);
-      });
+          if (Array.isArray(data)) setClientes(data);
+          else setClientes([]); 
+      }).catch(() => setClientes([]));
 
     // MODO CORREÇÃO
     if (retryId) {
@@ -130,7 +123,6 @@ export default function EmitirNotaPage() {
     }
   }, [router, retryId]);
 
-  // Monitora digitação do Documento
   useEffect(() => {
     const docLimpo = novoCliente.documento.replace(/\D/g, '');
     if (docLimpo.length === 11 || docLimpo.length === 14) {
@@ -225,6 +217,8 @@ export default function EmitirNotaPage() {
         } catch (e) { dialog.showAlert("Erro de conexão."); } finally { setLoading(false); }
     } else { setStep(step + 1); }
   };
+
+  const handleBack = () => setStep(step - 1);
 
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
@@ -352,8 +346,8 @@ export default function EmitirNotaPage() {
                   <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
                 </div>
 
-                {/* === CAMPOS INTELIGENTES === */}
-                {perfilEmpresa?.regimeTributario !== 'MEI' && (
+                {/* CAMPO DE ALÍQUOTA (Só exibe se perfil já carregou e não é MEI) */}
+                {perfilEmpresa && perfilEmpresa.regimeTributario !== 'MEI' && (
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Alíquota ISS (%)</label>
                         <input type="number" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700" value={nfData.aliquota} onChange={e => setNfData({...nfData, aliquota: e.target.value})} placeholder="Ex: 5.00" />
@@ -361,7 +355,7 @@ export default function EmitirNotaPage() {
                 )}
             </div>
             
-            {perfilEmpresa?.regimeTributario !== 'MEI' && (
+            {perfilEmpresa && perfilEmpresa.regimeTributario !== 'MEI' && (
                 <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border">
                     <input type="checkbox" id="issRetido" className="w-5 h-5 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
                     <label htmlFor="issRetido" className="text-sm text-slate-700 font-medium cursor-pointer">ISS Retido pelo Tomador?</label>
@@ -382,7 +376,7 @@ export default function EmitirNotaPage() {
             <div className="bg-slate-50 p-6 rounded-lg space-y-4 border border-slate-200">
               <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tomador:</span><span className="font-medium text-slate-900">{modoCliente === 'novo' ? novoCliente.nome : nfData.clienteNome}</span></div>
               <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Atividade (CNAE):</span><span className="font-medium text-slate-900">{nfData.codigoCnae}</span></div>
-              {perfilEmpresa?.regimeTributario !== 'MEI' && parseFloat(nfData.aliquota) > 0 && (
+              {perfilEmpresa && perfilEmpresa.regimeTributario !== 'MEI' && parseFloat(nfData.aliquota) > 0 && (
                   <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Alíquota ISS:</span><span className="font-medium text-slate-900">{nfData.aliquota}%</span></div>
               )}
               <div className="flex justify-between pt-2"><span className="text-slate-500">Valor Bruto:</span><span className="font-bold text-slate-900">R$ {valorNumerico.toFixed(2)}</span></div>
@@ -391,20 +385,27 @@ export default function EmitirNotaPage() {
           </div>
         )}
 
+        {/* RODAPÉ SIMPLIFICADO */}
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-100">
-          {step > 1 ? (
-            <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded"><ArrowLeft size={18} /> Voltar</button>
-          ) : <div></div>}
+          <div>
+            {step > 1 && (
+                <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded">
+                    <ArrowLeft size={18} /> Voltar
+                </button>
+            )}
+          </div>
           
-          {step < 3 ? (
-            <button onClick={handleNext} disabled={loading || (step === 1 && ((modoCliente === 'existente' && !nfData.clienteId) || (modoCliente === 'novo' && !novoCliente.nome))) || isStep2Invalid} className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}>
-                {loading ? <Loader2 className="animate-spin" size={18}/> : (step === 1 && modoCliente === 'novo' ? 'Cadastrar e Avançar' : 'Próximo')} <ArrowRight size={18} />
-            </button>
-          ) : (
-            <button onClick={handleEmitir} disabled={loading} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold">
-                {loading ? 'Enviando...' : <><CheckCircle size={20} /> EMITIR NOTA</>}
-            </button>
-          )}
+          <div>
+            {step < 3 ? (
+                <button onClick={handleNext} disabled={loading || (step === 1 && ((modoCliente === 'existente' && !nfData.clienteId) || (modoCliente === 'novo' && !novoCliente.nome))) || isStep2Invalid} className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}>
+                    {loading ? <Loader2 className="animate-spin" size={18}/> : (step === 1 && modoCliente === 'novo' ? 'Cadastrar e Avançar' : 'Próximo')} <ArrowRight size={18} />
+                </button>
+            ) : (
+                <button onClick={handleEmitir} disabled={loading} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold">
+                    {loading ? 'Enviando...' : <><CheckCircle size={20} /> EMITIR NOTA</>}
+                </button>
+            )}
+          </div>
         </div>
 
       </div>
