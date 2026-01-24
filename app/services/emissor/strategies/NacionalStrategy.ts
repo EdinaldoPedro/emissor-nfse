@@ -1,5 +1,4 @@
 import { BaseStrategy } from './BaseStrategy';
-// CORREÇÃO: O caminho correto é '../' (apenas um nível acima)
 import { IEmissorStrategy, IDadosEmissao, IResultadoEmissao, IResultadoConsulta, IResultadoCancelamento } from '../interfaces/IEmissorStrategy';
 import axios from 'axios';
 import https from 'https';
@@ -26,16 +25,34 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             this.validarTomador(tomador);
             if (!servico.codigoTribNacional) throw new Error("CNAE/Tributação Nacional não definido.");
 
-            // 2. Inteligência Fiscal (Motor de Regras Simples)
+            // 2. Inteligência Fiscal
             const isMei = prestador.regimeTributario === 'MEI';
-            
-            // Se for MEI, alíquota é 0. Se não, usa o que veio do serviço ou o padrão da empresa.
             const aliquotaFinal = isMei ? 0 : (servico.valor > 0 ? (servico.aliquota || Number(prestador.aliquotaPadrao) || 0) : 0);
-            
-            // Cálculo do ISS
             const valorIss = (servico.valor * aliquotaFinal) / 100;
 
-            // 3. Montagem do Objeto Canônico (Domínio)
+            // === 3. TRATAMENTO DE RETENÇÕES (CORREÇÃO DE ROBUSTEZ) ===
+            // Garante que se vier null/undefined do banco/front, viram zeros aqui.
+            const r = (servico as any).retencoes || {}; 
+            const retencoes = {
+                pis: { valor: Number(r.pis?.valor) || 0, retido: !!r.pis?.retido },
+                cofins: { valor: Number(r.cofins?.valor) || 0, retido: !!r.cofins?.retido },
+                inss: { valor: Number(r.inss?.valor) || 0, retido: !!r.inss?.retido },
+                ir: { valor: Number(r.ir?.valor) || 0, retido: !!r.ir?.retido },
+                csll: { valor: Number(r.csll?.valor) || 0, retido: !!r.csll?.retido }
+            };
+
+            // Cálculo do Líquido (Valor Bruto - ISS Retido - Federais Retidos)
+            let totalRetido = 0;
+            if (servico.issRetido) totalRetido += valorIss;
+            if (retencoes.pis.retido) totalRetido += retencoes.pis.valor;
+            if (retencoes.cofins.retido) totalRetido += retencoes.cofins.valor;
+            if (retencoes.inss.retido) totalRetido += retencoes.inss.valor;
+            if (retencoes.ir.retido) totalRetido += retencoes.ir.valor;
+            if (retencoes.csll.retido) totalRetido += retencoes.csll.valor;
+
+            const valorLiquido = servico.valor - totalRetido;
+
+            // 4. Montagem do Objeto Canônico (Domínio)
             const rps: ICanonicalRps = {
                 prestador: {
                     id: prestador.id,
@@ -69,16 +86,22 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                 },
                 servico: {
                     valor: servico.valor,
+                    valorLiquido: valorLiquido,
                     descricao: servico.descricao,
                     cnae: servico.cnae,
                     codigoTributacaoNacional: servico.codigoTribNacional,
                     itemListaServico: servico.itemLc,
                     
-                    // Aplicação das Regras
+                    // Repassa propriedades para o Adapter saber se adiciona tags ou não
+                    codigoNbs: (servico as any).codigoNbs, // Caso venha do backend
+                    codigoTributacaoMunicipal: (servico as any).codigoTributacaoMunicipal, // Caso venha do backend
+
                     aliquotaAplicada: aliquotaFinal,
                     valorIss: valorIss,
                     issRetido: servico.issRetido || false,
-                    tipoTributacao: prestador.tipoTributacaoPadrao || '1'
+                    tipoTributacao: prestador.tipoTributacaoPadrao || '1',
+                    
+                    retencoes: retencoes // Agora garantido que não é undefined
                 },
                 meta: {
                     ambiente: ambiente,
@@ -88,11 +111,10 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                 }
             };
 
-            // 4. Adapter: Transformar RPS em XML
+            // 5. Adapter: Transformar RPS em XML
             const xmlGerado = this.adapter.toXml(rps);
 
-            // 5. Assinar e Transmitir
-            // Recalcula ID para assinatura (garantindo consistência com o Adapter)
+            // 6. Assinar e Transmitir
             const idDps = `DPS${this.cleanString(rps.prestador.endereco.codigoIbge).padStart(7,'0')}2${this.cleanString(rps.prestador.documento).padStart(14,'0')}${this.cleanString(rps.meta.serie).padStart(5,'0')}${String(rps.meta.numero).padStart(15,'0')}`;
             
             const xmlAssinado = this.assinarXML(xmlGerado, idDps, prestador);

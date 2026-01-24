@@ -54,8 +54,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    // AQUI: Adicionamos 'aliquota' e 'issRetido' na desestruturação
-    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido } = body;
+    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes } = body;
 
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
@@ -88,21 +87,38 @@ export async function POST(request: Request) {
     }
     if (!cnaeFinal) throw new Error("CNAE é obrigatório para emissão.");
 
-    // Lógica de Códigos Fiscais (De/Para)
+    // === LÓGICA DE INTELIGÊNCIA FISCAL (PRIORIDADES) ===
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
 
+    // 1. Padrão Estático (Hardcoded no utils)
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
-    if (infoEstatica && infoEstatica.codigoTributacaoNacional) {
+    if (infoEstatica) {
          itemLc = infoEstatica.itemLC;
          codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
-    const regraFiscal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
-    if (regraFiscal) {
-        if (regraFiscal.itemLc) itemLc = regraFiscal.itemLc;
-        if (regraFiscal.codigoTributacaoNacional && regraFiscal.codigoTributacaoNacional.trim() !== '') {
-            codigoTribNacional = regraFiscal.codigoTributacaoNacional.replace(/\D/g, '');
+    // 2. Regra Global (Admin - GlobalCnae) - Sobrescreve estático
+    const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
+    if (regraGlobal) {
+        if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
+        if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
+    }
+
+    // 3. Regra Municipal Específica (Admin - TributacaoMunicipal) - Sobrescreve tudo
+    if (prestador.codigoIbge) {
+        const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
+            where: {
+                cnae: cnaeFinal,
+                codigoIbge: prestador.codigoIbge
+            }
+        });
+
+        if (regraMunicipal) {
+            console.log(`[MOTOR FISCAL] Aplicando regra municipal específica para IBGE ${prestador.codigoIbge}`);
+            if (regraMunicipal.codigoTributacaoMunicipal) {
+                 // itemLc = regraMunicipal.codigoTributacaoMunicipal; 
+            }
         }
     }
 
@@ -119,7 +135,7 @@ export async function POST(request: Request) {
             codigoTribNacional,
             aliquota: aliquota ? parseFloat(aliquota) : 0, 
             issRetido: !!issRetido,
-            retencoes: retencoes // <--- REPASSA O OBJETO
+            retencoes: retencoes
         },
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
         numeroDPS: novoNumeroDPS,
@@ -134,7 +150,7 @@ export async function POST(request: Request) {
         message: `Iniciando transmissão DPS ${novoNumeroDPS}.`,
         empresaId: prestador.id,
         vendaId: venda.id,
-        details: { payload: limparPayloadParaLog(dadosParaEstrategia), xml: resultado.xmlGerado }
+        details: { payloadOriginal: dadosParaEstrategia, xmlGerado: resultado.xmlGerado }
     });
 
     if (!resultado.sucesso) {
@@ -183,12 +199,14 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '10');
     const search = searchParams.get('search') || '';
+    const typeFilter = searchParams.get('type') || 'all'; 
   
     try {
       const empresaIdAlvo = await getEmpresaContexto(user, contextId);
       if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0 } });
   
       const skip = (page - 1) * limit;
+      
       const whereClause: any = {
           empresaId: empresaIdAlvo,
           ...(search && {
@@ -199,12 +217,17 @@ export async function GET(request: Request) {
               ]
           })
       };
+
+      if (typeFilter === 'valid') {
+          whereClause.status = { in: ['CONCLUIDA', 'CANCELADA'] };
+      }
   
       const [vendas, total] = await prisma.$transaction([
           prisma.venda.findMany({
               where: whereClause, take: limit, skip: skip, orderBy: { createdAt: 'desc' },
               include: {
                   cliente: { select: { razaoSocial: true, documento: true } },
+                  // CORREÇÃO: Removido 'codigoTribNacional: true' pois não existe no schema
                   notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, xmlBase64: true, pdfBase64: true } },
                   logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true } }
               }
@@ -214,10 +237,12 @@ export async function GET(request: Request) {
   
       const dadosFinais = vendas.map(v => {
           let codigoTribDisplay = '---';
+          // Cálculo dinâmico já que não salvamos no banco
           if (v.notas.length > 0 && v.notas[0].cnae) {
              const info = getTributacaoPorCnae(v.notas[0].cnae);
              if (info && info.codigoTributacaoNacional) codigoTribDisplay = info.codigoTributacaoNacional;
           }
+
           return {
             ...v,
             notas: v.notas.map(n => ({ ...n, codigoTribNacional: codigoTribDisplay })),

@@ -200,28 +200,36 @@ export default function DetalheVendaCompleto() {
       setProcessing(true);
       const userId = localStorage.getItem('userId');
       const payloadEnvio = { ...formData, valor: parseValor(formData.valor) };
+      
       try {
           await fetch(`/api/admin/vendas/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadEnvio) });
+          
           if (reenviar) {
               const resRetry = await fetch('/api/notas/retry', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: JSON.stringify({ vendaId: id, dadosAtualizados: payloadEnvio }) });
               const dataRetry = await resRetry.json();
               if(!resRetry.ok) throw new Error(dataRetry.error || "Erro no processamento.");
+              
               await dialog.showAlert({ type: 'success', title: 'Processando', description: "🚀 Reenvio iniciado! Acompanhe na aba de Logs." });
-              alert("🚀 Reenvio iniciado! Acompanhe na aba de Logs.");
+              // REMOVIDO: alert("🚀 Reenvio iniciado! Acompanhe na aba de Logs.");
+              
               setIsEditing(false);
               setVenda((prev: any) => ({ ...prev, status: 'PROCESSANDO' }));
               setActiveTab('logs');
               setTimeout(() => fetchVenda(true), 1000);
           } else {
-            await dialog.showAlert({ type: 'success', title: 'Salvo', description: "Dados atualizados com sucesso." });
-              alert("✅ Salvo.");
+              await dialog.showAlert({ type: 'success', title: 'Salvo', description: "Dados atualizados com sucesso." });
+              // REMOVIDO: alert("✅ Salvo.");
+              
               setIsEditing(false);
               fetchVenda();
           }
       } catch (error: any) { 
         dialog.showAlert({ type: 'danger', title: 'Erro', description: error.message });
-        alert("❌ " + error.message); setTimeout(() => fetchVenda(true), 1000); } finally { setProcessing(false); 
-        }
+        // REMOVIDO: alert("❌ " + error.message);
+        setTimeout(() => fetchVenda(true), 1000); 
+      } finally { 
+        setProcessing(false); 
+      }
   };
 
   const handleDelete = async () => {
