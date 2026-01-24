@@ -5,6 +5,7 @@ import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory'
 import { getTributacaoPorCnae } from '@/app/utils/tributacao'; 
 import { processarRetornoNota } from '@/app/services/notaProcessor';
 import { getAuthenticatedUser, unauthorized, forbidden } from '@/app/utils/api-middleware';
+import { checkPlanLimits, incrementUsage } from '@/app/services/planService';
 
 const prisma = new PrismaClient();
 
@@ -47,6 +48,11 @@ async function resolveUser(request: Request) {
 export async function POST(request: Request) {
   const user = await resolveUser(request);
   if (!user) return unauthorized();
+
+  const planCheck = await checkPlanLimits(user.id);
+  if (!planCheck.allowed) {
+      return NextResponse.json({ error: planCheck.reason }, { status: 403 }); // 403 Forbidden
+  }
 
   const contextId = request.headers.get('x-empresa-id'); 
   let vendaIdLog = null;
@@ -157,6 +163,7 @@ export async function POST(request: Request) {
         await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
         await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
+        if(planCheck.historyId) await incrementUsage(planCheck.historyId);
     }
 
     const nota = await prisma.notaFiscal.create({

@@ -4,21 +4,32 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import ListaVendas from '@/components/ListaVendas'; // <--- IMPORT NOVO
+import OnboardingTutorial from '@/components/OnboardingTutorial';
 
 export default function ClienteDashboard() {
   const [nomeUsuario, setNomeUsuario] = useState('');
+  const [planoInfo, setPlanoInfo] = useState<any>(null); // Info do plano
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
     if(userId) {
         fetch('/api/perfil', { headers: {'x-user-id': userId}})
         .then(res => res.json())
-        .then(data => setNomeUsuario(data.nome));
+        .then(data => {
+            setNomeUsuario(data.nome);
+            setPlanoInfo(data.plano); // Pega info do plano (status, validade)
+        });
     }
   }, []);
 
+  // Calcula dias restantes
+  const diasRestantes = planoInfo?.expiresAt 
+    ? Math.ceil((new Date(planoInfo.expiresAt).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
+
   return (
     <div className="min-h-screen bg-slate-50">
+        <OnboardingTutorial />
       
       {/* HEADER */}
       <header className="flex justify-between items-center p-6 border-b bg-white sticky top-0 z-30 shadow-sm">
@@ -34,6 +45,22 @@ export default function ClienteDashboard() {
 
       {/* CONTEÚDO PRINCIPAL */}
       <div className="p-8 max-w-6xl mx-auto space-y-8">
+
+        {/* AVISO DE PLANO TRIAL */}
+        {planoInfo?.tipo === 'TRIAL' && diasRestantes >= 0 && (
+            <div className="bg-indigo-600 text-white p-4 rounded-xl shadow-lg flex justify-between items-center animate-in slide-in-from-top">
+                <div className="flex items-center gap-3">
+                    <div className="bg-white/20 p-2 rounded-lg"><Clock size={24}/></div>
+                    <div>
+                        <p className="font-bold text-lg">Período de Teste Grátis</p>
+                        <p className="text-indigo-100 text-sm">Você tem {diasRestantes} dias restantes e limite de 3 notas.</p>
+                    </div>
+                </div>
+                <Link href="/configuracoes/minha-conta" className="bg-white text-indigo-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-50 transition">
+                    Assinar Agora
+                </Link>
+            </div>
+        )}
         
         {/* CARDS DE AÇÃO */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

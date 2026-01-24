@@ -73,6 +73,12 @@ model User {
   tempEmail         String?    // O novo e-mail que ele quer cadastrar
   verificationCode  String?    // O código de 6 dígitos
   verificationExpires DateTime? // Validade do código
+
+  // Controle do Tutorial (0 = Não viu, 1, 2, 3... Etapas, 99 = Concluído)
+  tutorialStep     Int      @default(0)
+
+  // Relacionamento com Histórico
+  historicoPlanos  PlanHistory[]
 }
 
 // --- EMPRESAS ---
@@ -261,6 +267,31 @@ model Plan {
   recommended   Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  // Limites e Regras
+  maxNotasMensal   Int      @default(0) // 0 = Ilimitado
+  diasTeste        Int      @default(0) // 7 para o plano teste
+  privado          Boolean  @default(false) // Se true, não aparece na vitrine (Ex: Parceiro)
+
+  historico        PlanHistory[]
+}
+
+model PlanHistory {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  
+  planId      String
+  plan        Plan      @relation(fields: [planId], references: [id])
+  
+  dataInicio  DateTime  @default(now())
+  dataFim     DateTime? // Null = Vitalício ou Recorrente Ativo
+  
+  status      String    @default("ATIVO") // ATIVO, EXPIRADO, CANCELADO
+  
+  notasEmitidas Int     @default(0) // Contador para controle de limite do plano específico
+  
+  createdAt   DateTime  @default(now())
 }
 
 model SystemLog {
