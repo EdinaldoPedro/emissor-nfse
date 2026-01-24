@@ -169,6 +169,8 @@ model Cnae {
   codigo      String 
   descricao   String 
   principal   Boolean @default(false)
+  codigoNbs        String?  // Nomenclatura Brasileira de Serviços
+  temRetencaoInss  Boolean  @default(false) // O Validador que você pediu
   empresaId   String
   empresa     Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 }
@@ -230,6 +232,8 @@ model GlobalCnae {
   itemLc                    String?
   codigoTributacaoNacional  String?
   aliquotaPadrao            Decimal? @db.Decimal(5,2)
+  codigoNbs                 String?
+  temRetencaoInss           Boolean  @default(false)
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 }

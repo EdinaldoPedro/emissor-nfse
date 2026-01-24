@@ -1,14 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Search, Edit, Save, X, ChevronLeft, ChevronRight } from 'lucide-react';
-// 1. Importar Dialog
+import { Search, Edit, Save, X, ChevronLeft, ChevronRight, CheckCircle, XCircle } from 'lucide-react';
 import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function AdminCnaes() {
-  const dialog = useDialog(); // 2. Inicializar
+  const dialog = useDialog();
   const [cnaes, setCnaes] = useState<any[]>([]);
   
-  // Paginação e Busca
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -17,7 +15,6 @@ export default function AdminCnaes() {
 
   const [editing, setEditing] = useState<any>(null);
 
-  // Efeito Debounce
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       carregar(page, termoBusca);
@@ -49,9 +46,6 @@ export default function AdminCnaes() {
         dialog.showAlert({ type: 'danger', description: "Erro ao salvar." });
     }
   };
-
-  // ... (RESTO DO CÓDIGO PERMANECE IGUAL, POIS SÓ MUDOU O ALERTA DO SAVE)
-  // ... (Copie o return do seu código original a partir daqui, ele já está certo)
   
   return (
     <div className="p-6">
@@ -61,7 +55,6 @@ export default function AdminCnaes() {
             <p className="text-sm text-slate-500">Total de {totalItems} atividades encontradas.</p>
         </div>
         
-        {/* BARRA DE PESQUISA */}
         <div className="relative">
             <Search className="absolute left-3 top-3 text-slate-400" size={18} />
             <input 
@@ -70,7 +63,7 @@ export default function AdminCnaes() {
                 value={termoBusca}
                 onChange={e => {
                     setTermoBusca(e.target.value);
-                    setPage(1); // Reseta para a primeira página ao pesquisar
+                    setPage(1); 
                 }}
             />
         </div>
@@ -91,6 +84,8 @@ export default function AdminCnaes() {
                         <input className="w-full p-2 bg-gray-100 border rounded font-mono text-sm" value={editing.codigo} disabled />
                         <p className="text-xs text-gray-500 mt-1">{editing.descricao}</p>
                     </div>
+                    
+                    {/* Campos Fiscais */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Item LC 116/03</label>
@@ -111,6 +106,30 @@ export default function AdminCnaes() {
                             />
                         </div>
                     </div>
+
+                    {/* NOVOS CAMPOS: NBS e INSS */}
+                    <div className="grid grid-cols-2 gap-4 pt-2 border-t mt-2">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Código NBS</label>
+                            <input 
+                                className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" 
+                                value={editing.codigoNbs || ''} 
+                                onChange={e => setEditing({...editing, codigoNbs: e.target.value})}
+                                placeholder="Ex: 123456789"
+                            />
+                        </div>
+                        <div className="flex items-center pt-5">
+                             <label className="flex items-center gap-2 cursor-pointer select-none">
+                                <input 
+                                    type="checkbox" 
+                                    className="w-5 h-5 text-blue-600 rounded"
+                                    checked={editing.temRetencaoInss || false}
+                                    onChange={e => setEditing({...editing, temRetencaoInss: e.target.checked})}
+                                />
+                                <span className="text-sm font-bold text-slate-700">Reter INSS?</span>
+                             </label>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="mt-6 flex justify-end gap-2">
@@ -122,35 +141,47 @@ export default function AdminCnaes() {
         </div>
       )}
 
-      {/* TABELA COM PAGINAÇÃO */}
+      {/* TABELA COM NOVAS COLUNAS */}
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col justify-between min-h-[500px]">
         <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 border-b">
                 <tr>
-                    <th className="p-4 w-24 font-semibold text-slate-600">Código</th>
-                    <th className="p-4 font-semibold text-slate-600">Descrição da Atividade</th>
-                    <th className="p-4 w-32 font-semibold text-slate-600">Item LC</th>
-                    <th className="p-4 w-40 font-semibold text-slate-600">Trib. Nacional</th>
+                    <th className="p-4 w-20 font-semibold text-slate-600">CNAE</th>
+                    <th className="p-4 font-semibold text-slate-600">Descrição</th>
+                    <th className="p-4 w-24 font-semibold text-slate-600">Item LC</th>
+                    <th className="p-4 w-32 font-semibold text-slate-600">Trib. Nac.</th>
+                    <th className="p-4 w-24 font-semibold text-slate-600">NBS</th>
+                    <th className="p-4 w-20 text-center font-semibold text-slate-600">INSS</th>
                     <th className="p-4 w-16 text-right">Ação</th>
                 </tr>
             </thead>
             <tbody>
                 {cnaes.length === 0 ? (
-                    <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhum CNAE encontrado.</td></tr>
+                    <tr><td colSpan={7} className="p-8 text-center text-gray-400">Nenhum CNAE encontrado.</td></tr>
                 ) : (
                     cnaes.map(cnae => (
                         <tr key={cnae.id} className="border-b hover:bg-slate-50">
                             <td className="p-4 font-mono font-bold text-slate-700">{cnae.codigo}</td>
-                            <td className="p-4 text-slate-600">{cnae.descricao}</td>
+                            <td className="p-4 text-slate-600 text-xs">{cnae.descricao}</td>
                             <td className="p-4">
                                 {cnae.itemLc ? (
-                                    <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold">{cnae.itemLc}</span>
+                                    <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-[10px] font-bold">{cnae.itemLc}</span>
                                 ) : <span className="text-gray-300">-</span>}
                             </td>
                             <td className="p-4">
                                 {cnae.codigoTributacaoNacional ? (
-                                    <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-bold">{cnae.codigoTributacaoNacional}</span>
+                                    <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-[10px] font-bold">{cnae.codigoTributacaoNacional}</span>
                                 ) : <span className="text-gray-300">-</span>}
+                            </td>
+                            <td className="p-4 font-mono text-xs text-slate-500">
+                                {cnae.codigoNbs || '-'}
+                            </td>
+                            <td className="p-4 text-center">
+                                {cnae.temRetencaoInss ? (
+                                    <CheckCircle size={16} className="text-green-500 mx-auto"/>
+                                ) : (
+                                    <XCircle size={16} className="text-slate-200 mx-auto"/>
+                                )}
                             </td>
                             <td className="p-4 text-right">
                                 <button onClick={() => setEditing(cnae)} className="text-blue-500 hover:bg-blue-50 p-2 rounded transition">
@@ -163,7 +194,7 @@ export default function AdminCnaes() {
             </tbody>
         </table>
 
-        {/* CONTROLES DE PAGINAÇÃO */}
+        {/* PAGINAÇÃO */}
         <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
             <span className="text-sm text-gray-500">Página {page} de {totalPages}</span>
             <div className="flex gap-2">

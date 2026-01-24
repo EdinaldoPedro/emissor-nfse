@@ -12,11 +12,10 @@ export async function GET(request: Request) {
 
   const skip = (page - 1) * limit;
 
-  // Filtro: Busca por Código OU Descrição
   const whereClause = search ? {
     OR: [
       { codigo: { contains: search } },
-      { descricao: { contains: search } } // Adicione mode: 'insensitive' se usar Postgres no futuro
+      { descricao: { contains: search } } 
     ]
   } : {};
 
@@ -50,13 +49,16 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { id, itemLc, codigoTributacaoNacional } = body;
+    // ATUALIZADO: Agora recebemos os novos campos
+    const { id, itemLc, codigoTributacaoNacional, codigoNbs, temRetencaoInss } = body;
 
     const atualizado = await prisma.globalCnae.update({
       where: { id },
       data: {
         itemLc,
-        codigoTributacaoNacional
+        codigoTributacaoNacional,
+        codigoNbs,           // Novo
+        temRetencaoInss      // Novo
       }
     });
 

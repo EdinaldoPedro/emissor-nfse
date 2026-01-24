@@ -174,7 +174,9 @@ export async function PUT(request: Request) {
                       empresaId: empresaSalva.id,
                       codigo: String(c.codigo).replace(/\D/g, ''),
                       descricao: c.descricao,
-                      principal: c.principal
+                      principal: c.principal,
+                      codigoNbs: c.codigoNbs,
+                      temRetencaoInss: c.temRetencaoInss || false
                   }))
               });
               await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);

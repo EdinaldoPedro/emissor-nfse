@@ -1,10 +1,21 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, Briefcase, Loader2, User, Building, Home, Check } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, Briefcase, Loader2, User, Building, Home, Check, Info } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import { validarCPF } from "@/app/utils/cpf";
+
+// 1. Interface atualizada para refletir o Banco de Dados
+interface CnaeDB {
+  id: string;
+  codigo: string;
+  descricao: string;
+  principal: boolean;
+  // Novos campos vindos do banco
+  codigoNbs?: string;
+  temRetencaoInss?: boolean; 
+}
 
 interface ClienteDB {
   id: string;
@@ -20,13 +31,6 @@ interface ClienteDB {
   cidade?: string;
   uf?: string;
   codigoIbge?: string;
-}
-
-interface CnaeDB {
-  id: string;
-  codigo: string;
-  descricao: string;
-  principal: boolean;
 }
 
 export default function EmitirNotaPage() {
@@ -45,6 +49,9 @@ export default function EmitirNotaPage() {
   
   const [perfilEmpresa, setPerfilEmpresa] = useState<any>(null); 
 
+  // Controle de Regras de Negócio
+  const [permiteINSS, setPermiteINSS] = useState(false);
+
   const [buscandoDoc, setBuscandoDoc] = useState(false);
   const [buscandoCep, setBuscandoCep] = useState(false);
   const [clienteEncontrado, setClienteEncontrado] = useState(false);
@@ -57,17 +64,88 @@ export default function EmitirNotaPage() {
 
   const isPJ = novoCliente.documento.replace(/\D/g, '').length > 11;
 
+  // === DADOS DA NOTA ===
   const [nfData, setNfData] = useState({
     clienteId: "", clienteNome: "", servicoDescricao: "", valor: "", 
-    retencoes: false, codigoCnae: "", aliquota: "", issRetido: false 
+    codigoCnae: "", aliquota: "", issRetido: false 
   });
 
+  // === DADOS DE RETENÇÕES ===
+  const [retencoes, setRetencoes] = useState({
+      inss: { retido: false, aliquota: '', base: '', valor: 0 },
+      pis: { retido: false, aliquota: '0.65', valor: 0 },
+      cofins: { retido: false, aliquota: '3.00', valor: 0 },
+      ir: { retido: false, aliquota: '1.50', valor: 0 },
+      csll: { retido: false, aliquota: '1.00', valor: 0 }
+  });
+
+  // === CÁLCULOS DE IMPOSTOS ===
+  const calcularRetencao = (tipo: string, baseVal: string, aliqVal: string) => {
+      const base = parseFloat(baseVal) || 0;
+      const aliq = parseFloat(aliqVal) || 0;
+      const valor = base * (aliq / 100);
+      setRetencoes(prev => ({
+          ...prev,
+          [tipo]: { ...prev[tipo as keyof typeof retencoes], base: baseVal, aliquota: aliqVal, valor }
+      }));
+  };
+
+  const toggleRetencao = (tipo: string) => {
+      setRetencoes(prev => {
+          const atual = prev[tipo as keyof typeof retencoes];
+          const novoEstado = !atual.retido;
+          
+          // Se ativou INSS, sugere base = valor da nota e alíquota 11%
+          if (tipo === 'inss' && novoEstado) {
+              const valNota = nfData.valor || '0';
+              return { ...prev, inss: { ...atual, retido: true, base: valNota, aliquota: '11.00', valor: (parseFloat(valNota) * 0.11) } };
+          }
+          // Se ativou PIS/COFINS/IR/CSLL, calcula sobre valor total
+          if (novoEstado && tipo !== 'inss') {
+               const valNota = parseFloat(nfData.valor) || 0;
+               const aliq = parseFloat(atual.aliquota) || 0;
+               return { ...prev, [tipo]: { ...atual, retido: true, valor: valNota * (aliq / 100) } };
+          }
+
+          return { ...prev, [tipo]: { ...atual, retido: novoEstado, valor: novoEstado ? atual.valor : 0 } };
+      });
+  };
+
+  // Atualiza base do INSS se mudar valor da nota (se já estiver ativo)
+  useEffect(() => {
+      if (nfData.valor && retencoes.inss.retido) {
+          calcularRetencao('inss', nfData.valor, retencoes.inss.aliquota);
+      }
+  }, [nfData.valor]);
+
+  // === REGRA DE NEGÓCIO: VALIDAÇÃO DO CNAE ===
+  useEffect(() => {
+      if (!meusCnaes.length) return;
+
+      const cnaeSelecionado = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
+      
+      // Lê a permissão direto do objeto carregado do banco
+      const deveReter = cnaeSelecionado?.temRetencaoInss || false;
+      
+      setPermiteINSS(deveReter);
+
+      // Se o CNAE não permite, limpa a seleção
+      if (!deveReter) {
+          setRetencoes(prev => ({ 
+              ...prev, 
+              inss: { ...prev.inss, retido: false, valor: 0 } 
+          }));
+      }
+  }, [nfData.codigoCnae, meusCnaes]);
+
+
+  // === CARREGAMENTO INICIAL ===
   useEffect(() => {
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
     if(!userId) { router.push('/login'); return; }
 
-    // CARREGA PERFIL
+    // Perfil
     fetch('/api/perfil', { headers: { 'x-user-id': userId } })
       .then(res => res.json())
       .then(data => {
@@ -81,7 +159,7 @@ export default function EmitirNotaPage() {
                          const principal = data.atividades.find((c: CnaeDB) => c.principal);
                          updates.codigoCnae = principal ? principal.codigo : data.atividades[0].codigo;
                      }
-                     // Se for MEI, alíquota é 0. Senão, usa padrão.
+                     // Se MEI, alíquota 0. Senão, usa padrão.
                      updates.aliquota = data.regimeTributario === 'MEI' ? '0' : (data.aliquotaPadrao || '0');
                      updates.issRetido = data.issRetidoPadrao || false;
                      return { ...prev, ...updates };
@@ -90,7 +168,7 @@ export default function EmitirNotaPage() {
          }
       }).catch(console.error);
 
-    // CARREGA CLIENTES
+    // Clientes
     fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
       .then(res => res.json())
       .then(data => {
@@ -98,7 +176,7 @@ export default function EmitirNotaPage() {
           else setClientes([]); 
       }).catch(() => setClientes([]));
 
-    // MODO CORREÇÃO
+    // Modo Retry
     if (retryId) {
         setLoadingRetry(true);
         fetch(`/api/vendas/${retryId}`, { headers: { 'x-user-id': userId } })
@@ -123,6 +201,7 @@ export default function EmitirNotaPage() {
     }
   }, [router, retryId]);
 
+  // Autocomplete Cliente
   useEffect(() => {
     const docLimpo = novoCliente.documento.replace(/\D/g, '');
     if (docLimpo.length === 11 || docLimpo.length === 14) {
@@ -225,6 +304,15 @@ export default function EmitirNotaPage() {
     setLoading(true);
     const userId = localStorage.getItem('userId');
     try {
+      
+      const payloadRetencoes = {
+          inss: retencoes.inss.retido ? { retido: true, valor: retencoes.inss.valor, aliquota: parseFloat(retencoes.inss.aliquota) } : null,
+          pis: retencoes.pis.retido ? { retido: true, valor: retencoes.pis.valor } : null,
+          cofins: retencoes.cofins.retido ? { retido: true, valor: retencoes.cofins.valor } : null,
+          ir: retencoes.ir.retido ? { retido: true, valor: retencoes.ir.valor } : null,
+          csll: retencoes.csll.retido ? { retido: true, valor: retencoes.csll.valor } : null,
+      };
+
       const res = await fetch('/api/notas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
@@ -234,7 +322,8 @@ export default function EmitirNotaPage() {
           descricao: nfData.servicoDescricao,
           codigoCnae: nfData.codigoCnae,
           aliquota: nfData.aliquota,
-          issRetido: nfData.issRetido
+          issRetido: nfData.issRetido,
+          retencoes: payloadRetencoes
         })
       });
       const resposta = await res.json();
@@ -346,8 +435,7 @@ export default function EmitirNotaPage() {
                   <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
                 </div>
 
-                {/* CAMPO DE ALÍQUOTA (Só exibe se perfil já carregou e não é MEI) */}
-                {perfilEmpresa && perfilEmpresa.regimeTributario !== 'MEI' && (
+                {perfilEmpresa?.regimeTributario !== 'MEI' && (
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Alíquota ISS (%)</label>
                         <input type="number" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700" value={nfData.aliquota} onChange={e => setNfData({...nfData, aliquota: e.target.value})} placeholder="Ex: 5.00" />
@@ -355,10 +443,72 @@ export default function EmitirNotaPage() {
                 )}
             </div>
             
-            {perfilEmpresa && perfilEmpresa.regimeTributario !== 'MEI' && (
-                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg border">
-                    <input type="checkbox" id="issRetido" className="w-5 h-5 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
-                    <label htmlFor="issRetido" className="text-sm text-slate-700 font-medium cursor-pointer">ISS Retido pelo Tomador?</label>
+            {/* === ÁREA DE IMPOSTOS E RETENÇÕES (Lógica Dinâmica) === */}
+            {perfilEmpresa?.regimeTributario !== 'MEI' && (
+                <div className="mt-6 border-t pt-4">
+                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                        <Calculator size={16}/> Retenções e Impostos
+                    </h4>
+
+                    {/* 1. ISS RETIDO (SN e LP) */}
+                    <div className="mb-4 bg-slate-50 p-3 rounded border">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
+                            <span className="text-sm text-slate-700 font-medium">ISS Retido pelo Tomador?</span>
+                        </label>
+                    </div>
+
+                    {/* 2. INSS (Condicionado ao CNAE) */}
+                    <div className={`bg-slate-50 p-3 rounded border mb-4 transition-all ${permiteINSS ? 'opacity-100' : 'opacity-50 grayscale pointer-events-none'}`}>
+                        <div className="flex justify-between items-center mb-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={retencoes.inss.retido} onChange={() => toggleRetencao('inss')} disabled={!permiteINSS} />
+                                <span className="text-sm font-bold text-slate-700">Reter INSS?</span>
+                            </label>
+                            {!permiteINSS && (
+                                <span className="text-[10px] text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded flex items-center gap-1">
+                                    <Info size={10}/> Não aplicável a este CNAE
+                                </span>
+                            )}
+                        </div>
+                        
+                        {retencoes.inss.retido && (
+                            <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 uppercase font-bold">Base Cálculo</label>
+                                    <input className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.base} onChange={e => calcularRetencao('inss', e.target.value, retencoes.inss.aliquota)} />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 uppercase font-bold">Alíquota (%)</label>
+                                    <input type="number" className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.aliquota} onChange={e => calcularRetencao('inss', retencoes.inss.base, e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 uppercase font-bold">Valor Retido</label>
+                                    <div className="w-full p-2 border rounded text-sm bg-gray-200 text-slate-700 font-bold border-gray-300">R$ {retencoes.inss.valor.toFixed(2)}</div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 3. IMPOSTOS FEDERAIS (Só Lucro Presumido/Real) */}
+                    {['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario) && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {['pis', 'cofins', 'csll', 'ir'].map(imposto => (
+                                <label key={imposto} className={`flex flex-col p-3 border rounded cursor-pointer transition ${retencoes[imposto as keyof typeof retencoes].retido ? 'bg-blue-50 border-blue-200' : 'bg-white hover:bg-slate-50'}`}>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={retencoes[imposto as keyof typeof retencoes].retido} onChange={() => toggleRetencao(imposto)} />
+                                        <span className="text-xs font-bold uppercase">{imposto}</span>
+                                    </div>
+                                    {retencoes[imposto as keyof typeof retencoes].retido && (
+                                        <div className="text-xs text-blue-700">
+                                            Aliq: <strong>{retencoes[imposto as keyof typeof retencoes].aliquota}%</strong><br/>
+                                            R$ {retencoes[imposto as keyof typeof retencoes].valor.toFixed(2)}
+                                        </div>
+                                    )}
+                                </label>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
             
@@ -376,16 +526,25 @@ export default function EmitirNotaPage() {
             <div className="bg-slate-50 p-6 rounded-lg space-y-4 border border-slate-200">
               <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tomador:</span><span className="font-medium text-slate-900">{modoCliente === 'novo' ? novoCliente.nome : nfData.clienteNome}</span></div>
               <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Atividade (CNAE):</span><span className="font-medium text-slate-900">{nfData.codigoCnae}</span></div>
-              {perfilEmpresa && perfilEmpresa.regimeTributario !== 'MEI' && parseFloat(nfData.aliquota) > 0 && (
-                  <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Alíquota ISS:</span><span className="font-medium text-slate-900">{nfData.aliquota}%</span></div>
+              
+              {/* Exibição Condicional na Revisão */}
+              {perfilEmpresa?.regimeTributario !== 'MEI' && (
+                  <>
+                    <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Alíquota ISS:</span><span className="font-medium text-slate-900">{nfData.aliquota}% {nfData.issRetido ? '(Retido)' : ''}</span></div>
+                    {Object.entries(retencoes).map(([key, data]) => data.retido && (
+                        <div key={key} className="flex justify-between border-b pb-2 text-red-600 text-sm">
+                            <span className="uppercase">Retenção {key}:</span><span>- R$ {data.valor.toFixed(2)}</span>
+                        </div>
+                    ))}
+                  </>
               )}
+
               <div className="flex justify-between pt-2"><span className="text-slate-500">Valor Bruto:</span><span className="font-bold text-slate-900">R$ {valorNumerico.toFixed(2)}</span></div>
             </div>
             <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será processada no ambiente nacional.</p>
           </div>
         )}
 
-        {/* RODAPÉ SIMPLIFICADO */}
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-100">
           <div>
             {step > 1 && (

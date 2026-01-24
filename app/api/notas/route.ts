@@ -117,9 +117,9 @@ export async function POST(request: Request) {
             cnae: cnaeFinal,
             itemLc,
             codigoTribNacional,
-            // AQUI: Passamos os novos campos para a Estratégia
             aliquota: aliquota ? parseFloat(aliquota) : 0, 
-            issRetido: !!issRetido
+            issRetido: !!issRetido,
+            retencoes: retencoes // <--- REPASSA O OBJETO
         },
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
         numeroDPS: novoNumeroDPS,

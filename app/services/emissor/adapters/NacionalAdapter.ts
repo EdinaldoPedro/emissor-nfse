@@ -1,5 +1,3 @@
-// app/services/emissor/adapters/NacionalAdapter.ts
-
 import { ICanonicalRps } from '../interfaces/ICanonicalRps';
 
 export class NacionalAdapter {
@@ -8,11 +6,10 @@ export class NacionalAdapter {
         return str ? str.replace(/\D/g, '') : '';
     }
 
-    // Converte nosso Regime Interno para o Código do Portal Nacional
     private mapRegime(regime: string): string {
         switch(regime) {
             case 'MEI': return '4';
-            case 'SIMPLES': return '1'; // Ou 2 se tiver excesso
+            case 'SIMPLES': return '1'; 
             case 'LUCRO_PRESUMIDO': 
             case 'LUCRO_REAL': return '3';
             default: return '3';
@@ -20,20 +17,12 @@ export class NacionalAdapter {
     }
 
     private formatData(date: Date): string {
-        // Formato: AAAA-MM-DDThh:mm:ss-03:00
         const timestamp = date.getTime();
         const offsetBrasilia = -3 * 60 * 60 * 1000;
         const dateBR = new Date(timestamp + offsetBrasilia);
         
         const pad = (n: number) => n.toString().padStart(2, '0');
-        const YYYY = dateBR.getUTCFullYear();
-        const MM = pad(dateBR.getUTCMonth() + 1);
-        const DD = pad(dateBR.getUTCDate());
-        const HH = pad(dateBR.getUTCHours());
-        const mm = pad(dateBR.getUTCMinutes());
-        const ss = pad(dateBR.getUTCSeconds());
-        
-        return `${YYYY}-${MM}-${DD}T${HH}:${mm}:${ss}-03:00`;
+        return `${dateBR.getUTCFullYear()}-${pad(dateBR.getUTCMonth() + 1)}-${pad(dateBR.getUTCDate())}T${pad(dateBR.getUTCHours())}:${pad(dateBR.getUTCMinutes())}:${pad(dateBR.getUTCSeconds())}-03:00`;
     }
 
     public toXml(rps: ICanonicalRps): string {
@@ -41,22 +30,19 @@ export class NacionalAdapter {
         const t = rps.tomador;
         const s = rps.servico;
         const m = rps.meta;
+        const r = s.retencoes;
 
         const dhEmi = this.formatData(m.dataEmissao);
         const dCompet = dhEmi.split('T')[0];
-        
-        // Identificador Único do DPS
         const idDps = `DPS${this.clean(p.endereco.codigoIbge).padStart(7,'0')}2${this.clean(p.documento).padStart(14,'0')}${this.clean(m.serie).padStart(5,'0')}${String(m.numero).padStart(15,'0')}`;
         
         const tpAmb = m.ambiente === 'PRODUCAO' ? '1' : '2';
         const opSimpNac = this.mapRegime(p.regimeTributario);
         
-        // Bloco de Tributação (Dinâmico)
+        // TRIBUTAÇÃO MUNICIPAL
         let tribXml = `<tribMun>`;
-        tribXml += `<tribISSQN>${s.tipoTributacao}</tribISSQN>`; // 1=Exigivel
+        tribXml += `<tribISSQN>${s.tipoTributacao}</tribISSQN>`;
         tribXml += `<tpRetISSQN>${s.issRetido ? 2 : 1}</tpRetISSQN>`;
-        
-        // Só adiciona alíquota se for maior que 0 e regime permitir
         if (s.aliquotaAplicada && s.aliquotaAplicada > 0) {
             tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
         }
@@ -64,6 +50,14 @@ export class NacionalAdapter {
             tribXml += `<vISSQN>${s.valorIss.toFixed(2)}</vISSQN>`;
         }
         tribXml += `</tribMun>`;
+
+        // VALORES FEDERAIS (Se houver retenção > 0)
+        let valoresFederais = '';
+        if (r.pis.retido && r.pis.valor > 0) valoresFederais += `<vPIS>${r.pis.valor.toFixed(2)}</vPIS>`;
+        if (r.cofins.retido && r.cofins.valor > 0) valoresFederais += `<vCOFINS>${r.cofins.valor.toFixed(2)}</vCOFINS>`;
+        if (r.inss.retido && r.inss.valor > 0) valoresFederais += `<vINSS>${r.inss.valor.toFixed(2)}</vINSS>`;
+        if (r.ir.retido && r.ir.valor > 0) valoresFederais += `<vIR>${r.ir.valor.toFixed(2)}</vIR>`;
+        if (r.csll.retido && r.csll.valor > 0) valoresFederais += `<vCSLL>${r.csll.valor.toFixed(2)}</vCSLL>`;
 
         return `<?xml version="1.0" encoding="UTF-8"?>` + 
         `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">` + 
@@ -97,6 +91,8 @@ export class NacionalAdapter {
                 `<valores>` +
                     `<vServPrest><vServ>${s.valor.toFixed(2)}</vServ></vServPrest>` +
                     `<trib>${tribXml}</trib>` +
+                    valoresFederais + 
+                    `<vLiq>${s.valorLiquido.toFixed(2)}</vLiq>` + 
                 `</valores>` + 
             `</infDPS>` + 
         `</DPS>`;

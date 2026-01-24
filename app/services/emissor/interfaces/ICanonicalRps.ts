@@ -1,9 +1,8 @@
-// app/services/emissor/interfaces/ICanonicalRps.ts
-
 export interface ICanonicalRps {
+    // ... (prestador e tomador mantidos)
     prestador: {
         id: string;
-        documento: string; // CNPJ
+        documento: string;
         inscricaoMunicipal?: string;
         regimeTributario: 'MEI' | 'SIMPLES' | 'LUCRO_PRESUMIDO' | 'LUCRO_REAL';
         endereco: {
@@ -13,13 +12,15 @@ export interface ICanonicalRps {
         configuracoes: {
             aliquotaPadrao?: number;
             issRetido?: boolean;
-            tipoTributacao?: string; // 1-Exigivel, 2-Nao Incidencia...
-            regimeEspecial?: string; // 0-Nenhum, 1-Microempresa Municipal...
+            tipoTributacao?: string;
+            regimeEspecial?: string;
         };
     };
     tomador: {
         documento: string;
         razaoSocial: string;
+        email?: string;
+        telefone?: string;
         endereco: {
             cep: string;
             logradouro: string;
@@ -28,23 +29,30 @@ export interface ICanonicalRps {
             codigoIbge: string;
             uf: string;
         };
-        email?: string;
-        telefone?: string;
     };
     servico: {
         valor: number;
+        valorLiquido: number; // NOVO: Valor após descontos
         descricao: string;
         cnae: string;
         
-        // Campos fiscais específicos da transação
-        itemListaServico?: string; // LC 116 (ex: 1.07)
-        codigoTributacaoNacional?: string; // NBS
+        itemListaServico?: string;
+        codigoTributacaoNacional?: string;
         
-        aliquotaAplicada?: number; // Se houver (0 para MEI)
-        valorIss?: number;         // Calculado
+        // ISS
+        aliquotaAplicada?: number;
+        valorIss?: number;
         issRetido: boolean;
-        
-        tipoTributacao: string; // Exigibilidade para esta nota específica
+        tipoTributacao: string;
+
+        // RETENÇÕES FEDERAIS (NOVO)
+        retencoes: {
+            pis: { valor: number; aliquota?: number; retido: boolean };
+            cofins: { valor: number; aliquota?: number; retido: boolean };
+            csll: { valor: number; aliquota?: number; retido: boolean };
+            inss: { valor: number; aliquota?: number; retido: boolean };
+            ir: { valor: number; aliquota?: number; retido: boolean };
+        };
     };
     meta: {
         ambiente: 'HOMOLOGACAO' | 'PRODUCAO';
