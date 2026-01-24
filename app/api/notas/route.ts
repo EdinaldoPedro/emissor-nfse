@@ -9,11 +9,8 @@ import { getAuthenticatedUser, unauthorized, forbidden } from '@/app/utils/api-m
 const prisma = new PrismaClient();
 
 // === FUNÇÕES AUXILIARES ===
-
-// Define qual empresa está sendo operada (Contexto do Contador ou Admin)
 async function getEmpresaContexto(user: any, contextId: string | null) {
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-    
     if (contextId && contextId !== 'null' && contextId !== 'undefined') {
         const vinculo = await prisma.contadorVinculo.findUnique({
             where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
@@ -21,11 +18,9 @@ async function getEmpresaContexto(user: any, contextId: string | null) {
         if (vinculo && vinculo.status === 'APROVADO') return contextId;
         if (isStaff) return contextId; 
     }
-    
     return user.empresaId;
 }
 
-// Remove dados sensíveis dos logs
 function limparPayloadParaLog(payload: any) {
     const copia = JSON.parse(JSON.stringify(payload));
     if (copia.prestador) {
@@ -36,19 +31,14 @@ function limparPayloadParaLog(payload: any) {
     return copia;
 }
 
-// Permite que Admin/Suporte "seja" o cliente (header x-user-id)
 async function resolveUser(request: Request) {
     let user = await getAuthenticatedUser(request);
     if (!user) return null;
-
     const headerUserId = request.headers.get('x-user-id');
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-
     if (isStaff && headerUserId && headerUserId !== user.id) {
         const targetUser = await prisma.user.findUnique({ where: { id: headerUserId } });
-        if (targetUser) {
-            return { ...targetUser, isImpersonating: true }; 
-        }
+        if (targetUser) return { ...targetUser, isImpersonating: true }; 
     }
     return user;
 }
@@ -59,13 +49,13 @@ export async function POST(request: Request) {
   if (!user) return unauthorized();
 
   const contextId = request.headers.get('x-empresa-id'); 
-  
   let vendaIdLog = null;
   let empresaIdLog = null;
 
   try {
     const body = await request.json();
-    const { clienteId, valor, descricao, codigoCnae, vendaId } = body;
+    // AQUI: Adicionamos 'aliquota' e 'issRetido' na desestruturação
+    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido } = body;
 
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
@@ -75,7 +65,6 @@ export async function POST(request: Request) {
     const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
     if (!prestador || !tomador) throw new Error("Empresas (Prestador ou Tomador) não encontradas.");
 
-    // Cria ou Atualiza a Venda
     let venda;
     if (vendaId) {
         venda = await prisma.venda.update({
@@ -89,11 +78,9 @@ export async function POST(request: Request) {
     }
     vendaIdLog = venda.id;
 
-    // Incrementa DPS
     const novoNumeroDPS = (prestador.ultimoDPS || 0) + 1;
     await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: novoNumeroDPS } });
 
-    // Trata CNAE
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
         const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
@@ -101,31 +88,22 @@ export async function POST(request: Request) {
     }
     if (!cnaeFinal) throw new Error("CNAE é obrigatório para emissão.");
 
-    // === LÓGICA DE TRIBUTAÇÃO (FISCAL) ===
-    // Define padrão INVÁLIDO para forçar erro se não achar mapeamento
+    // Lógica de Códigos Fiscais (De/Para)
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
 
-    // 1. Tenta Lista Estática (Arquivo utils)
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica && infoEstatica.codigoTributacaoNacional) {
          itemLc = infoEstatica.itemLC;
          codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
-    // 2. Tenta Banco de Dados Global (Prioridade Máxima)
     const regraFiscal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
     if (regraFiscal) {
         if (regraFiscal.itemLc) itemLc = regraFiscal.itemLc;
         if (regraFiscal.codigoTributacaoNacional && regraFiscal.codigoTributacaoNacional.trim() !== '') {
             codigoTribNacional = regraFiscal.codigoTributacaoNacional.replace(/\D/g, '');
         }
-    }
-
-    // 3. TRAVA DE SEGURANÇA
-    // Impede o envio se o código ainda for o padrão inválido
-    if (codigoTribNacional === '000000') {
-        throw new Error(`Erro Fiscal: O CNAE ${cnaeFinal} não possui 'Código de Tributação Nacional' configurado no sistema. Contate o suporte para cadastrar este De-Para.`);
     }
 
     // Prepara dados para a Factory
@@ -138,7 +116,10 @@ export async function POST(request: Request) {
             descricao,
             cnae: cnaeFinal,
             itemLc,
-            codigoTribNacional
+            codigoTribNacional,
+            // AQUI: Passamos os novos campos para a Estratégia
+            aliquota: aliquota ? parseFloat(aliquota) : 0, 
+            issRetido: !!issRetido
         },
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
         numeroDPS: novoNumeroDPS,
@@ -153,21 +134,12 @@ export async function POST(request: Request) {
         message: `Iniciando transmissão DPS ${novoNumeroDPS}.`,
         empresaId: prestador.id,
         vendaId: venda.id,
-        details: { 
-            payloadOriginal: limparPayloadParaLog(dadosParaEstrategia),
-            xmlGerado: resultado.xmlGerado 
-        }
+        details: { payload: limparPayloadParaLog(dadosParaEstrategia), xml: resultado.xmlGerado }
     });
 
     if (!resultado.sucesso) {
         await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
-        await createLog({
-            level: 'ERRO', action: 'FALHA_EMISSAO',
-            message: resultado.motivo || 'Rejeição da Sefaz',
-            empresaId: prestador.id,
-            vendaId: venda.id,
-            details: resultado.erros
-        });
+        await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
     }
 
@@ -190,53 +162,31 @@ export async function POST(request: Request) {
         }
     });
 
-    await createLog({
-        level: 'INFO', action: 'NOTA_AUTORIZADA',
-        message: `Nota ${nota.numero} autorizada! Protocolo: ${resultado.notaGov!.protocolo}`,
-        empresaId: prestador.id,
-        vendaId: venda.id,
-        details: { 
-            chave: resultado.notaGov!.chave,
-            protocolo: resultado.notaGov!.protocolo
-        }
-    });
-
+    await createLog({ level: 'INFO', action: 'NOTA_AUTORIZADA', message: `Nota ${nota.numero} autorizada!`, empresaId: prestador.id, vendaId: venda.id });
     await processarRetornoNota(nota.id, prestador.id, venda.id);
 
     return NextResponse.json({ success: true, nota }, { status: 201 });
 
   } catch (error: any) {
     if(vendaIdLog) try { await prisma.venda.update({ where: { id: vendaIdLog }, data: { status: 'ERRO_EMISSAO' } }); } catch(e){}
-    
-    await createLog({
-        level: 'ERRO', action: 'ERRO_SISTEMA',
-        message: error.message,
-        empresaId: empresaIdLog || undefined,
-        vendaId: vendaIdLog || undefined,
-        details: { stack: error.stack }
-    });
+    await createLog({ level: 'ERRO', action: 'ERRO_SISTEMA', message: error.message, empresaId: empresaIdLog || undefined, details: { stack: error.stack } });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// === GET: LISTAGEM DE NOTAS ===
+// === GET: LISTAGEM ===
 export async function GET(request: Request) {
     const user = await resolveUser(request);
     if (!user) return unauthorized();
-
     const contextId = request.headers.get('x-empresa-id');
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '10');
     const search = searchParams.get('search') || '';
-    const type = searchParams.get('type') || 'all';
   
     try {
       const empresaIdAlvo = await getEmpresaContexto(user, contextId);
-      
-      if (!empresaIdAlvo) {
-          return NextResponse.json({ data: [], meta: { total: 0, page: 1, totalPages: 1 } });
-      }
+      if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0 } });
   
       const skip = (page - 1) * limit;
       const whereClause: any = {
@@ -249,7 +199,6 @@ export async function GET(request: Request) {
               ]
           })
       };
-      if (type === 'valid') whereClause.status = { in: ['CONCLUIDA', 'CANCELADA'] };
   
       const [vendas, total] = await prisma.$transaction([
           prisma.venda.findMany({
@@ -257,7 +206,7 @@ export async function GET(request: Request) {
               include: {
                   cliente: { select: { razaoSocial: true, documento: true } },
                   notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, xmlBase64: true, pdfBase64: true } },
-                  logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true, details: true } }
+                  logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true } }
               }
           }),
           prisma.venda.count({ where: whereClause })
@@ -267,9 +216,7 @@ export async function GET(request: Request) {
           let codigoTribDisplay = '---';
           if (v.notas.length > 0 && v.notas[0].cnae) {
              const info = getTributacaoPorCnae(v.notas[0].cnae);
-             if (info && info.codigoTributacaoNacional) {
-                 codigoTribDisplay = info.codigoTributacaoNacional;
-             }
+             if (info && info.codigoTributacaoNacional) codigoTribDisplay = info.codigoTributacaoNacional;
           }
           return {
             ...v,

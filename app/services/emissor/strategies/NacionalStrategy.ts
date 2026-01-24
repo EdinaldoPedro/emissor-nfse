@@ -1,4 +1,110 @@
-// Cole isso dentro da classe NacionalStrategy, substituindo os métodos antigos
+import { BaseStrategy } from './BaseStrategy';
+import { IEmissorStrategy, IDadosEmissao, IResultadoEmissao, IResultadoConsulta, IResultadoCancelamento } from '../../interfaces/IEmissorStrategy';
+import axios from 'axios';
+import https from 'https';
+import crypto from 'crypto';
+import zlib from 'zlib';
+import { NacionalAdapter } from '../adapters/NacionalAdapter';
+import { ICanonicalRps } from '../interfaces/ICanonicalRps';
+
+export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
+    
+    private adapter: NacionalAdapter;
+
+    constructor() {
+        super();
+        this.adapter = new NacionalAdapter();
+    }
+
+    async executar(dados: IDadosEmissao): Promise<IResultadoEmissao> {
+        const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente } = dados;
+
+        try {
+            // 1. Validações Prévias
+            this.validarCertificado(prestador);
+            this.validarTomador(tomador);
+            if (!servico.codigoTribNacional) throw new Error("CNAE/Tributação Nacional não definido.");
+
+            // 2. Inteligência Fiscal (Motor de Regras Simples)
+            const isMei = prestador.regimeTributario === 'MEI';
+            
+            // Se for MEI, alíquota é 0. Se não, usa o que veio do serviço ou o padrão da empresa.
+            const aliquotaFinal = isMei ? 0 : (servico.valor > 0 ? (servico.aliquota || Number(prestador.aliquotaPadrao) || 0) : 0);
+            
+            // Cálculo do ISS
+            const valorIss = (servico.valor * aliquotaFinal) / 100;
+
+            // 3. Montagem do Objeto Canônico (Domínio)
+            const rps: ICanonicalRps = {
+                prestador: {
+                    id: prestador.id,
+                    documento: prestador.documento,
+                    inscricaoMunicipal: prestador.inscricaoMunicipal,
+                    regimeTributario: prestador.regimeTributario as any,
+                    endereco: {
+                        codigoIbge: prestador.codigoIbge,
+                        uf: prestador.uf
+                    },
+                    configuracoes: {
+                        aliquotaPadrao: Number(prestador.aliquotaPadrao),
+                        issRetido: servico.issRetido !== undefined ? servico.issRetido : prestador.issRetidoPadrao,
+                        tipoTributacao: prestador.tipoTributacaoPadrao,
+                        regimeEspecial: prestador.regimeEspecialTributacao
+                    }
+                },
+                tomador: {
+                    documento: tomador.documento,
+                    razaoSocial: tomador.razaoSocial,
+                    email: tomador.email,
+                    telefone: tomador.telefone,
+                    endereco: {
+                        cep: tomador.cep,
+                        logradouro: tomador.logradouro,
+                        numero: tomador.numero,
+                        bairro: tomador.bairro || 'Centro',
+                        codigoIbge: tomador.codigoIbge,
+                        uf: tomador.uf
+                    }
+                },
+                servico: {
+                    valor: servico.valor,
+                    descricao: servico.descricao,
+                    cnae: servico.cnae,
+                    codigoTributacaoNacional: servico.codigoTribNacional,
+                    itemListaServico: servico.itemLc,
+                    
+                    // Aplicação das Regras
+                    aliquotaAplicada: aliquotaFinal,
+                    valorIss: valorIss,
+                    issRetido: servico.issRetido || false,
+                    tipoTributacao: prestador.tipoTributacaoPadrao || '1'
+                },
+                meta: {
+                    ambiente: ambiente,
+                    serie: serieDPS,
+                    numero: numeroDPS,
+                    dataEmissao: new Date()
+                }
+            };
+
+            // 4. Adapter: Transformar RPS em XML
+            const xmlGerado = this.adapter.toXml(rps);
+
+            // 5. Assinar e Transmitir
+            // Recalcula ID para assinatura (garantindo consistência com o Adapter)
+            const idDps = `DPS${this.cleanString(rps.prestador.endereco.codigoIbge).padStart(7,'0')}2${this.cleanString(rps.prestador.documento).padStart(14,'0')}${this.cleanString(rps.meta.serie).padStart(5,'0')}${String(rps.meta.numero).padStart(15,'0')}`;
+            
+            const xmlAssinado = this.assinarXML(xmlGerado, idDps, prestador);
+            return this.transmitirXML(xmlAssinado, prestador);
+
+        } catch (error: any) {
+            return { 
+                sucesso: false, 
+                motivo: `Erro Motor Fiscal: ${error.message}`, 
+                erros: [{ codigo: "MOTOR_ERR", mensagem: error.message }] 
+            };
+        }
+    }
 
     async consultar(chave: string, empresa: any): Promise<IResultadoConsulta> {
         try {
@@ -103,7 +209,6 @@
 
             const xmlParaAssinar = `<pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00"><infPedReg Id="${idPed}">${infPedRegContent}</infPedReg></pedRegEvento>`;
             
-            // Método auxiliar de assinatura de evento (precisa ser copiado ou estar na BaseStrategy)
             const xmlAssinado = this.assinarPedidoEvento(xmlParaAssinar, idPed, empresa);
             
             const xmlEnvio = `<?xml version="1.0" encoding="UTF-8"?>${xmlAssinado}`;
@@ -159,7 +264,6 @@
         }
     }
 
-    // Método auxiliar necessário para o cancelamento
     private assinarPedidoEvento(xml: string, tagId: string, empresa: any): string {
         try {
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
@@ -188,3 +292,4 @@
             return xml.replace('</pedRegEvento>', `${signatureXML}</pedRegEvento>`);
         } catch (e: any) { throw new Error(e.message); }
     }
+}
