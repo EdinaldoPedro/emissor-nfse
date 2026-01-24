@@ -14,193 +14,98 @@ export default function AppTour() {
   // === 1. LISTENER DO MENU (AVANÇO AUTOMÁTICO) ===
   useEffect(() => {
     const handleMenuOpened = () => {
-        // Se estivermos no passo do botão do menu (índice 3), avançamos
         if (pathname.includes('/cliente/dashboard') && stepIndex === 3) {
             setTimeout(() => {
-                // Avança para o próximo passo (Minha Conta)
                 setStepIndex(prev => prev + 1);
-            }, 600); // 600ms para a animação do menu completar
+            }, 600); 
         }
     };
-
     window.addEventListener('tour:menu-opened', handleMenuOpened);
     return () => window.removeEventListener('tour:menu-opened', handleMenuOpened);
   }, [stepIndex, pathname]);
 
-  // === 2. INICIALIZAÇÃO (LÓGICA AJUSTADA) ===
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    
-    // Reseta estado local para evitar conflitos ao trocar de rota
-    setRun(false);
-
-    const userId = localStorage.getItem('userId');
-
-    if (userId) {
-      // Verifica no banco se o usuário já concluiu o tutorial
-      fetch('/api/perfil', { headers: { 'x-user-id': userId } })
-        .then(r => r.json())
-        .then(user => {
-            // LÓGICA DE PRODUÇÃO:
-            // Só roda se o step for menor que 4 (0, 1, 2 ou 3)
-            // Se o usuário clicou em "Reiniciar" na aba minha conta, o step virou 0, então vai entrar aqui.
-            if (user && typeof user.tutorialStep === 'number' && user.tutorialStep < 4) {
-               configurarPassos(); 
-               // Pequeno delay para garantir que a UI carregou antes de iniciar o tour
-               setTimeout(() => setRun(true), 500);
-            }
-        })
-        .catch(() => {
-            // Em caso de erro (ex: sem internet), não roda para não travar
-            console.log("Não foi possível verificar status do tutorial.");
-        });
-    }
-  }, [pathname]);
-
+  // === 2. CONFIGURAÇÃO DE PASSOS ===
   const configurarPassos = () => {
-    
     // 1. Minha Conta
     if (pathname.includes('/configuracoes/minha-conta')) {
         setSteps([
-            { 
-                target: 'body', 
-                placement: 'center', 
-                title: 'Seu Perfil', 
-                content: 'Aqui você gerencia seus dados de acesso e preferências.', 
-                disableBeacon: true 
-            },
-            { 
-                target: '.tour-perfil-card', 
-                content: 'Visualize seu resumo e altere seu plano de assinatura aqui.' 
-            },
-            { 
-                target: '.tour-dados-pessoais', 
-                content: 'Mantenha e-mail e telefone atualizados.' 
-            },
-            { 
-                target: '.tour-preferencias', 
-                content: 'Personalize o sistema: Modo Escuro ou Idioma.' 
-            },
-            { 
-                target: '.tour-save-btn', 
-                content: 'Não esqueça de salvar suas alterações!' 
-            }
+            { target: 'body', placement: 'center', title: 'Seu Perfil', content: 'Aqui você gerencia seus dados de acesso e preferências.', disableBeacon: true },
+            { target: '.tour-perfil-card', content: 'Visualize seu resumo e altere seu plano aqui.' },
+            { target: '.tour-dados-pessoais', content: 'Mantenha seus dados sempre atualizados.' },
+            { target: '.tour-preferencias', content: 'Personalize o sistema (Modo Escuro, Idioma).' },
+            { target: '.tour-save-btn', content: 'Clique em Salvar para finalizar.' }
         ]);
     } 
-    
     // 2. Empresa
     else if (pathname === '/configuracoes') {
         setSteps([
-            { 
-                target: 'body', 
-                placement: 'center', 
-                title: 'Dados da Empresa', 
-                content: 'Esta é a parte mais importante! Sem esses dados, a prefeitura não aceita suas notas.', 
-                disableBeacon: true 
-            },
-            { 
-                target: '.tour-cnpj-search', 
-                content: 'Digite seu CNPJ e clique na lupa. O sistema preenche Razão Social e Endereço automaticamente!', 
-                disableBeacon: true 
-            },
-            { 
-                target: '.tour-tributacao', 
-                content: 'Confira sua Inscrição Municipal e Regime Tributário. Se tiver dúvidas, consulte seu contador.' 
-            },
-            { 
-                target: '.tour-dps-config', 
-                content: 'Atenção aqui: Para testar, use "Homologação". Para emitir valendo, mude para "Produção".' 
-            },
-            { 
-                target: '.tour-certificado', 
-                content: 'Obrigatório: Envie seu Certificado A1 (.pfx) e a senha. Nós guardamos com criptografia de ponta.' 
-            },
-            { 
-                target: '.tour-save-btn', 
-                content: 'Salve suas configurações para liberar o emissor.' 
-            }
+            { target: 'body', placement: 'center', title: 'Dados da Empresa', content: 'Preencha os dados obrigatórios para emitir notas.', disableBeacon: true },
+            { target: '.tour-cnpj-search', content: 'Busque os dados automaticamente pelo CNPJ.' },
+            { target: '.tour-tributacao', content: 'Confira Inscrição Municipal e Regime Tributário.' },
+            { target: '.tour-dps-config', content: 'Defina o ambiente (Teste ou Produção).' },
+            { target: '.tour-certificado', content: 'Faça upload do Certificado A1 aqui.' },
+            { target: '.tour-save-btn', content: 'Salve para liberar o painel.' }
         ]);
     }
-    
     // 3. Dashboard
     else if (pathname.includes('/cliente/dashboard')) {
         setSteps([
-            { 
-                target: 'body', 
-                placement: 'center', 
-                title: 'Seu Painel', 
-                content: 'Aqui você controla tudo.', 
-                disableBeacon: true 
-            },
-            { 
-                target: '.tour-emitir-card', 
-                content: 'Clique aqui para emitir uma nova NFS-e.' 
-            },
-            { 
-                target: '.tour-minhas-notas', 
-                content: 'Aqui fica seu histórico de notas.' 
-            },
-            
-            // PASSO DE INTERAÇÃO: BOTÃO DO MENU
-            {
-                target: '.tour-menu-btn',
-                content: 'Clique neste ícone para abrir o menu lateral e ver mais opções.',
-                spotlightClicks: true, // Permite clicar
-                disableOverlayClose: true,
-                hideFooter: true, // Esconde botão "Próximo" para forçar o clique no menu
-                placement: 'right'
-            },
-            
-            // PASSOS DENTRO DO MENU
-            {
-                target: '.tour-sidebar-perfil',
-                content: 'Confira seus dados de acesso e plano aqui.',
-                placement: 'right'
-            },
-            {
-                target: '.tour-sidebar-empresa',
-                content: 'Precisa mudar o certificado ou endereço da empresa? É aqui.',
-                placement: 'right'
-            },
-            {
-                target: '.tour-sidebar-gestao',
-                content: 'Cadastre seus clientes recorrentes para emitir mais rápido.',
-                placement: 'right'
-            },
-            {
-                target: '.tour-sidebar-suporte',
-                content: 'Teve problema? Abra um chamado no suporte.',
-                placement: 'right'
-            },
-            
-            // Passo Final
-            { 
-                target: 'body', 
-                placement: 'center', 
-                title: 'Pronto! 🚀', 
-                content: 'Você já pode usar o sistema.' 
-            }
+            { target: 'body', placement: 'center', title: 'Seu Painel', content: 'Visão geral do negócio.', disableBeacon: true },
+            { target: '.tour-emitir-card', content: 'Botão rápido para emitir nota.' },
+            { target: '.tour-minhas-notas', content: 'Histórico de notas emitidas.' },
+            { target: '.tour-menu-btn', content: 'Clique no menu para ver mais opções.', spotlightClicks: true, disableOverlayClose: true, hideFooter: true, placement: 'right' },
+            { target: '.tour-sidebar-perfil', content: 'Dados de acesso.', placement: 'right' },
+            { target: '.tour-sidebar-empresa', content: 'Configurações da empresa.', placement: 'right' },
+            { target: '.tour-sidebar-gestao', content: 'Cadastro de clientes.', placement: 'right' },
+            { target: '.tour-sidebar-suporte', content: 'Suporte técnico.', placement: 'right' },
+            { target: 'body', placement: 'center', title: 'Pronto! 🚀', content: 'Sistema configurado.' }
         ]);
     }
   };
 
+  // === 3. INICIALIZAÇÃO (LÓGICA CORRIGIDA) ===
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Reseta estado para evitar lixo de memória
+    setRun(false);
+    setStepIndex(0);
+
+    const userId = localStorage.getItem('userId');
+
+    if (userId) {
+      // Busca perfil no banco
+      // IMPORTANTE: Adicionei timestamp para evitar cache do navegador (fix do problema de "não resetou")
+      fetch(`/api/perfil?t=${Date.now()}`, { headers: { 'x-user-id': userId } })
+        .then(r => r.json())
+        .then(user => {
+            // Agora 'user.tutorialStep' vai existir porque corrigimos a API!
+            // Se step < 4 (0, 1, 2, 3), roda o tutorial.
+            if (typeof user.tutorialStep === 'number' && user.tutorialStep < 4) {
+               configurarPassos(); 
+               setTimeout(() => setRun(true), 800); // Delay para UI carregar
+            }
+        })
+        .catch(err => console.error("Erro Tour:", err));
+    }
+  }, [pathname]);
+
   const handleJoyrideCallback = async (data: CallBackProps) => {
     const { status, index, type } = data;
 
-    // Atualiza o índice interno quando o usuário clica em "Próximo" ou "Voltar"
-    if (type === 'step:after') {
-        setStepIndex(index + 1);
-    }
+    if (type === 'step:after') setStepIndex(index + 1);
 
     if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status as any)) {
       setRun(false);
       setStepIndex(0);
 
-      // Navegação
+      // Salva e Navega
       if (pathname.includes('/configuracoes/minha-conta')) {
+          await atualizarBanco(2);
           router.push('/configuracoes');
       } 
       else if (pathname === '/configuracoes') {
+          await atualizarBanco(3);
           router.push('/cliente/dashboard');
       } 
       else if (pathname.includes('/cliente/dashboard')) {
@@ -221,44 +126,22 @@ export default function AppTour() {
 
   return (
     <Joyride
+      key={pathname} // IMPORTANTE: Força remontagem ao trocar rota
       steps={steps}
       run={run}
       stepIndex={stepIndex} 
       continuous
-      showProgress={true}
+      showProgress={false}
       showSkipButton={true}
       disableOverlayClose
       callback={handleJoyrideCallback}
       styles={{
-        options: {
-          primaryColor: '#2563eb',
-          zIndex: 99999,
-          textColor: '#334155',
-        },
-        buttonNext: {
-            backgroundColor: '#2563eb',
-            color: '#fff',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            padding: '10px 20px',
-            borderRadius: '8px'
-        },
-        buttonBack: {
-            color: '#64748b',
-            marginRight: '10px'
-        },
+        options: { primaryColor: '#2563eb', zIndex: 99999, textColor: '#334155' },
+        buttonNext: { backgroundColor: '#2563eb', color: '#fff', fontSize: '14px', fontWeight: 'bold', padding: '10px 20px', borderRadius: '8px' },
+        buttonBack: { color: '#64748b', marginRight: '10px' },
         tooltipContainer: { textAlign: 'left' }
       }}
-      // === TRADUÇÃO COMPLETA ===
-      locale={{ 
-          back: 'Voltar', 
-          close: 'Fechar', 
-          last: 'Concluir', 
-          next: 'Próximo',
-          nextLabelWithProgress: 'Próximo (Passo {step} de {steps})', 
-          skip: 'Pular',
-          open: 'Abrir'
-      }}
+      locale={{ back: 'Voltar', close: 'Fechar', last: 'Concluir', next: 'Próximo', nextLabelWithProgress: 'Próximo', skip: 'Pular', open: 'Abrir' }}
     />
   );
 }

@@ -50,31 +50,23 @@ export async function GET(request: Request) {
       if (emp) dadosEmpresa = emp;
   }
 
-  // === INÍCIO DA INTELIGÊNCIA GLOBAL ===
-  // Cruzamos os dados locais do cliente com a tabela Mestra (Admin)
   let atividadesEnriquecidas = dadosEmpresa.atividades || [];
   
   if (atividadesEnriquecidas.length > 0) {
-      // Pega os códigos dos CNAEs da empresa
       const codigos = atividadesEnriquecidas.map((c: any) => c.codigo);
-      
-      // Busca as regras globais para esses códigos
       const globais = await prisma.globalCnae.findMany({
           where: { codigo: { in: codigos } }
       });
 
-      // Mescla os dados: A regra Global tem prioridade sobre a Local antiga
       atividadesEnriquecidas = atividadesEnriquecidas.map((local: any) => {
           const global = globais.find((g: any) => g.codigo === local.codigo);
           return {
               ...local,
-              // Se existir regra global definida, usa ela. Senão usa a local.
               temRetencaoInss: global ? global.temRetencaoInss : local.temRetencaoInss,
               codigoNbs: global?.codigoNbs || local.codigoNbs
           };
       });
   }
-  // === FIM DA INTELIGÊNCIA GLOBAL ===
 
   // @ts-ignore
   const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
@@ -86,7 +78,7 @@ export async function GET(request: Request) {
     temCertificado: !!certificadoA1,
     vencimentoCertificado: dadosEmpresa.certificadoVencimento,
     cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
-    atividades: atividadesEnriquecidas, // <--- Devolvemos a lista com as regras atualizadas
+    atividades: atividadesEnriquecidas,
 
     // Dados do Usuário
     role: user.role,
@@ -94,6 +86,7 @@ export async function GET(request: Request) {
     email: user.email,
     cpf: user.cpf,
     telefone: user.telefone,
+    tutorialStep: user.tutorialStep, // <--- ADICIONADO AQUI! OBRIGATÓRIO PARA O TOUR FUNCIONAR
     
     configuracoes: {
         darkMode: user.darkMode,
@@ -105,7 +98,7 @@ export async function GET(request: Request) {
   });
 }
 
-// PUT
+// PUT (Mantém o mesmo que você já tem, não precisa alterar o PUT se não quiser, mas para garantir, copiei o arquivo original da sua base e mantive a lógica)
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextEmpresaId = request.headers.get('x-empresa-id');
@@ -119,7 +112,6 @@ export async function PUT(request: Request) {
         include: { empresa: true }
     });
 
-    // 1. Atualiza User
     const userDataToUpdate: any = {
         nome: body.nome,
         telefone: body.telefone
@@ -133,7 +125,6 @@ export async function PUT(request: Request) {
 
     await prisma.user.update({ where: { id: userId }, data: userDataToUpdate });
 
-    // 2. Atualiza Empresa
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
       
@@ -151,7 +142,6 @@ export async function PUT(request: Request) {
           codigoIbge: body.codigoIbge,
           email: body.emailComercial || body.email,
           cadastroCompleto: true,
-          // === PERSISTÊNCIA DOS DADOS DE DPS ===
           serieDPS: body.serieDPS, 
           ultimoDPS: body.ultimoDPS ? parseInt(String(body.ultimoDPS)) : undefined,
           ambiente: body.ambiente
@@ -167,13 +157,11 @@ export async function PUT(request: Request) {
               const p12Der = forge.util.decode64(body.certificadoArquivo);
               const p12Asn1 = forge.asn1.fromDer(p12Der);
               const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, body.certificadoSenha);
-              
               let dataVencimento = null;
               const bags = p12.getBags({ bagType: forge.pki.oids.certBag });
               // @ts-ignore
               const certBag = bags[forge.pki.oids.certBag]?.[0];
               if(certBag && certBag.cert) dataVencimento = certBag.cert.validity.notAfter;
-
               dadosEmpresa.certificadoA1 = body.certificadoArquivo;
               dadosEmpresa.senhaCertificado = body.certificadoSenha;
               dadosEmpresa.certificadoVencimento = dataVencimento;
@@ -201,7 +189,6 @@ export async function PUT(request: Request) {
                       codigo: String(c.codigo).replace(/\D/g, ''),
                       descricao: c.descricao,
                       principal: c.principal,
-                      // Salva localmente também para garantir
                       codigoNbs: c.codigoNbs,
                       temRetencaoInss: c.temRetencaoInss || false
                   }))
@@ -210,11 +197,8 @@ export async function PUT(request: Request) {
           }
       }
     }
-
     return NextResponse.json({ success: true });
-
   } catch (error: any) {
-    console.error(error);
     return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
   }
 }
