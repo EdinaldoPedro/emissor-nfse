@@ -215,7 +215,7 @@ export default function RelatoriosPage() {
                         <div>
                             <h2 className="text-sm font-bold text-slate-400 uppercase mb-1">Resumo do Período</h2>
                             <p className="text-slate-500 text-xs">
-                                {new Date(startDate).toLocaleDateString()} até {new Date(endDate).toLocaleDateString()}
+                                {startDate ? new Date(startDate + 'T12:00:00').toLocaleDateString() : '-'} até {endDate ? new Date(endDate + 'T12:00:00').toLocaleDateString() : '-'}
                             </p>
                         </div>
                         <div className="flex gap-8">

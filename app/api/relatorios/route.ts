@@ -54,8 +54,9 @@ export async function GET(request: Request) {
 
     // Filtro de Data
     if (startDate && endDate) {
-        const start = new Date(startDate); start.setHours(0,0,0,0);
-        const end = new Date(endDate); end.setHours(23,59,59,999);
+        // Ao concatenar o horário, garantimos que o dia não "volte" por causa do fuso horário UTC
+        const start = new Date(`${startDate}T00:00:00`); 
+        const end = new Date(`${endDate}T23:59:59.999`);
         whereClause.dataEmissao = { gte: start, lte: end };
     }
 

@@ -24,7 +24,7 @@ export default function ClienteDashboard() {
       <header className="flex justify-between items-center p-6 border-b bg-white sticky top-0 z-30 shadow-sm">
         <div>
           <h1 className="text-xl font-bold text-blue-600">NFSe Facil</h1>
-          <p className="text-xs text-gray-500">Ambiente MEI</p>
+          <p className="text-xs text-gray-500">Ambiente Beta</p>
         </div>
         <div className="flex items-center gap-4">
             <span className="text-sm text-gray-600 hidden md:block">Olá, {nomeUsuario}</span>

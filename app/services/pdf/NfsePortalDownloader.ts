@@ -33,8 +33,8 @@ export class NfsePortalDownloader {
             console.log("[BOT] 1. Acessando página de Login...");
             await page.goto(URL_LOGIN, { timeout: 60000 });
             
-            // Pausa de segurança (igual ao seu time.sleep(2))
-            await page.waitForTimeout(2000); 
+            // OTIMIZAÇÃO: Reduzido de 2000ms para 500ms (Apenas estabilização mínima)
+            await page.waitForTimeout(500); 
 
             console.log("[BOT] Clicando na opção 'Certificado Digital'...");
             try {
@@ -45,17 +45,17 @@ export class NfsePortalDownloader {
                 await page.getByText("ACESSO COM CERTIFICADO DIGITAL").first().click();
             }
 
-            console.log("[BOT] Aguardando autenticação (5s)...");
-            // Pausa para o certificado ser processado (igual ao seu time.sleep(5))
-            await page.waitForTimeout(5000);
+            console.log("[BOT] Aguardando autenticação...");
+            // OTIMIZAÇÃO CRÍTICA: Removido o wait de 5s fixo.
+            // A função waitForURL abaixo já vai esperar o tempo necessário (seja 1s ou 10s).
+            // Adicionado apenas 1s de margem de segurança para cookies.
+            await page.waitForTimeout(1000); 
 
-            // Validação inteligente: Espera a URL mudar (sair do Login)
-            // CORREÇÃO DO ERRO AQUI: url.toString()
             try {
+                // Espera sair da tela de Login (sinal de sucesso)
                 await page.waitForURL((url) => !url.toString().includes("Login"), { timeout: 30000 });
                 console.log("[BOT] ✅ Login detectado (URL mudou).");
             } catch (e) {
-                // Se der timeout esperando a URL mudar, verificamos se ainda estamos na tela de login
                 if (page.url().includes("Login")) {
                     throw new Error("Falha no Login: O sistema não saiu da tela de autenticação.");
                 }
@@ -68,20 +68,16 @@ export class NfsePortalDownloader {
             const downloadPromise = page.waitForEvent('download', { timeout: 60000 });
 
             try {
-                // Navega para o link de download
                 await page.goto(URL_DOWNLOAD, { timeout: 15000 });
             } catch (e) {
-                // O navegador pode abortar a navegação quando o download inicia, isso é normal no Playwright
                 console.log("[BOT] Navegação interrompida pelo início do download (Esperado).");
             }
 
             const download = await downloadPromise;
             
-            console.log("[BOT] ⏳ Processando arquivo...");
-            // Pausa para garantir integridade (igual ao seu time.sleep(2))
-            await page.waitForTimeout(2000);
+            console.log("[BOT] ⏳ Processando stream...");
+            // OTIMIZAÇÃO: Removido o wait de 2000ms. O stream já está disponível.
 
-            // Lê o stream do arquivo direto da memória (sem salvar no disco do servidor)
             const fileStream = await download.createReadStream();
             const chunks = [];
             for await (const chunk of fileStream) {

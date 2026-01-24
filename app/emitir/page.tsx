@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, Briefcase, Loader2, User, Building, Home, Check, Info } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, Briefcase, Loader2, User, Home, Check, AlertTriangle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import { validarCPF } from "@/app/utils/cpf";
@@ -40,6 +40,10 @@ export default function EmitirNotaPage() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [loadingRetry, setLoadingRetry] = useState(false);
+  
+  // === NOVO: ESTADOS DE PROGRESSO VISUAL ===
+  const [progressStatus, setProgressStatus] = useState("Iniciando...");
+  const [progressPercent, setProgressPercent] = useState(0);
   
   const [clientes, setClientes] = useState<ClienteDB[]>([]);
   const [meusCnaes, setMeusCnaes] = useState<CnaeDB[]>([]);
@@ -293,10 +297,15 @@ export default function EmitirNotaPage() {
 
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
+    
+    // 1. Inicia UI de Progresso
     setLoading(true);
+    setProgressPercent(10);
+    setProgressStatus("Preparando envio...");
+
     const userId = localStorage.getItem('userId');
+    
     try {
-      
       const payloadRetencoes = {
           inss: retencoes.inss.retido ? { retido: true, valor: retencoes.inss.valor, aliquota: parseFloat(retencoes.inss.aliquota) } : null,
           pis: retencoes.pis.retido ? { retido: true, valor: retencoes.pis.valor } : null,
@@ -304,6 +313,10 @@ export default function EmitirNotaPage() {
           ir: retencoes.ir.retido ? { retido: true, valor: retencoes.ir.valor } : null,
           csll: retencoes.csll.retido ? { retido: true, valor: retencoes.csll.valor } : null,
       };
+
+      // 2. Atualiza status para Envio
+      setProgressPercent(40);
+      setProgressStatus("Transmitindo para o Portal Nacional...");
 
       const res = await fetch('/api/notas', {
         method: 'POST',
@@ -318,15 +331,36 @@ export default function EmitirNotaPage() {
           retencoes: payloadRetencoes
         })
       });
+
       const resposta = await res.json();
+      
       if (res.ok) {
-        await dialog.showAlert({ type: 'success', title: 'Processando', description: 'Nota enviada para autorização.' });
+        // 3. Sucesso: Feedback Visual
+        setProgressPercent(90);
+        setProgressStatus("NFS-e Autorizada! Buscando dados...");
+        
+        // Pequena pausa para o usuário ver que deu certo
+        await new Promise(r => setTimeout(r, 1000));
+        
+        setProgressPercent(100);
+        setProgressStatus("Concluído!");
+
+        await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida e autorizada.' });
         router.push('/cliente/dashboard');
       } else {
-        dialog.showAlert({ type: 'danger', title: 'Falha', description: resposta.error || 'Erro.' });
+        // 4. Erro: Alerta e Redireciona
+        await dialog.showAlert({ type: 'danger', title: 'Falha na Emissão', description: resposta.error || 'A prefeitura rejeitou o lote.' });
+        
+        // CORREÇÃO PEDIDA: Se falhar, volta para o Dashboard para não travar a tela
+        router.push('/cliente/dashboard');
       }
-    } catch (error) { dialog.showAlert("Erro de Conexão."); } 
-    finally { setLoading(false); }
+    } catch (error) { 
+        dialog.showAlert("Erro de Conexão. Verifique sua internet."); 
+        router.push('/cliente/dashboard'); // Redireciona também no erro de rede
+    } 
+    finally { 
+        setLoading(false); 
+    }
   };
 
   const valorNumerico = parseFloat(nfData.valor) || 0;
@@ -536,22 +570,38 @@ export default function EmitirNotaPage() {
 
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-100">
           <div>
-            {step > 1 && (
+            {step > 1 && !loading && (
                 <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded">
                     <ArrowLeft size={18} /> Voltar
                 </button>
             )}
           </div>
           
-          <div>
+          <div className="w-full flex justify-end">
             {step < 3 ? (
                 <button onClick={handleNext} disabled={loading || (step === 1 && ((modoCliente === 'existente' && !nfData.clienteId) || (modoCliente === 'novo' && !novoCliente.nome))) || isStep2Invalid} className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}>
                     {loading ? <Loader2 className="animate-spin" size={18}/> : (step === 1 && modoCliente === 'novo' ? 'Cadastrar e Avançar' : 'Próximo')} <ArrowRight size={18} />
                 </button>
             ) : (
-                <button onClick={handleEmitir} disabled={loading} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg disabled:opacity-50 font-bold">
-                    {loading ? 'Enviando...' : <><CheckCircle size={20} /> EMITIR NOTA</>}
-                </button>
+                /* === MUDANÇA: BARRA DE PROGRESSO AO EMITIR === */
+                loading ? (
+                    <div className="w-full max-w-xs">
+                        <div className="flex justify-between text-xs font-bold text-blue-600 mb-1">
+                            <span>{progressStatus}</span>
+                            <span>{progressPercent}%</span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                            <div 
+                                className="bg-blue-600 h-3 rounded-full transition-all duration-500 ease-out" 
+                                style={{ width: `${progressPercent}%` }}
+                            ></div>
+                        </div>
+                    </div>
+                ) : (
+                    <button onClick={handleEmitir} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg font-bold transition-transform transform hover:scale-105">
+                        <CheckCircle size={20} /> EMITIR NOTA
+                    </button>
+                )
             )}
           </div>
         </div>
