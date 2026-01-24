@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
-  Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings
+  Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings, HelpCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -40,7 +40,6 @@ export default function ConfiguracoesEmpresa() {
     uf: '',
     codigoIbge: '',
     email: '',
-    // === CAMPOS DE CONTROLE DPS ===
     ambiente: 'HOMOLOGACAO',
     serieDPS: '900',
     ultimoDPS: 0
@@ -72,7 +71,6 @@ export default function ConfiguracoesEmpresa() {
           setEmpresa(prev => ({ 
               ...prev, 
               ...dados,
-              // Garante valores padrão se vier nulo do banco
               serieDPS: dados.serieDPS || '900',
               ultimoDPS: dados.ultimoDPS || 0,
               ambiente: dados.ambiente || 'HOMOLOGACAO'
@@ -92,6 +90,25 @@ export default function ConfiguracoesEmpresa() {
     }
     carregarDados();
   }, [router]);
+
+  const handleResetTutorial = async () => {
+      const userId = localStorage.getItem('userId');
+      if(!userId) return;
+
+      if(!confirm("Deseja ver o tutorial desta página novamente?")) return;
+
+      try {
+          // Reseta para o passo 2 (Configurações)
+          await fetch('/api/perfil/tutorial', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+              body: JSON.stringify({ step: 2 }) 
+          });
+          window.location.reload();
+      } catch (e) {
+          alert("Erro ao reiniciar tutorial.");
+      }
+  };
 
   const consultarCNPJ = async (forcarAtualizacao = false) => {
     const docLimpo = empresa.documento.replace(/\D/g, '');
@@ -188,16 +205,27 @@ export default function ConfiguracoesEmpresa() {
     <div className="min-h-screen bg-gray-50 p-6 md:p-12">
       <div className="max-w-4xl mx-auto">
         
-        <div className="flex items-center gap-4 mb-8">
-          <button onClick={() => router.back()} className="p-2 hover:bg-gray-200 rounded-full transition">
-            <ArrowLeft className="text-gray-600" />
-          </button>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">
-                {isContador ? 'Dados da Empresa (Cliente)' : 'Cadastro da Empresa'}
-            </h1>
-            <p className="text-gray-500">Dados obrigatórios para emissão de Nota Fiscal (NFS-e).</p>
-          </div>
+        <div className="flex justify-between items-center mb-8">
+            <div className="flex items-center gap-4">
+                <button onClick={() => router.back()} className="p-2 hover:bg-gray-200 rounded-full transition">
+                    <ArrowLeft className="text-gray-600" />
+                </button>
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-800">
+                        {isContador ? 'Dados da Empresa (Cliente)' : 'Cadastro da Empresa'}
+                    </h1>
+                    <p className="text-gray-500">Dados obrigatórios para emissão de Nota Fiscal (NFS-e).</p>
+                </div>
+            </div>
+
+            {/* BOTÃO REINICIAR TUTORIAL */}
+            <button 
+                onClick={handleResetTutorial}
+                className="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition border border-blue-200"
+                title="Ver o tutorial novamente"
+            >
+                <HelpCircle size={16}/> Reiniciar Tutorial
+            </button>
         </div>
 
         {isLocked ? (
@@ -237,7 +265,7 @@ export default function ConfiguracoesEmpresa() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">CNPJ</label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 tour-cnpj-search"> {/* <--- TOUR ALVO */}
                   <div className="relative flex-1">
                     <Building2 className="absolute left-3 top-3 text-gray-400" size={20} />
                     <input type="text" className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} placeholder="00000000000191" value={empresa.documento || ''} onChange={e => setEmpresa({...empresa, documento: e.target.value})} maxLength={18} disabled={isLocked} />
@@ -253,7 +281,7 @@ export default function ConfiguracoesEmpresa() {
               <div><label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly /></div>
 
-              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 tour-tributacao"> {/* <--- TOUR ALVO */}
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
                       <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
@@ -295,46 +323,28 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
-          {/* === AQUI: CONFIGURAÇÃO DE EMISSÃO (DPS) === */}
-          <div className="p-8 border-b border-gray-100 bg-blue-50/30">
+          {/* DPS - TOUR ALVO */}
+          <div className="p-8 border-b border-gray-100 bg-blue-50/30 tour-dps-config">
             <h3 className="text-lg font-semibold text-blue-800 mb-6 flex items-center gap-2">
               <Settings size={20} /> Numeração e Ambiente (DPS)
             </h3>
-            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Ambiente de Emissão</label>
-                    <select 
-                        className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
-                        value={empresa.ambiente}
-                        onChange={e => setEmpresa({...empresa, ambiente: e.target.value})}
-                    >
+                    <select className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ambiente} onChange={e => setEmpresa({...empresa, ambiente: e.target.value})}>
                         <option value="HOMOLOGACAO">Homologação (Teste)</option>
                         <option value="PRODUCAO">Produção (Valendo)</option>
                     </select>
                     <p className="text-xs text-slate-500 mt-1">Use "Homologação" para testar sem valor fiscal.</p>
                 </div>
-
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Série do DPS</label>
-                    <input 
-                        type="text" 
-                        className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
-                        value={empresa.serieDPS}
-                        onChange={e => setEmpresa({...empresa, serieDPS: e.target.value})}
-                        placeholder="Ex: 900"
-                    />
+                    <input type="text" className="w-full p-3 border rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.serieDPS} onChange={e => setEmpresa({...empresa, serieDPS: e.target.value})} placeholder="Ex: 900"/>
                     <p className="text-xs text-slate-500 mt-1">Geralmente "900" para testes ou "1" para produção.</p>
                 </div>
-
                 <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">Último Número Usado</label>
-                    <input 
-                        type="number" 
-                        className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                        value={empresa.ultimoDPS}
-                        onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}
-                    />
+                    <input type="number" className="w-full p-3 border rounded-lg bg-white text-blue-700 font-bold focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.ultimoDPS} onChange={e => setEmpresa({...empresa, ultimoDPS: parseInt(e.target.value)})}/>
                     <p className="text-xs text-slate-500 mt-1">O sistema usará o Próximo (Ex: se 0, emite 1).</p>
                 </div>
             </div>
@@ -354,8 +364,8 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
-          {/* SEÇÃO 3: CERTIFICADO DIGITAL */}
-          <div className="p-8 bg-slate-50 border-t border-slate-200">
+          {/* CERTIFICADO - TOUR ALVO */}
+          <div className="p-8 bg-slate-50 border-t border-slate-200 tour-certificado">
             <h3 className="text-lg font-semibold text-slate-700 mb-6 flex items-center gap-2">
                 <Lock size={20} /> Certificado Digital A1
             </h3>
@@ -407,7 +417,8 @@ export default function ConfiguracoesEmpresa() {
                 {msg.texto}
               </div>
             )}
-            <button type="submit" disabled={loading} className="w-full md:w-auto px-12 py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200 transform hover:scale-[1.02]">
+            {/* TOUR ALVO: Botão Salvar */}
+            <button type="submit" disabled={loading} className="tour-save-btn w-full md:w-auto px-12 py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200 transform hover:scale-[1.02]">
               {loading ? 'Processando...' : <><Save size={20} /> Salvar Configurações</>}
             </button>
           </div>

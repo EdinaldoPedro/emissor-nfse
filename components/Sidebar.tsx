@@ -5,7 +5,6 @@ import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield } f
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
-// --- IMPORTAÇÃO DO CONTEXTO ---
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 
 export default function Sidebar() {
@@ -15,9 +14,7 @@ export default function Sidebar() {
   const [isContador, setIsContador] = useState(false);
   const [notificacoes, setNotificacoes] = useState(0);
 
-  // --- USANDO O CONTEXTO PARA TRADUÇÃO ---
   const { t } = useAppConfig();
-
   const router = useRouter();
 
   useEffect(() => {
@@ -34,13 +31,11 @@ export default function Sidebar() {
             try {
                 const contextId = localStorage.getItem('empresaContextId');
                 
-                // 1. Dados do Usuário
                 const res = await fetch('/api/perfil', { 
                     headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' }
                 });
                 if(res.ok) setUserData(await res.json());
 
-                // 2. Notificações (Só se for cliente)
                 if (!checkIsStaff(role)) {
                     const resNotif = await fetch('/api/clientes/notificacoes', {
                         headers: { 'x-user-id': userId }
@@ -54,14 +49,22 @@ export default function Sidebar() {
         }
     };
 
-    if (isOpen) fetchData(); // Busca ao abrir o menu
-    fetchData(); // Busca ao carregar a página também
+    if (isOpen) fetchData(); 
+    fetchData();
 
   }, [isOpen]); 
 
   const handleLogout = () => {
     localStorage.clear();
     router.push('/login');
+  };
+
+  const abrirMenu = () => {
+      setIsOpen(true);
+      // DISPARA EVENTO PARA O TUTORIAL SABER QUE ABRIU
+      if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('tour:menu-opened'));
+      }
   };
 
   const getStatusCertificado = () => {
@@ -82,12 +85,11 @@ export default function Sidebar() {
   return (
     <>
       <button 
-        onClick={() => setIsOpen(true)} 
-        className="p-2 hover:bg-gray-100 rounded-lg transition relative dark:hover:bg-slate-800"
+        onClick={abrirMenu} 
+        className="tour-menu-btn p-2 hover:bg-gray-100 rounded-lg transition relative dark:hover:bg-slate-800"
       >
         <Menu size={28} className="text-gray-700 dark:text-gray-200" />
         
-        {/* BALÃOZINHO NO ÍCONE HAMBÚRGUER */}
         {notificacoes > 0 && (
             <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
         )}
@@ -111,9 +113,10 @@ export default function Sidebar() {
 
         <div className="p-6 space-y-8 flex-1 overflow-y-auto">
           
-          <section>
+          {/* SEÇÃO MINHA CONTA - CLASSE DO TOUR ADICIONADA */}
+          <section className="tour-sidebar-perfil">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
-              <User size={14} /> {t('menu', 'settings')} {/* TRADUZIDO */}
+              <User size={14} /> {t('menu', 'settings')}
             </h3>
             <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
               <p><span className="font-medium">Nome:</span> {userData?.nome || '...'}</p>
@@ -131,7 +134,8 @@ export default function Sidebar() {
 
           <hr className="dark:border-slate-800" />
 
-          <section>
+          {/* SEÇÃO MINHA EMPRESA - CLASSE DO TOUR ADICIONADA */}
+          <section className="tour-sidebar-empresa">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Briefcase size={14} /> Minha Empresa
             </h3>
@@ -156,13 +160,14 @@ export default function Sidebar() {
 
           <hr className="dark:border-slate-800" />
 
-          <section>
+          {/* SEÇÃO GESTÃO - CLASSE DO TOUR */}
+          <section className="tour-sidebar-gestao">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Settings size={14} /> Gestão
             </h3>
             <div className="flex flex-col gap-3">
                 <Link href="/cliente" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded dark:text-gray-300 dark:hover:bg-slate-800">
-                    <FileText size={18} /> {t('menu', 'clients')} {/* TRADUZIDO */}
+                    <FileText size={18} /> {t('menu', 'clients')}
                 </Link>
                 <Link href="/relatorios" onClick={() => setIsOpen(false)} className="flex items-center gap-2 text-gray-700 hover:bg-gray-50 p-2 rounded dark:text-gray-300 dark:hover:bg-slate-800">
                     <FileText size={18} /> Relatórios
@@ -185,10 +190,9 @@ export default function Sidebar() {
         </div>
 
         <div className="bg-gray-50 p-4 border-t space-y-2 shrink-0 dark:bg-slate-950 dark:border-slate-800">
-            {/* O BOTÃO DE SUPORTE COM BALÃO DE NOTIFICAÇÃO */}
-            <Link href="/cliente/suporte" onClick={() => setIsOpen(false)} className="flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition dark:text-gray-400">
+            <Link href="/cliente/suporte" onClick={() => setIsOpen(false)} className="tour-sidebar-suporte flex items-center justify-between text-gray-600 hover:text-blue-600 w-full p-2 text-sm transition dark:text-gray-400">
                 <div className="flex items-center gap-2">
-                    <Phone size={16} /> {t('menu', 'support')} {/* TRADUZIDO */}
+                    <Phone size={16} /> {t('menu', 'support')}
                 </div>
                 {notificacoes > 0 && (
                     <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm animate-pulse">
@@ -198,7 +202,7 @@ export default function Sidebar() {
             </Link>
             
             <button onClick={handleLogout} className="flex items-center gap-2 text-red-500 hover:text-red-700 w-full p-2 text-sm font-medium transition">
-                <LogOut size={16} /> {t('menu', 'logout')} {/* TRADUZIDO */}
+                <LogOut size={16} /> {t('menu', 'logout')}
             </button>
         </div>
 

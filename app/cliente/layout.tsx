@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldAlert, LogOut } from 'lucide-react'; // Ícones novos
+import { ShieldAlert, LogOut } from 'lucide-react'; 
+import AppTour from '@/components/AppTour'; // <--- NOVO IMPORT
 
 export default function ClienteLayout({ children }: { children: React.ReactNode }) {
   const [isSupport, setIsSupport] = useState(false);
-  const [isContadorContext, setIsContadorContext] = useState(false); // Novo estado
+  const [isContadorContext, setIsContadorContext] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -41,6 +42,9 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   return (
     <div className={`min-h-screen ${isSupport ? 'bg-amber-50 border-4 border-amber-400' : ''} ${isContadorContext ? 'border-t-4 border-purple-600' : ''}`}>
       
+      {/* --- TUTORIAL INSERIDO AQUI --- */}
+      <AppTour />
+
       {/* BARRA DE AVISO FLUTUANTE - SUPORTE */}
       {isSupport && (
         <div className="bg-amber-500 text-white p-2 px-6 flex justify-between items-center sticky top-0 z-50 shadow-lg">
