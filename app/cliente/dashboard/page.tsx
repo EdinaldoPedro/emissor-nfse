@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Clock, Zap } from 'lucide-react';
+import { Clock, Zap, AlertTriangle, Lock } from 'lucide-react';
 import Sidebar from '@/components/Sidebar';
 import ListaVendas from '@/components/ListaVendas';
 
@@ -26,8 +26,10 @@ export default function ClienteDashboard() {
     ? Math.ceil((new Date(planoDetalhes.dataFim).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
     : null;
 
-  // Lógica para esconder banner se for Admin
   const isAdminPlan = planoDetalhes?.slug === 'ADMIN_ACCESS';
+  
+  // Verifica se está expirado (se a API já marcou ou se a data passou)
+  const isExpirado = planoDetalhes?.status === 'EXPIRADO' || (diasRestantes !== null && diasRestantes < 0);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -45,8 +47,28 @@ export default function ClienteDashboard() {
 
       <div className="p-8 max-w-6xl mx-auto space-y-8">
         
-        {/* BANNER DE BOAS VINDAS (Só mostra se for Trial E não for Admin) */}
-        {!isAdminPlan && planoDetalhes?.slug === 'TRIAL' && diasRestantes !== null && diasRestantes >= 0 && (
+        {/* === ALERTA DE PLANO EXPIRADO === */}
+        {isExpirado && (
+            <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-r-xl shadow-sm flex flex-col md:flex-row justify-between items-center gap-4 animate-in slide-in-from-top">
+                <div className="flex items-center gap-4">
+                    <div className="bg-red-100 p-3 rounded-full text-red-600">
+                        <Lock size={32}/>
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-bold text-red-700">Plano Expirado</h2>
+                        <p className="text-red-600 text-sm mt-1">
+                            Suas funcionalidades de emissão e download estão bloqueadas. Renove para continuar.
+                        </p>
+                    </div>
+                </div>
+                <Link href="/configuracoes/minha-conta" className="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition shadow-lg shadow-red-200">
+                    Renovar Agora
+                </Link>
+            </div>
+        )}
+
+        {/* BANNER TRIAL (Só mostra se ativo) */}
+        {!isAdminPlan && !isExpirado && planoDetalhes?.slug === 'TRIAL' && diasRestantes !== null && diasRestantes >= 0 && (
             <div className="tour-emitir-card bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4 animate-in slide-in-from-top duration-500">
                 <div className="flex items-center gap-4">
                     <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
@@ -57,10 +79,6 @@ export default function ClienteDashboard() {
                         <p className="text-indigo-100 text-sm mt-1">
                             Aproveite! Faltam <strong>{diasRestantes} dias</strong> para encerrar seu acesso.
                         </p>
-                        <div className="flex items-center gap-2 mt-2 text-xs bg-black/20 w-fit px-3 py-1 rounded-full">
-                            <Zap size={12}/>
-                            <span>{planoDetalhes.usoEmissoes} de {planoDetalhes.limiteEmissoes} notas utilizadas</span>
-                        </div>
                     </div>
                 </div>
                 <Link href="/configuracoes/minha-conta" className="bg-white text-indigo-700 px-6 py-3 rounded-xl font-bold text-sm hover:bg-indigo-50 transition shadow-md w-full md:w-auto text-center">
@@ -70,17 +88,19 @@ export default function ClienteDashboard() {
         )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Link href="/emitir">
-                <div className="tour-emitir-card group p-8 border rounded-2xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition shadow-lg h-full flex flex-col justify-between relative overflow-hidden">
+            <Link href={isExpirado ? "/configuracoes/minha-conta" : "/emitir"} onClick={(e) => { if(isExpirado) { e.preventDefault(); alert("Plano expirado! Renove para emitir."); window.location.href="/configuracoes/minha-conta"; } }}>
+                <div className={`tour-emitir-card group p-8 border rounded-2xl transition shadow-lg h-full flex flex-col justify-between relative overflow-hidden ${isExpirado ? 'bg-gray-100 border-gray-300 cursor-not-allowed grayscale' : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'}`}>
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition">
                         <svg width="120" height="120" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                     </div>
                     <div>
-                        <h2 className="text-2xl font-bold mb-2">Emitir Nova Nota</h2>
-                        <p className="text-blue-100 text-sm">Integração com Portal Nacional.</p>
+                        <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
+                            {isExpirado && <Lock size={24}/>} Emitir Nova Nota
+                        </h2>
+                        <p className={`${isExpirado ? 'text-gray-500' : 'text-blue-100'} text-sm`}>Integração com Portal Nacional.</p>
                     </div>
-                    <div className="mt-6 flex items-center gap-2 font-bold text-sm bg-white/20 w-fit px-4 py-2 rounded-full backdrop-blur-sm">
-                        Começar Agora ➜
+                    <div className={`mt-6 flex items-center gap-2 font-bold text-sm w-fit px-4 py-2 rounded-full backdrop-blur-sm ${isExpirado ? 'bg-gray-200 text-gray-500' : 'bg-white/20'}`}>
+                        {isExpirado ? 'Bloqueado' : 'Começar Agora ➜'}
                     </div>
                 </div>
             </Link>
@@ -89,7 +109,7 @@ export default function ClienteDashboard() {
                 <div className="tour-minhas-notas group p-8 border rounded-2xl bg-white hover:border-blue-300 hover:shadow-md cursor-pointer transition h-full flex flex-col justify-between">
                     <div>
                         <h2 className="text-2xl font-bold text-slate-700 mb-2">Minhas Notas</h2>
-                        <p className="text-slate-500 text-sm">Consulte histórico completo, baixe XML/PDF e gerencie cancelamentos.</p>
+                        <p className="text-slate-500 text-sm">Consulte histórico completo. (Visualização liberada)</p>
                     </div>
                     <div className="mt-6 text-blue-600 font-medium group-hover:underline">
                         Ver todas as notas ➜
@@ -103,6 +123,7 @@ export default function ClienteDashboard() {
                 <h3 className="font-bold text-xl text-slate-700">Atividade Recente</h3>
                 <Link href="/cliente/notas" className="text-sm text-blue-600 hover:underline">Ver tudo</Link>
             </div>
+            {/* ListaVendas vai mostrar os itens, mas o download estará bloqueado na API */}
             <ListaVendas compact={true} />
         </div>
       </div>

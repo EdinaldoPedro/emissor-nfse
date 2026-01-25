@@ -1,21 +1,21 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
-// Força a API a ser dinâmica (sem cache eterno)
+// Força o Next.js a não cachear estaticamente esta rota
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const prisma = new PrismaClient();
 
-// GET: Lista planos com Filtro e sem Cache
+// GET: Lista planos
 export async function GET(request: Request) {
-  // 1. Pega os parâmetros da URL para saber quem está pedindo
   const { searchParams } = new URL(request.url);
   const isVisaoAdmin = searchParams.get('visao') === 'admin';
 
   try {
     const total = await prisma.plan.count();
     
-    // === SEED SEGURO (Só cria se estiver vazio) ===
+    // Seed Seguro: Só roda se o banco estiver VAZIO
     if (total === 0) {
       await prisma.plan.createMany({
         data: [
@@ -28,9 +28,6 @@ export async function GET(request: Request) {
       });
     }
 
-    // === FILTRO DE VISIBILIDADE ===
-    // Admin vê tudo. Cliente vê apenas os públicos.
-    // Se isVisaoAdmin for false (cliente), aplicamos o filtro { privado: false }
     const whereClause = isVisaoAdmin ? {} : { privado: false, active: true };
 
     const plans = await prisma.plan.findMany({
@@ -38,13 +35,23 @@ export async function GET(request: Request) {
       orderBy: { priceMonthly: 'asc' }
     });
 
-    return NextResponse.json(plans);
+    // === A CORREÇÃO ESTÁ AQUI ===
+    // Adiciona cabeçalhos HTTP que proíbem o navegador de guardar cópia
+    return NextResponse.json(plans, {
+        headers: {
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Surrogate-Control': 'no-store'
+        }
+    });
+
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao buscar planos' }, { status: 500 });
   }
 }
 
-// POST: Criar novo plano manualmente
+// POST: Criar
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -71,11 +78,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json(novo, { status: 201 });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || 'Erro ao criar plano' }, { status: 500 });
+    return NextResponse.json({ error: e.message || 'Erro ao criar' }, { status: 500 });
   }
 }
 
-// PUT: Editar plano existente
+// PUT: Editar
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
@@ -101,11 +108,11 @@ export async function PUT(request: Request) {
 
     return NextResponse.json(atualizado);
   } catch (e: any) {
-    return NextResponse.json({ error: 'Erro ao atualizar plano' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro ao atualizar plano: ' + e.message }, { status: 500 });
   }
 }
 
-// DELETE: Excluir plano
+// DELETE: Excluir
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
@@ -113,10 +120,15 @@ export async function DELETE(request: Request) {
   if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
 
   try {
+    // Verifica se o plano já foi usado por algum cliente (Histórico)
     const uso = await prisma.planHistory.count({ where: { planId: id } });
     
     if (uso > 0) {
-        return NextResponse.json({ error: 'Não é possível excluir: Existem usuários com histórico neste plano. Desative-o em vez de excluir.' }, { status: 409 });
+        // Se já foi usado, não podemos deletar pois quebraria o histórico dos clientes.
+        // A solução é desativar o plano em vez de excluir.
+        return NextResponse.json({ 
+            error: 'Este plano possui histórico de uso e não pode ser excluído. Edite o plano e desmarque a opção "Ativo" para escondê-lo.' 
+        }, { status: 409 });
     }
 
     await prisma.plan.delete({ where: { id } });
