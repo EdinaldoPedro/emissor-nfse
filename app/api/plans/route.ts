@@ -3,10 +3,16 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-export async function GET() {
+// GET: Lista planos (Com filtro de privacidade)
+export async function GET(request: Request) {
+  // 1. Verifica se é o Admin pedindo (via parametro na URL)
+  const { searchParams } = new URL(request.url);
+  const isVisaoAdmin = searchParams.get('visao') === 'admin';
+
   try {
     const total = await prisma.plan.count();
     
+    // Seed automático (Mantido)
     if (total === 0) {
       await prisma.plan.createMany({
         data: [
@@ -19,11 +25,21 @@ export async function GET() {
       });
     }
 
+    // === O FILTRO MÁGICO ===
+    // Se for admin, where é vazio (traz tudo).
+    // Se for cliente, filtra onde privado = false E active = true
+    const whereClause = isVisaoAdmin ? {} : { privado: false, active: true };
+
     const plans = await prisma.plan.findMany({
+      where: whereClause, // Aplica o filtro aqui
       orderBy: { priceMonthly: 'asc' }
     });
 
-    return NextResponse.json(plans);
+    // Adiciona header para evitar cache antigo
+    return NextResponse.json(plans, {
+        headers: { 'Cache-Control': 'no-store' }
+    });
+
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao buscar planos' }, { status: 500 });
   }
@@ -103,8 +119,6 @@ export async function DELETE(request: Request) {
     const uso = await prisma.planHistory.count({ where: { planId: id } });
     
     if (uso > 0) {
-        // Se já foi usado, não deleta fisicamente, apenas desativa (Soft Delete)
-        // ou impede a exclusão. Aqui vamos impedir.
         return NextResponse.json({ error: 'Não é possível excluir: Existem usuários com histórico neste plano. Desative-o em vez de excluir.' }, { status: 409 });
     }
 

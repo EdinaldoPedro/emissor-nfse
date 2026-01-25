@@ -6,6 +6,7 @@ import { useDialog } from '@/app/contexts/DialogContext';
 export default function AdminPlanos() {
   const dialog = useDialog();
   
+  // Inicializa SEMPRE como array vazio para não quebrar
   const [plans, setPlans] = useState<any[]>([]);
   const [editing, setEditing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -15,21 +16,21 @@ export default function AdminPlanos() {
     setLoading(true);
     fetch('/api/plans?visao=admin', { cache: 'no-store' })
         .then(async (r) => {
-            if (!r.ok) throw new Error("Erro na requisição");
-            return r.json();
-        })
-        .then(data => {
-            // Garante que é array antes de setar
-            if (Array.isArray(data)) {
+            const data = await r.json();
+            
+            if (r.ok && Array.isArray(data)) {
                 setPlans(data);
             } else {
-                console.error("Formato inválido:", data);
-                setPlans([]);
+                console.error("API retornou erro ou formato inválido:", data);
+                // Se der erro, mantemos lista vazia para não travar a tela
+                setPlans([]); 
+                if(!r.ok) dialog.showAlert({ type: 'danger', description: data.error || "Erro ao carregar dados." });
             }
         })
         .catch(err => {
             console.error(err);
-            dialog.showAlert({ type: 'danger', description: "Erro ao carregar planos." });
+            setPlans([]);
+            dialog.showAlert({ type: 'danger', description: "Erro de conexão com o servidor." });
         })
         .finally(() => setLoading(false));
   };
@@ -68,7 +69,7 @@ export default function AdminPlanos() {
             dialog.showAlert({ type: 'success', description: "Salvo com sucesso!" });
         } else {
             const err = await res.json();
-            dialog.showAlert({ type: 'danger', description: err.error });
+            dialog.showAlert({ type: 'danger', description: err.error || "Erro ao salvar." });
         }
     } catch (e) {
         dialog.showAlert("Erro de conexão.");
@@ -78,7 +79,7 @@ export default function AdminPlanos() {
   const handleDelete = async (id: string) => {
       const confirmed = await dialog.showConfirm({
           title: 'Excluir Plano',
-          description: 'Tem certeza?',
+          description: 'Tem certeza? Essa ação não pode ser desfeita.',
           type: 'danger',
           confirmText: 'Sim, Excluir'
       });
@@ -118,7 +119,9 @@ export default function AdminPlanos() {
       {!loading && plans.length === 0 && (
           <div className="p-12 text-center border-2 border-dashed border-slate-300 rounded-xl bg-slate-50">
               <p className="text-slate-500 font-bold mb-2">Nenhum plano encontrado.</p>
-              <p className="text-sm text-slate-400 mb-4">Isso não deveria acontecer. Tente recarregar.</p>
+              <p className="text-sm text-slate-400 mb-4">
+                Se for a primeira vez, verifique se o banco de dados foi atualizado (npx prisma db push).
+              </p>
               <button onClick={carregar} className="text-blue-600 font-bold hover:underline">Tentar Novamente</button>
           </div>
       )}
@@ -165,7 +168,7 @@ export default function AdminPlanos() {
                         <div>
                             <label className="block text-xs font-bold text-yellow-800 uppercase mb-1">Limite de Emissões</label>
                             <input type="number" className="w-full p-2 border rounded focus:ring-2 focus:ring-yellow-500 outline-none" value={editing.maxNotasMensal} onChange={e => setEditing({...editing, maxNotasMensal: e.target.value})} />
-                            <p className="text-[10px] text-slate-500 mt-1">0 = Ilimitado.</p>
+                            <p className="text-[10px] text-slate-500 mt-1">0 = Ilimitado. -1 = Bloqueado.</p>
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-yellow-800 uppercase mb-1">Dias de Teste</label>
@@ -212,7 +215,7 @@ export default function AdminPlanos() {
 
       {/* GRID DE PLANOS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {plans.map(plan => (
+        {(plans || []).map(plan => (
             <div key={plan.id} className={`bg-white rounded-xl shadow-sm border relative overflow-hidden flex flex-col ${plan.recommended ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'} ${!plan.active ? 'opacity-60 grayscale' : ''}`}>
                 <div className="p-6 flex-1">
                     <div className="flex justify-between items-start mb-4">
@@ -230,9 +233,10 @@ export default function AdminPlanos() {
                         <p className="text-3xl font-black text-slate-900">R$ {Number(plan.priceMonthly).toFixed(2)}<span className="text-sm font-normal text-slate-500">/mês</span></p>
                     </div>
                     
+                    {/* Regras Visuais */}
                     <div className="flex gap-2 mb-4">
                         <span className={`text-[10px] px-2 py-1 rounded font-bold border ${plan.maxNotasMensal === 0 ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                            {plan.maxNotasMensal === 0 ? 'ILIMITADO' : `${plan.maxNotasMensal} Notas`}
+                            {plan.maxNotasMensal === 0 ? 'ILIMITADO' : plan.maxNotasMensal === -1 ? 'BLOQUEADO' : `${plan.maxNotasMensal} Notas`}
                         </span>
                         {plan.diasTeste > 0 && (
                              <span className="text-[10px] px-2 py-1 rounded font-bold border bg-yellow-50 text-yellow-700 border-yellow-200">
