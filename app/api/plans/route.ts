@@ -1,23 +1,26 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
+// Força a API a ser dinâmica (sem cache eterno)
+export const dynamic = 'force-dynamic';
+
 const prisma = new PrismaClient();
 
-// GET: Lista planos (Com filtro de privacidade)
+// GET: Lista planos com Filtro e sem Cache
 export async function GET(request: Request) {
-  // 1. Verifica se é o Admin pedindo (via parametro na URL)
+  // 1. Pega os parâmetros da URL para saber quem está pedindo
   const { searchParams } = new URL(request.url);
   const isVisaoAdmin = searchParams.get('visao') === 'admin';
 
   try {
     const total = await prisma.plan.count();
     
-    // Seed automático (Mantido)
+    // === SEED SEGURO (Só cria se estiver vazio) ===
     if (total === 0) {
       await prisma.plan.createMany({
         data: [
-          { name: 'Período de Avaliação', slug: 'TRIAL', description: 'Teste grátis por 7 dias', priceMonthly: 0, priceYearly: 0, features: 'Validade de 7 dias,Máximo 3 Emissões', active: true, maxNotasMensal: 3, diasTeste: 7, privado: true },
-          { name: 'Parceiro', slug: 'PARCEIRO', description: 'Acesso total irrestrito', priceMonthly: 0, priceYearly: 0, features: 'Emissões Ilimitadas,Prioridade Total', active: true, maxNotasMensal: 0, diasTeste: 0, privado: true },
+          { name: 'Período de Avaliação', slug: 'TRIAL', description: 'Teste grátis por 7 dias', priceMonthly: 0, priceYearly: 0, features: 'Validade de 7 dias,Máximo 3 Emissões,Suporte Básico', active: true, maxNotasMensal: 3, diasTeste: 7, privado: true },
+          { name: 'Parceiro', slug: 'PARCEIRO', description: 'Acesso total irrestrito', priceMonthly: 0, priceYearly: 0, features: 'Emissões Ilimitadas,Prioridade Total,API Liberada', active: true, maxNotasMensal: 0, diasTeste: 0, privado: true },
           { name: 'Plano Inicial', slug: 'INICIAL', description: 'Para quem está começando', priceMonthly: 24.99, priceYearly: 249.90, features: 'Até 5 Emissões/mês,Suporte por Email', active: true, maxNotasMensal: 5, diasTeste: 0, privado: false },
           { name: 'Plano Intermediário', slug: 'INTERMEDIARIO', description: 'Para pequenos negócios', priceMonthly: 45.99, priceYearly: 459.90, features: 'Até 15 Emissões/mês,Suporte WhatsApp', active: true, maxNotasMensal: 15, diasTeste: 0, privado: false },
           { name: 'Plano Livre', slug: 'LIVRE', description: 'Liberdade total', priceMonthly: 89.90, priceYearly: 899.00, features: 'Emissões Ilimitadas,Suporte VIP', active: true, maxNotasMensal: 0, diasTeste: 0, privado: false },
@@ -25,21 +28,17 @@ export async function GET(request: Request) {
       });
     }
 
-    // === O FILTRO MÁGICO ===
-    // Se for admin, where é vazio (traz tudo).
-    // Se for cliente, filtra onde privado = false E active = true
+    // === FILTRO DE VISIBILIDADE ===
+    // Admin vê tudo. Cliente vê apenas os públicos.
+    // Se isVisaoAdmin for false (cliente), aplicamos o filtro { privado: false }
     const whereClause = isVisaoAdmin ? {} : { privado: false, active: true };
 
     const plans = await prisma.plan.findMany({
-      where: whereClause, // Aplica o filtro aqui
+      where: whereClause,
       orderBy: { priceMonthly: 'asc' }
     });
 
-    // Adiciona header para evitar cache antigo
-    return NextResponse.json(plans, {
-        headers: { 'Cache-Control': 'no-store' }
-    });
-
+    return NextResponse.json(plans);
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao buscar planos' }, { status: 500 });
   }
@@ -50,7 +49,6 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     
-    // Validação básica
     if (!body.name || !body.slug) {
         return NextResponse.json({ error: 'Nome e Slug são obrigatórios' }, { status: 400 });
     }
@@ -115,7 +113,6 @@ export async function DELETE(request: Request) {
   if (!id) return NextResponse.json({ error: 'ID obrigatório' }, { status: 400 });
 
   try {
-    // Verifica se tem histórico usando esse plano
     const uso = await prisma.planHistory.count({ where: { planId: id } });
     
     if (uso > 0) {
