@@ -2,8 +2,10 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-export async function checkPlanLimits(userId: string) {
-    // 0. Verifica se é ADMIN/STAFF (Acesso total)
+type TipoAcao = 'EMITIR' | 'VISUALIZAR';
+
+export async function checkPlanLimits(userId: string, acao: TipoAcao = 'EMITIR') {
+    // 0. Verifica se é ADMIN/STAFF (Acesso total sempre)
     const user = await prisma.user.findUnique({
         where: { id: userId },
         select: { role: true }
@@ -20,20 +22,33 @@ export async function checkPlanLimits(userId: string) {
         orderBy: { createdAt: 'desc' }
     });
 
-    // Se não tem plano ativo, verifica se tem um expirado recente para dar mensagem correta
+    // Se não tem plano ativo, procura se tem um expirado para mensagem específica
     if (!historico) {
         const expirado = await prisma.planHistory.findFirst({
             where: { userId, status: 'EXPIRADO' },
             orderBy: { createdAt: 'desc' }
         });
-        if (expirado) return { allowed: false, reason: 'Seu plano expirou. Renove para continuar usando.', status: 'EXPIRADO' };
-        return { allowed: false, reason: 'Nenhum plano ativo. Assine um plano para começar.', status: 'INATIVO' };
+        
+        // CENÁRIO: Expirou os 7 dias (Trava TUDO, inclusive visualização)
+        if (expirado) {
+            return { 
+                allowed: false, 
+                reason: 'Seu plano expirou. Renove sua assinatura para acessar o sistema.', 
+                status: 'EXPIRADO' 
+            };
+        }
+        
+        return { 
+            allowed: false, 
+            reason: 'Nenhum plano ativo. Escolha um plano para começar.', 
+            status: 'INATIVO' 
+        };
     }
 
     // 2. Verifica Validade de Data (AUTO-EXPIRAÇÃO)
-    // Se hoje for maior que a data fim, expira AGORA.
+    // CENÁRIO: Passou dos 7 dias. Trava TUDO.
     if (historico.dataFim && new Date() > historico.dataFim) {
-        console.log(`[PLAN] Plano do usuário ${userId} venceu em ${historico.dataFim}. Expirando...`);
+        console.log(`[PLAN] Plano do usuário ${userId} venceu. Expirando...`);
         
         await prisma.planHistory.update({ 
             where: { id: historico.id }, 
@@ -45,11 +60,16 @@ export async function checkPlanLimits(userId: string) {
             data: { planoStatus: 'expired' }
         });
 
-        return { allowed: false, reason: 'Seu plano acabou de expirar. Renove para continuar.', status: 'EXPIRADO' };
+        return { 
+            allowed: false, 
+            reason: 'Seu período de acesso acabou. Renove o plano.', 
+            status: 'EXPIRADO' 
+        };
     }
 
-    // 3. Verifica Limite de Emissões (Apenas se não for ilimitado)
-    if (historico.plan.maxNotasMensal > 0) {
+    // 3. Verifica Limite de Emissões (QUOTA)
+    // CENÁRIO: Atingiu 3 notas. Bloqueia 'EMITIR', mas libera 'VISUALIZAR'.
+    if (acao === 'EMITIR' && historico.plan.maxNotasMensal > 0) {
         if (historico.notasEmitidas >= historico.plan.maxNotasMensal) {
             return { 
                 allowed: false, 

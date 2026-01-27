@@ -2,12 +2,18 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import JSZip from 'jszip';
 import zlib from 'zlib';
+import { checkPlanLimits } from '@/app/services/planService';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
     const userId = request.headers.get('x-user-id');
     if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
+    const planCheck = await checkPlanLimits(userId, 'VISUALIZAR');
+    if (!planCheck.allowed) {
+        return NextResponse.json({ error: 'Acesso bloqueado: ' + planCheck.reason }, { status: 403 });
+    }
 
     try {
         const { ids, formato } = await request.json(); // formato: 'XML' | 'PDF' | 'AMBOS'

@@ -46,12 +46,15 @@ async function resolveUser(request: Request) {
 
 // === POST: EMISSÃO DE NOTA ===
 export async function POST(request: Request) {
-  const user = await resolveUser(request);
+const user = await resolveUser(request);
   if (!user) return unauthorized();
 
-  const planCheck = await checkPlanLimits(user.id);
+  const planCheck = await checkPlanLimits(user.id, 'EMITIR');
   if (!planCheck.allowed) {
-      return NextResponse.json({ error: planCheck.reason }, { status: 403 }); // 403 Forbidden
+      return NextResponse.json({ 
+          error: planCheck.reason,
+          code: planCheck.status // Frontend pode usar isso para mostrar modal de upgrade
+      }, { status: 403 });
   }
 
   const contextId = request.headers.get('x-empresa-id'); 

@@ -38,28 +38,39 @@ export async function GET(request: Request) {
       };
   } else {
       // Se for CLIENTE, busca o plano real no histórico
-      const planoAtivo = await prisma.planHistory.findFirst({
-          where: { userId: user.id, status: 'ATIVO' },
-          include: { plan: true },
-          orderBy: { createdAt: 'desc' }
-      });
+        const planoAtivo = await prisma.planHistory.findFirst({
+            where: { userId: user.id, status: 'ATIVO' },
+            include: { plan: true },
+            orderBy: { createdAt: 'desc' }
+        });
 
-      planoDetalhado = planoAtivo ? {
-          nome: planoAtivo.plan.name,
-          slug: planoAtivo.plan.slug,
-          status: planoAtivo.status,
-          dataInicio: planoAtivo.dataInicio,
-          dataFim: planoAtivo.dataFim,
-          usoEmissoes: planoAtivo.notasEmitidas,
-          limiteEmissoes: planoAtivo.plan.maxNotasMensal,
-          diasTeste: planoAtivo.plan.diasTeste
-      } : { 
-          nome: 'Sem Plano Ativo', 
-          slug: 'FREE', 
-          status: 'INATIVO', 
-          usoEmissoes: 0, 
-          limiteEmissoes: 0 
-      };
+        // Verifica se atingiu limite apenas para informação visual
+        let statusVisual = planoAtivo?.status || 'INATIVO';
+        if (planoAtivo && planoAtivo.plan.maxNotasMensal > 0 && planoAtivo.notasEmitidas >= planoAtivo.plan.maxNotasMensal) {
+            statusVisual = 'LIMITE_ATINGIDO';
+        }
+
+        // Verifica se data expirou (Dupla checagem visual)
+        if (planoAtivo && planoAtivo.dataFim && new Date() > planoAtivo.dataFim) {
+            statusVisual = 'EXPIRADO';
+        }
+
+        planoDetalhado = planoAtivo ? {
+            nome: planoAtivo.plan.name,
+            slug: planoAtivo.plan.slug,
+            status: statusVisual, // <--- STATUS CALCULADO
+            dataInicio: planoAtivo.dataInicio,
+            dataFim: planoAtivo.dataFim,
+            usoEmissoes: planoAtivo.notasEmitidas,
+            limiteEmissoes: planoAtivo.plan.maxNotasMensal,
+            diasTeste: planoAtivo.plan.diasTeste
+        } : { 
+            nome: 'Sem Plano Ativo', 
+            slug: 'FREE', 
+            status: 'INATIVO', 
+            usoEmissoes: 0, 
+            limiteEmissoes: 0 
+        };
   }
   // ====================================================
 
