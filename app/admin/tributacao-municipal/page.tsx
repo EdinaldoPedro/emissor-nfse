@@ -64,13 +64,10 @@ const carregarAuxiliares = async () => {
         .catch(() => setListaCnaes([]));
 
     // 2. Carrega Cidades (Empresas)
-    // CORREÇÃO AQUI: Adicionado limit=1000 e tratamento da resposta { data: [] }
     fetch('/api/admin/empresas?limit=1000')
         .then(r => r.json())
         .then((res: any) => {
-            // A API retorna { data: [...], meta: ... }, então pegamos .data
             const listaEmpresas = res.data || (Array.isArray(res) ? res : []);
-
             const cidadesMap = new Map();
             listaEmpresas.forEach((emp: any) => {
                 if (emp.codigoIbge && emp.cidade) {
@@ -90,10 +87,17 @@ const carregarAuxiliares = async () => {
         alert("Preencha os campos obrigatórios.");
         return;
     }
+
+    // === CORREÇÃO DE SEGURANÇA: Recupera o token ===
+    const token = localStorage.getItem('token');
+    
     const metodo = editing ? 'PUT' : 'POST';
     const res = await fetch('/api/admin/tributacao-municipal', {
         method: metodo,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` // <--- Envia o crachá de Admin
+        },
         body: JSON.stringify(form)
     });
     const data = await res.json();
@@ -109,16 +113,24 @@ const carregarAuxiliares = async () => {
 
   const handleDelete = async (id: string) => {
       if(!confirm("Excluir regra?")) return;
-      await fetch(`/api/admin/tributacao-municipal?id=${id}`, { method: 'DELETE' });
+      
+      // === CORREÇÃO DE SEGURANÇA: Recupera o token ===
+      const token = localStorage.getItem('token');
+
+      await fetch(`/api/admin/tributacao-municipal?id=${id}`, { 
+          method: 'DELETE',
+          headers: {
+              'Authorization': `Bearer ${token}` // <--- Envia o crachá de Admin
+          }
+      });
       carregarRegras(page, termoBusca);
   };
 
   const getNomeCidade = (ibge: string) => {
       const cidade = listaCidades.find(c => c.ibge === ibge);
-      return cidade ? cidade.nome : ibge; // Retorna nome ou o próprio IBGE se não achar
+      return cidade ? cidade.nome : ibge; 
   }
 
-  // Prepara opções para o Select
   const opcoesCnae = listaCnaes.map(c => ({
       value: c.codigo,
       label: c.codigo,
