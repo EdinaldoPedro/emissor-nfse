@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Check, Star, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Check, Loader2 } from 'lucide-react';
 
 interface Plan {
   id: string;
@@ -13,39 +14,37 @@ interface Plan {
 }
 
 interface PlanSelectorProps {
-  currentPlan: string; // Slug do plano atual (ex: 'GRATUITO')
-  currentCycle: string; // 'MENSAL' ou 'ANUAL'
-  onSelectPlan: (slug: string, ciclo: string) => Promise<void>;
+  currentPlan: string;
+  currentCycle: string;
+  onSelectPlan?: (slug: string, ciclo: string) => Promise<void>;
 }
 
-export default function PlanSelector({ currentPlan, currentCycle, onSelectPlan }: PlanSelectorProps) {
+export default function PlanSelector({ currentPlan }: PlanSelectorProps) {
   const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [ciclo, setCiclo] = useState<'MENSAL' | 'ANUAL'>(currentCycle as 'MENSAL' | 'ANUAL' || 'MENSAL');
+  const [ciclo, setCiclo] = useState<'MENSAL' | 'ANUAL'>('MENSAL');
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/plans')
       .then(r => r.json())
       .then(data => {
-        setPlans(data);
+        setPlans(Array.isArray(data) ? data : []);
         setLoading(false);
-      });
+      })
+      .catch(() => setLoading(false));
   }, []);
 
-  const handleSelect = async (slug: string) => {
-    router.push(`/checkout?plan=${slug}`);
-    setProcessing(slug);
-    await onSelectPlan(slug, ciclo);
-    setProcessing(null);
+  const handleSelect = (slug: string) => {
+    // === MUDANÇA: Passa o ciclo escolhido na URL ===
+    router.push(`/checkout?plan=${slug}&cycle=${ciclo}`);
   };
 
   if (loading) return <div className="p-8 text-center"><Loader2 className="animate-spin mx-auto text-blue-600"/></div>;
 
   return (
     <div className="w-full">
-      {/* SELETOR DE CICLO (Toggle) */}
+      {/* SELETOR DE CICLO */}
       <div className="flex justify-center mb-8">
         <div className="bg-gray-100 p-1 rounded-full flex relative">
           <button 
@@ -58,7 +57,7 @@ export default function PlanSelector({ currentPlan, currentCycle, onSelectPlan }
             onClick={() => setCiclo('ANUAL')}
             className={`px-6 py-2 rounded-full text-sm font-bold transition-all z-10 ${ciclo === 'ANUAL' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
-            Anual <span className="text-[10px] text-green-600 ml-1">(-25%)</span>
+            Anual <span className="text-[10px] text-green-600 ml-1">(-15%)</span>
           </button>
         </div>
       </div>
@@ -106,20 +105,14 @@ export default function PlanSelector({ currentPlan, currentCycle, onSelectPlan }
 
               <button
                 onClick={() => handleSelect(plan.slug)}
-                    disabled={isCurrent} // Remove o 'processing' pois não tem mais loading aqui
-                    className={`w-full py-3 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 ${
-                      isCurrent 
-                        ? 'bg-blue-200 text-blue-700 cursor-default'
-                        : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
-                    }`}
+                disabled={isCurrent}
+                className={`w-full py-3 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 ${
+                  isCurrent 
+                    ? 'bg-blue-200 text-blue-700 cursor-default'
+                    : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
+                }`}
               >
-                {processing === plan.slug ? (
-                  <Loader2 className="animate-spin" size={18}/>
-                ) : isCurrent ? (
-                  'Seu Plano Atual'
-                ) : (
-                  'Escolher este Plano'
-                )}
+                {isCurrent ? 'Seu Plano Atual' : 'Escolher este Plano'}
               </button>
             </div>
           );
