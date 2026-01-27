@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
-export async function GET() {
+export async function GET(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+  if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+
   try {
     // 1. Pega todos os CNAEs do sistema
     const allCnaes = await prisma.cnae.findMany();

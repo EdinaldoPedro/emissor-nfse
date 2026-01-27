@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
@@ -47,6 +48,10 @@ export async function GET(request: Request) {
 
 // PUT: Atualiza dados tributários
 export async function PUT(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+  if (!['MASTER', 'ADMIN', 'CONTADOR'].includes(user.role)) return forbidden();
+
   try {
     const body = await request.json();
     // ATUALIZADO: Agora recebemos os novos campos

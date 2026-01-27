@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
@@ -47,6 +48,8 @@ export async function GET(request: Request) {
 
 // POST: Cria Nova Regra
 export async function POST(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
   try {
     const body = await request.json();
 
@@ -88,6 +91,8 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
   try {
     const body = await request.json();
     
@@ -122,6 +127,8 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+    const user = await getAuthenticatedUser(request);
+    if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     if(id) {
