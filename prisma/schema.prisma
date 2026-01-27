@@ -79,6 +79,14 @@ model User {
 
   // Relacionamento com Histórico
   historicoPlanos  PlanHistory[]
+
+  // === NOVOS CAMPOS PARA CONTROLE DE CONSUMO (Lógica de Baldes) ===
+  creditosPlano      Int       @default(0) // Balde A: Zera todo mês (Use-it-or-lose-it)
+  creditosExtras     Int       @default(0) // Balde B: Nunca expira (Rollover)
+  dataRenovacaoCiclo DateTime?             // Data base para zerar o Balde A
+
+  // Relacionamento com Pedidos
+  pedidos            Pedido[]
 }
 
 // --- EMPRESAS ---
@@ -385,4 +393,29 @@ model MunicipioHomologado {
   regime    String   @default("SN") // "SN" (Simples) ou "LP" (Lucro Presumido)
   
   createdAt DateTime @default(now())
+}
+
+model Pedido {
+  id              String   @id @default(uuid())
+  
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  
+  // O que ele comprou?
+  planoSlug       String   // Ex: "INICIAL"
+  ciclo           String   // "MENSAL" ou "ANUAL"
+  notasAdicionais Int      @default(0) // Quantidade de notas extras avulsas
+  
+  // Valores
+  valorPlano      Decimal  @db.Decimal(10, 2)
+  valorAdicionais Decimal  @db.Decimal(10, 2)
+  valorTotal      Decimal  @db.Decimal(10, 2)
+  
+  // Controle Financeiro
+  status          String   @default("PENDENTE") // PENDENTE, PAGO, FALHA, CANCELADO
+  formaPagamento  String?  // PIX, CARTAO
+  gatewayId       String?  // ID da transação no banco (futuro)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

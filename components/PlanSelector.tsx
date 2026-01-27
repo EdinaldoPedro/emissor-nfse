@@ -19,6 +19,7 @@ interface PlanSelectorProps {
 }
 
 export default function PlanSelector({ currentPlan, currentCycle, onSelectPlan }: PlanSelectorProps) {
+  const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [ciclo, setCiclo] = useState<'MENSAL' | 'ANUAL'>(currentCycle as 'MENSAL' | 'ANUAL' || 'MENSAL');
   const [loading, setLoading] = useState(true);
@@ -34,6 +35,7 @@ export default function PlanSelector({ currentPlan, currentCycle, onSelectPlan }
   }, []);
 
   const handleSelect = async (slug: string) => {
+    router.push(`/checkout?plan=${slug}`);
     setProcessing(slug);
     await onSelectPlan(slug, ciclo);
     setProcessing(null);
@@ -104,12 +106,12 @@ export default function PlanSelector({ currentPlan, currentCycle, onSelectPlan }
 
               <button
                 onClick={() => handleSelect(plan.slug)}
-                disabled={isCurrent || processing !== null}
-                className={`w-full py-3 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 ${
-                  isCurrent 
-                    ? 'bg-blue-200 text-blue-700 cursor-default'
-                    : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
-                }`}
+                    disabled={isCurrent} // Remove o 'processing' pois não tem mais loading aqui
+                    className={`w-full py-3 rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 ${
+                      isCurrent 
+                        ? 'bg-blue-200 text-blue-700 cursor-default'
+                        : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200'
+                    }`}
               >
                 {processing === plan.slug ? (
                   <Loader2 className="animate-spin" size={18}/>
