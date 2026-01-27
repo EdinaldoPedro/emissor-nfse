@@ -17,23 +17,28 @@ export default function GestaoClientes() {
 
   useEffect(() => {
     carregarUsuarios();
-    fetch('/api/admin/plans', {
-         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+    
+    // === CORREÇÃO AQUI: Aponta para a API centralizada, sem resetar dados ===
+    fetch('/api/plans?visao=admin', { 
+        cache: 'no-store',
+        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     }).then(r => r.json()).then(setPlanosDisponiveis);
+    // =======================================================================
+    
   }, []);
 
   const carregarUsuarios = () => {
     fetch('/api/admin/users', {
          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     }).then(r => r.json()).then(data => {
-        // Filtra apenas COMUM (Clientes) e outros cargos baixos, se desejar
-        // Aqui removi o filtro rígido para você ver todos, ou você pode manter:
+        // Filtra apenas COMUM (Clientes) e outros cargos baixos
         const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
         setClientes(listaClientes);
     });
   };
 
   const handleSaveUser = async () => {
+      if (!editingUser.planoCombinado) return;
       const [slug, ciclo] = editingUser.planoCombinado.split('|');
 
       const res = await fetch('/api/admin/users', {
@@ -171,11 +176,8 @@ export default function GestaoClientes() {
       setNovoCnpj(user.empresa ? user.empresa.documento : '');
   }
 
-  // === CORREÇÃO DA FUNÇÃO DE ACESSO (IMPERSONATE) ===
   const acessarSuporte = async (targetId: string) => {
     const adminId = localStorage.getItem('userId');
-    
-    // Salva o ID do admin para poder voltar depois
     if (adminId) localStorage.setItem('adminBackUpId', adminId);
 
     try {
@@ -185,16 +187,10 @@ export default function GestaoClientes() {
         const data = await res.json();
         
         if (data.success) {
-            // 1. LIMPEZA CRÍTICA: Remove qualquer contexto de empresa/contador anterior
-            // Isso evita que o admin tente acessar a empresa errada ao trocar de cliente
             localStorage.removeItem('empresaContextId'); 
-            
-            // 2. Define os dados da sessão falsa
             localStorage.setItem('userId', data.fakeSession.id);
             localStorage.setItem('userRole', data.fakeSession.role);
             localStorage.setItem('isSupportMode', 'true');
-            
-            // 3. Redireciona
             router.push('/cliente/dashboard');
         } else {
              dialog.showAlert({ type: 'danger', description: "Falha ao iniciar sessão." });
