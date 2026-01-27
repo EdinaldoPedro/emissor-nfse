@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import bcrypt from 'bcryptjs'; // <--- Necessário para validar a senha
 
 const prisma = new PrismaClient();
 
@@ -21,9 +22,9 @@ export async function GET(request: Request) {
   return NextResponse.json(safeUsers);
 }
 
-// PUT: Edição Inteligente (Acumular Dias e Troca de Plano)
+// PUT: Edição Inteligente com Auditoria e Segurança
 export async function PUT(request: Request) {
-  const userAuth = await getAuthenticatedUser(request);
+  const userAuth = await getAuthenticatedUser(request); // Usuário Logado (Admin)
   if (!userAuth) return unauthorized();
 
   // Apenas Admin/Master pode editar
@@ -32,20 +33,36 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
 
-    // 1. Resetar E-mail
+    // === 0. VALIDAÇÃO DE SEGURANÇA (Apenas se houver troca de plano) ===
+    if (body.plano) {
+        if (!body.adminPassword || !body.justification) {
+            return NextResponse.json({ error: 'Senha de confirmação e justificativa são obrigatórios para alterar planos.' }, { status: 400 });
+        }
+
+        // Busca o ADMIN no banco para pegar o hash da senha dele
+        const adminDb = await prisma.user.findUnique({ where: { id: userAuth.id } });
+        if (!adminDb) return unauthorized();
+
+        const senhaValida = await bcrypt.compare(body.adminPassword, adminDb.senha);
+        if (!senhaValida) {
+            return NextResponse.json({ error: 'Senha de confirmação incorreta.' }, { status: 403 });
+        }
+    }
+
+    // 1. Resetar E-mail (Mantido)
     if (body.resetEmail) {
         const tempPlaceholder = `reset_${Date.now()}_${body.id.substring(0,5)}@sistema.temp`;
         await prisma.user.update({ where: { id: body.id }, data: { email: tempPlaceholder } });
         return NextResponse.json({ success: true, message: "E-mail resetado." });
     }
     
-    // 2. Desvincular Empresa
+    // 2. Desvincular Empresa (Mantido)
     if (body.unlinkCompany) {
         await prisma.user.update({ where: { id: body.id }, data: { empresaId: null } });
         return NextResponse.json({ success: true, message: "Empresa desvinculada." });
     }
 
-    // 3. Trocar CNPJ
+    // 3. Trocar CNPJ (Mantido)
     if (body.newCnpj) {
         const cnpjLimpo = body.newCnpj.replace(/\D/g, '');
         if(cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ Inválido' }, { status: 400 });
@@ -68,67 +85,94 @@ export async function PUT(request: Request) {
         }
     }
 
-    // === 4. LÓGICA DE PLANOS (ACUMULATIVA) ===
+    // === 4. LÓGICA DE PLANOS (COM AUDITORIA) ===
     if (body.plano) {
+        // --- LOG DE AUDITORIA ---
+        // Pegar dados antigos para o log
+        const userAlvo = await prisma.user.findUnique({ where: { id: body.id } });
+        
+        await prisma.systemLog.create({
+            data: {
+                level: 'WARN',
+                action: 'MANUAL_PLAN_CHANGE',
+                message: `Alteração manual de plano para: ${userAlvo?.nome} (${userAlvo?.email})`,
+                details: JSON.stringify({
+                    adminId: userAuth.id,
+                    oldPlan: userAlvo?.plano,
+                    newPlan: body.plano,
+                    justification: body.justification,
+                    timestamp: new Date()
+                })
+            }
+        });
+
+        // --- CASO ESPECIAL: SUSPENDER ACESSO ---
+        if (body.plano === 'SUSPENDED') {
+            // Encerra qualquer histórico ativo
+            await prisma.planHistory.updateMany({
+                where: { userId: body.id, status: 'ATIVO' },
+                data: { status: 'CANCELADO_ADM', dataFim: new Date() }
+            });
+
+            // Atualiza usuário para bloqueado
+            await prisma.user.update({
+                where: { id: body.id },
+                data: { 
+                    plano: 'SEM_PLANO', 
+                    planoStatus: 'suspended',
+                    planoExpiresAt: new Date() // Expira agora
+                }
+            });
+
+            return NextResponse.json({ success: true, message: "Acesso suspenso com sucesso." });
+        }
+
+        // --- CASO NORMAL: ATIVAR PLANO ---
         const novoPlano = await prisma.plan.findUnique({ where: { slug: body.plano } });
         if (!novoPlano) return NextResponse.json({ error: 'Plano não encontrado.' }, { status: 404 });
 
         const ciclo = body.planoCiclo || 'MENSAL';
         
-        // Verifica se o usuário já tem um histórico ATIVO
+        // Verifica histórico ativo
         const historicoAtivo = await prisma.planHistory.findFirst({
             where: { userId: body.id, status: 'ATIVO' },
             orderBy: { createdAt: 'desc' }
         });
 
-        // --- DEFINIR A DURAÇÃO ---
         let diasParaAdicionar = 0;
-        
-        if (novoPlano.slug === 'PARCEIRO') {
-            diasParaAdicionar = 0; // Vitalício (null)
-        } else if (novoPlano.slug === 'TRIAL') {
-            diasParaAdicionar = novoPlano.diasTeste || 7;
-        } else {
-            // Planos Pagos (Inicial, Intermediário, Livre)
-            diasParaAdicionar = ciclo === 'ANUAL' ? 365 : 30;
-        }
+        if (novoPlano.slug === 'PARCEIRO') diasParaAdicionar = 0;
+        else if (novoPlano.slug === 'TRIAL') diasParaAdicionar = novoPlano.diasTeste || 7;
+        else diasParaAdicionar = ciclo === 'ANUAL' ? 365 : 30;
 
         let dataFimFinal: Date | null = null;
 
-        // CENÁRIO A: É o MESMO plano => ESTENDER (Acumular)
+        // ESTENDER (Mesmo plano)
         if (historicoAtivo && historicoAtivo.planId === novoPlano.id && novoPlano.slug !== 'PARCEIRO') {
-            
-            // Pega a maior data: (Vencimento Atual) ou (Hoje)
             const baseDate = historicoAtivo.dataFim && historicoAtivo.dataFim > new Date() 
                 ? new Date(historicoAtivo.dataFim) 
                 : new Date();
             
-            // Soma os dias
             baseDate.setDate(baseDate.getDate() + diasParaAdicionar);
             dataFimFinal = baseDate;
 
-            // Atualiza o histórico existente estendendo a data
             await prisma.planHistory.update({
                 where: { id: historicoAtivo.id },
                 data: { dataFim: dataFimFinal }
             });
         } 
-        // CENÁRIO B: É um plano DIFERENTE (Upgrade/Downgrade) ou Novo => TROCAR
+        // TROCAR (Novo histórico)
         else {
-            // Fecha o anterior
             await prisma.planHistory.updateMany({
                 where: { userId: body.id, status: 'ATIVO' },
                 data: { status: 'FINALIZADO', dataFim: new Date() } 
             });
 
-            // Define nova data fim
             if (novoPlano.slug !== 'PARCEIRO') {
                 const d = new Date();
                 d.setDate(d.getDate() + diasParaAdicionar);
                 dataFimFinal = d;
             }
 
-            // Cria novo histórico
             await prisma.planHistory.create({
                 data: {
                     userId: body.id,
@@ -141,7 +185,6 @@ export async function PUT(request: Request) {
             });
         }
 
-        // Atualiza Cache do Usuário
         await prisma.user.update({
             where: { id: body.id },
             data: { 
@@ -152,10 +195,10 @@ export async function PUT(request: Request) {
             }
         });
 
-        return NextResponse.json({ success: true, message: "Plano atualizado/estendido com sucesso!" });
+        return NextResponse.json({ success: true, message: "Plano atualizado com sucesso!" });
     }
 
-    // --- 5. OUTROS DADOS ---
+    // --- 5. OUTROS DADOS (Role, etc) ---
     const dataToUpdate: any = {};
     if (body.role) dataToUpdate.role = body.role;
 

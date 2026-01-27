@@ -4,11 +4,12 @@ import { useState, useEffect } from 'react';
 import { 
     Search, Download, FileText, FileCode, Archive, 
     CheckSquare, Square, Loader2, ChevronLeft, ChevronRight, 
-    Printer, Calendar, Filter 
+    Printer, Calendar, Filter, Lock, ArrowRight 
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import { useDialog } from '@/app/contexts/DialogContext';
+import Link from 'next/link';
 
 // Importações para PDF
 import jsPDF from 'jspdf';
@@ -28,6 +29,7 @@ export default function RelatoriosPage() {
     const [notas, setNotas] = useState<any[]>([]);
     const [summary, setSummary] = useState<any>(null);
     const [loading, setLoading] = useState(true);
+    const [isBlocked, setIsBlocked] = useState(false); // <--- NOVO: Estado de Bloqueio
     
     // Paginação
     const [page, setPage] = useState(1);
@@ -73,6 +75,13 @@ export default function RelatoriosPage() {
                 }
             });
             
+            // === LÓGICA DE BLOQUEIO ===
+            if (res.status === 403) {
+                setIsBlocked(true);
+                setLoading(false);
+                return; // Para aqui e mostra a tela de cadeado
+            }
+
             const data = await res.json();
             if (data.data) {
                 setNotas(data.data);
@@ -176,7 +185,7 @@ export default function RelatoriosPage() {
                 document.body.removeChild(link);
                 dialog.showAlert({ type: 'success', description: "Download iniciado!" });
             } else {
-                dialog.showAlert({ type: 'danger', description: "Erro: " + data.error });
+                dialog.showAlert({ type: 'danger', description: "Erro: " + (data.error || "Acesso negado.") });
             }
         } catch (e) {
             dialog.showAlert("Erro de conexão.");
@@ -194,6 +203,35 @@ export default function RelatoriosPage() {
         if (selectedIds.includes(id)) setSelectedIds(prev => prev.filter(i => i !== id));
         else setSelectedIds(prev => [...prev, id]);
     };
+
+    // === TELA DE BLOQUEIO (RENDERIZAÇÃO CONDICIONAL) ===
+    if (isBlocked) {
+        return (
+            <div className="min-h-screen bg-slate-50">
+                <header className="flex justify-between items-center p-6 border-b bg-white shadow-sm">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition text-slate-500">
+                            <ChevronLeft size={24}/>
+                        </button>
+                        <h1 className="text-xl font-bold text-slate-800">Relatórios Fiscais</h1>
+                    </div>
+                    <Sidebar />
+                </header>
+                <div className="flex flex-col items-center justify-center p-8 mt-12 text-center animate-in fade-in zoom-in duration-500">
+                    <div className="bg-red-100 p-6 rounded-full text-red-500 mb-6 shadow-inner">
+                        <Lock size={64} />
+                    </div>
+                    <h2 className="text-3xl font-bold text-slate-800 mb-4">Funcionalidade Bloqueada</h2>
+                    <p className="text-slate-500 max-w-md mb-8 text-lg">
+                        Seu plano atual não permite o acesso a relatórios avançados ou está expirado/inativo.
+                    </p>
+                    <Link href="/configuracoes/minha-conta" className="bg-blue-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-700 transition shadow-xl shadow-blue-200 flex items-center gap-2">
+                        Ver Planos Disponíveis <ArrowRight size={20}/>
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-slate-50">
@@ -370,7 +408,7 @@ export default function RelatoriosPage() {
                             </tbody>
                         </table>
                     </div>
-                     <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
+                    <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
                         <span className="text-xs text-slate-500">Mostrando {notas.length} registros</span>
                         <div className="flex gap-2">
                             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 bg-white border rounded hover:bg-slate-50 disabled:opacity-50"><ChevronLeft size={16}/></button>

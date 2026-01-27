@@ -28,8 +28,15 @@ export default function ClienteDashboard() {
 
   const isAdminPlan = planoDetalhes?.slug === 'ADMIN_ACCESS';
   
-  // Verifica se está expirado (se a API já marcou ou se a data passou)
-  const isExpirado = planoDetalhes?.status === 'EXPIRADO' || (diasRestantes !== null && diasRestantes < 0);
+  // === LÓGICA DE TRAVAMENTO ===
+  // Bloqueia se: Expirado OU Inativo (Sem plano)
+  const isBloqueado = planoDetalhes?.status === 'EXPIRADO' || planoDetalhes?.status === 'INATIVO' || (diasRestantes !== null && diasRestantes < 0);
+  
+  // Define texto do alerta
+  const tituloAlerta = planoDetalhes?.status === 'INATIVO' ? 'Nenhum Plano Ativo' : 'Plano Expirado';
+  const descAlerta = planoDetalhes?.status === 'INATIVO' 
+    ? 'Para começar a emitir notas, você precisa escolher um plano.' 
+    : 'Suas funcionalidades estão bloqueadas. Renove para continuar.';
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -47,28 +54,26 @@ export default function ClienteDashboard() {
 
       <div className="p-8 max-w-6xl mx-auto space-y-8">
         
-        {/* === ALERTA DE PLANO EXPIRADO === */}
-        {isExpirado && (
+        {/* === ALERTA DE BLOQUEIO (VERMELHO) === */}
+        {isBloqueado && (
             <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-r-xl shadow-sm flex flex-col md:flex-row justify-between items-center gap-4 animate-in slide-in-from-top">
                 <div className="flex items-center gap-4">
                     <div className="bg-red-100 p-3 rounded-full text-red-600">
                         <Lock size={32}/>
                     </div>
                     <div>
-                        <h2 className="text-xl font-bold text-red-700">Plano Expirado</h2>
-                        <p className="text-red-600 text-sm mt-1">
-                            Suas funcionalidades de emissão e download estão bloqueadas. Renove para continuar.
-                        </p>
+                        <h2 className="text-xl font-bold text-red-700">{tituloAlerta}</h2>
+                        <p className="text-red-600 text-sm mt-1">{descAlerta}</p>
                     </div>
                 </div>
                 <Link href="/configuracoes/minha-conta" className="bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700 transition shadow-lg shadow-red-200">
-                    Renovar Agora
+                    {planoDetalhes?.status === 'INATIVO' ? 'Ver Planos' : 'Renovar Agora'}
                 </Link>
             </div>
         )}
 
-        {/* BANNER TRIAL (Só mostra se ativo) */}
-        {!isAdminPlan && !isExpirado && planoDetalhes?.slug === 'TRIAL' && diasRestantes !== null && diasRestantes >= 0 && (
+        {/* BANNER TRIAL (Só mostra se ativo e válido) */}
+        {!isAdminPlan && !isBloqueado && planoDetalhes?.slug === 'TRIAL' && diasRestantes !== null && diasRestantes >= 0 && (
             <div className="tour-emitir-card bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4 animate-in slide-in-from-top duration-500">
                 <div className="flex items-center gap-4">
                     <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm">
@@ -88,19 +93,19 @@ export default function ClienteDashboard() {
         )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Link href={isExpirado ? "/configuracoes/minha-conta" : "/emitir"} onClick={(e) => { if(isExpirado) { e.preventDefault(); alert("Plano expirado! Renove para emitir."); window.location.href="/configuracoes/minha-conta"; } }}>
-                <div className={`tour-emitir-card group p-8 border rounded-2xl transition shadow-lg h-full flex flex-col justify-between relative overflow-hidden ${isExpirado ? 'bg-gray-100 border-gray-300 cursor-not-allowed grayscale' : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'}`}>
+            <Link href={isBloqueado ? "/configuracoes/minha-conta" : "/emitir"} onClick={(e) => { if(isBloqueado) { e.preventDefault(); alert("Ação bloqueada! Verifique seu plano."); window.location.href="/configuracoes/minha-conta"; } }}>
+                <div className={`tour-emitir-card group p-8 border rounded-2xl transition shadow-lg h-full flex flex-col justify-between relative overflow-hidden ${isBloqueado ? 'bg-gray-100 border-gray-300 cursor-not-allowed grayscale' : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'}`}>
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition">
                         <svg width="120" height="120" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                     </div>
                     <div>
                         <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
-                            {isExpirado && <Lock size={24}/>} Emitir Nova Nota
+                            {isBloqueado && <Lock size={24}/>} Emitir Nova Nota
                         </h2>
-                        <p className={`${isExpirado ? 'text-gray-500' : 'text-blue-100'} text-sm`}>Integração com Portal Nacional.</p>
+                        <p className={`${isBloqueado ? 'text-gray-500' : 'text-blue-100'} text-sm`}>Integração com Portal Nacional.</p>
                     </div>
-                    <div className={`mt-6 flex items-center gap-2 font-bold text-sm w-fit px-4 py-2 rounded-full backdrop-blur-sm ${isExpirado ? 'bg-gray-200 text-gray-500' : 'bg-white/20'}`}>
-                        {isExpirado ? 'Bloqueado' : 'Começar Agora ➜'}
+                    <div className={`mt-6 flex items-center gap-2 font-bold text-sm w-fit px-4 py-2 rounded-full backdrop-blur-sm ${isBloqueado ? 'bg-gray-200 text-gray-500' : 'bg-white/20'}`}>
+                        {isBloqueado ? 'Bloqueado' : 'Começar Agora ➜'}
                     </div>
                 </div>
             </Link>
@@ -123,7 +128,6 @@ export default function ClienteDashboard() {
                 <h3 className="font-bold text-xl text-slate-700">Atividade Recente</h3>
                 <Link href="/cliente/notas" className="text-sm text-blue-600 hover:underline">Ver tudo</Link>
             </div>
-            {/* ListaVendas vai mostrar os itens, mas o download estará bloqueado na API */}
             <ListaVendas compact={true} />
         </div>
       </div>

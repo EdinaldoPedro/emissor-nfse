@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, KeyRound, AtSign } from 'lucide-react';
+import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, KeyRound, AtSign, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 
@@ -15,15 +15,20 @@ export default function GestaoClientes() {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [novoCnpj, setNovoCnpj] = useState(''); 
 
+  // === ESTADOS PARA MODAL DE CONFIRMAÇÃO (AUDITORIA) ===
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [justificativa, setJustificativa] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
   useEffect(() => {
     carregarUsuarios();
     
-    // === CORREÇÃO AQUI: Aponta para a API centralizada, sem resetar dados ===
+    // Busca planos (API centralizada)
     fetch('/api/plans?visao=admin', { 
         cache: 'no-store',
         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     }).then(r => r.json()).then(setPlanosDisponiveis);
-    // =======================================================================
     
   }, []);
 
@@ -37,30 +42,60 @@ export default function GestaoClientes() {
     });
   };
 
-  const handleSaveUser = async () => {
+  // --- NOVA LÓGICA DE SALVAMENTO ---
+  const handlePreSaveUser = () => {
       if (!editingUser.planoCombinado) return;
+      
+      // Abre o modal de confirmação para obrigar a justificativa
+      setShowConfirmModal(true);
+  };
+
+  const handleConfirmChange = async () => {
+      if(!justificativa || justificativa.length < 5) {
+          return dialog.showAlert({type:'warning', description: 'Digite uma justificativa válida (mínimo 5 caracteres).'});
+      }
+      if(!adminPassword) {
+          return dialog.showAlert({type:'warning', description: 'Digite sua senha para confirmar a alteração.'});
+      }
+
+      setIsProcessing(true);
       const [slug, ciclo] = editingUser.planoCombinado.split('|');
 
-      const res = await fetch('/api/admin/users', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + localStorage.getItem('token')
-          },
-          body: JSON.stringify({ 
-              id: editingUser.id, 
-              plano: slug,
-              planoCiclo: ciclo
-          })
-      });
-      if(res.ok) {
-          setEditingUser(null);
-          carregarUsuarios();
-          dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Dados do cliente salvos!" });
-      } else {
-          dialog.showAlert({ type: 'danger', title: 'Erro', description: "Não foi possível salvar os dados." });
+      try {
+          const res = await fetch('/api/admin/users', {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('token')
+              },
+              body: JSON.stringify({ 
+                  id: editingUser.id, 
+                  plano: slug,
+                  planoCiclo: ciclo,
+                  justification: justificativa, // Envia justificativa
+                  adminPassword: adminPassword  // Envia senha para validação
+              })
+          });
+
+          if(res.ok) {
+              setShowConfirmModal(false);
+              setEditingUser(null);
+              setJustificativa('');
+              setAdminPassword('');
+              carregarUsuarios();
+              dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Plano atualizado e ação registrada nos logs." });
+          } else {
+              const err = await res.json();
+              dialog.showAlert({ type: 'danger', title: 'Erro', description: err.error || "Erro ao salvar." });
+          }
+      } catch (error) {
+          dialog.showAlert({ type: 'danger', title: 'Erro', description: "Falha na comunicação com o servidor." });
+      } finally {
+          setIsProcessing(false);
       }
   };
+
+  // --- FUNÇÕES EXISTENTES (MANTIDAS) ---
 
   const handleUnlinkCompany = async () => {
       const confirmed = await dialog.showConfirm({
@@ -167,13 +202,18 @@ export default function GestaoClientes() {
 
   const abrirEdicao = (user: any) => {
       const ciclo = user.planoCiclo || 'MENSAL';
-      const slug = user.plano || 'GRATUITO';
+      // Se for SEM_PLANO, trata como SUSPENDED no select
+      const slug = user.plano === 'SEM_PLANO' ? 'SUSPENDED' : (user.plano || 'GRATUITO');
       
       setEditingUser({
           ...user,
           planoCombinado: `${slug}|${ciclo}`
       });
       setNovoCnpj(user.empresa ? user.empresa.documento : '');
+      
+      // Reseta modal
+      setJustificativa('');
+      setAdminPassword('');
   }
 
   const acessarSuporte = async (targetId: string) => {
@@ -212,8 +252,68 @@ export default function GestaoClientes() {
         </div>
       </div>
 
-      {/* MODAL DE EDIÇÃO */}
-      {editingUser && (
+      {/* === MODAL DE JUSTIFICATIVA E SENHA (NOVO) === */}
+      {showConfirmModal && (
+          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm border-t-4 border-amber-500">
+                  <div className="flex items-center gap-3 mb-4 text-amber-600">
+                      <AlertTriangle size={28}/>
+                      <h3 className="font-bold text-lg leading-tight">Auditoria de Alteração</h3>
+                  </div>
+                  
+                  <p className="text-sm text-slate-600 mb-4">
+                      Você está alterando manualmente o contrato de um cliente. Essa ação será registrada nos logs do sistema em seu nome.
+                  </p>
+
+                  <div className="space-y-3">
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-1">Motivo da Alteração (Obrigatório)</label>
+                          <textarea 
+                              className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                              rows={3}
+                              placeholder="Ex: Pagamento via PIX manual, Cortesia por erro..."
+                              value={justificativa}
+                              onChange={e => setJustificativa(e.target.value)}
+                          />
+                      </div>
+                      
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-1">Confirme com SUA Senha</label>
+                          <div className="relative">
+                              <input 
+                                  type="password"
+                                  className="w-full pl-8 p-2 border rounded text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                                  placeholder="Sua senha de login..."
+                                  value={adminPassword}
+                                  onChange={e => setAdminPassword(e.target.value)}
+                              />
+                              <ShieldCheck className="absolute left-2.5 top-2.5 text-slate-400" size={14}/>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-6">
+                      <button 
+                          onClick={() => setShowConfirmModal(false)}
+                          disabled={isProcessing}
+                          className="flex-1 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded transition"
+                      >
+                          Cancelar
+                      </button>
+                      <button 
+                          onClick={handleConfirmChange}
+                          disabled={isProcessing}
+                          className="flex-1 py-2 bg-amber-500 text-white font-bold rounded hover:bg-amber-600 transition flex justify-center items-center gap-2"
+                      >
+                          {isProcessing ? 'Validando...' : 'Confirmar e Salvar'}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* MODAL DE EDIÇÃO PRINCIPAL */}
+      {editingUser && !showConfirmModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
                 <div className="flex justify-between mb-4">
@@ -287,6 +387,8 @@ export default function GestaoClientes() {
                             value={editingUser.planoCombinado}
                             onChange={e => setEditingUser({...editingUser, planoCombinado: e.target.value})}
                         >
+                            <option value="SUSPENDED|DEFAULT" className="text-red-600 font-bold bg-red-50">⛔ SUSPENDER ACESSO / SEM PLANO</option>
+                            <hr />
                             {planosDisponiveis.map(p => {
                                 if (Number(p.priceMonthly) === 0) {
                                     return <option key={`${p.slug}|MENSAL`} value={`${p.slug}|MENSAL`}>{p.name} (Gratuito)</option>
@@ -300,7 +402,7 @@ export default function GestaoClientes() {
                     </div>
 
                     <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
-                        <button onClick={handleSaveUser} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 flex items-center gap-2 font-bold shadow-lg shadow-green-100 transition">
+                        <button onClick={handlePreSaveUser} className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 flex items-center gap-2 font-bold shadow-lg shadow-green-100 transition">
                             <Save size={18}/> Salvar Tudo
                         </button>
                     </div>
@@ -336,9 +438,15 @@ export default function GestaoClientes() {
                             ) : <span className="text-orange-400 text-xs font-bold bg-orange-50 px-2 py-1 rounded">Pendente</span>}
                         </td>
                         <td className="p-4">
-                            <span className="flex items-center gap-1 w-fit text-green-700 bg-green-50 px-2 py-1 rounded text-[10px] font-bold border border-green-200 uppercase">
-                                {cli.plano} {cli.planoCiclo === 'ANUAL' ? '(A)' : '(M)'}
-                            </span>
+                            {cli.plano === 'SEM_PLANO' || cli.planoStatus === 'suspended' ? (
+                                <span className="flex items-center gap-1 w-fit text-red-700 bg-red-50 px-2 py-1 rounded text-[10px] font-bold border border-red-200 uppercase">
+                                    SUSPENSO ⛔
+                                </span>
+                            ) : (
+                                <span className="flex items-center gap-1 w-fit text-green-700 bg-green-50 px-2 py-1 rounded text-[10px] font-bold border border-green-200 uppercase">
+                                    {cli.plano} {cli.planoCiclo === 'ANUAL' ? '(A)' : '(M)'}
+                                </span>
+                            )}
                         </td>
                         <td className="p-4 text-right flex justify-end gap-2 items-center">
                             <button onClick={() => abrirEdicao(cli)} className="text-blue-600 hover:bg-blue-50 p-2 border border-blue-100 rounded transition" title="Gerenciar">
