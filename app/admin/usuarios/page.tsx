@@ -1,6 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, RefreshCw, KeyRound, AtSign, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { 
+    Search, LogIn, CreditCard, Edit, Save, X, Building2, Unlink, 
+    RefreshCw, KeyRound, AtSign, AlertTriangle, ShieldCheck, 
+    History, Clock, CheckCircle, UserCog, User 
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 
@@ -14,21 +18,32 @@ export default function GestaoClientes() {
   
   const [editingUser, setEditingUser] = useState<any>(null);
   const [novoCnpj, setNovoCnpj] = useState(''); 
-
+  
   // === ESTADOS PARA MODAL DE CONFIRMAÇÃO (AUDITORIA) ===
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [justificativa, setJustificativa] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // === NOVO: ESTADOS PARA HISTÓRICO DE PLANOS ===
+  const [historyUser, setHistoryUser] = useState<any>(null);
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   useEffect(() => {
     carregarUsuarios();
     
-    // Busca planos (API centralizada)
+    // Busca planos com proteção contra erro
     fetch('/api/plans?visao=admin', { 
         cache: 'no-store',
         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-    }).then(r => r.json()).then(setPlanosDisponiveis);
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (Array.isArray(data)) setPlanosDisponiveis(data);
+        else setPlanosDisponiveis([]);
+    })
+    .catch(() => setPlanosDisponiveis([]));
     
   }, []);
 
@@ -36,27 +51,23 @@ export default function GestaoClientes() {
     fetch('/api/admin/users', {
          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
     }).then(r => r.json()).then(data => {
-        // Filtra apenas COMUM (Clientes) e outros cargos baixos
-        const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
-        setClientes(listaClientes);
+        if(Array.isArray(data)) {
+            const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
+            setClientes(listaClientes);
+        }
     });
   };
 
-  // --- NOVA LÓGICA DE SALVAMENTO ---
+  // --- 1. ABRIR MODAL DE CONFIRMAÇÃO ---
   const handlePreSaveUser = () => {
       if (!editingUser.planoCombinado) return;
-      
-      // Abre o modal de confirmação para obrigar a justificativa
       setShowConfirmModal(true);
   };
 
+  // --- 2. SALVAR COM AUDITORIA ---
   const handleConfirmChange = async () => {
-      if(!justificativa || justificativa.length < 5) {
-          return dialog.showAlert({type:'warning', description: 'Digite uma justificativa válida (mínimo 5 caracteres).'});
-      }
-      if(!adminPassword) {
-          return dialog.showAlert({type:'warning', description: 'Digite sua senha para confirmar a alteração.'});
-      }
+      if(!justificativa || justificativa.length < 5) return dialog.showAlert({type:'warning', description: 'Digite uma justificativa válida.'});
+      if(!adminPassword) return dialog.showAlert({type:'warning', description: 'Digite sua senha.'});
 
       setIsProcessing(true);
       const [slug, ciclo] = editingUser.planoCombinado.split('|');
@@ -72,8 +83,8 @@ export default function GestaoClientes() {
                   id: editingUser.id, 
                   plano: slug,
                   planoCiclo: ciclo,
-                  justification: justificativa, // Envia justificativa
-                  adminPassword: adminPassword  // Envia senha para validação
+                  justification: justificativa,
+                  adminPassword: adminPassword
               })
           });
 
@@ -83,160 +94,74 @@ export default function GestaoClientes() {
               setJustificativa('');
               setAdminPassword('');
               carregarUsuarios();
-              dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Plano atualizado e ação registrada nos logs." });
+              dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Plano atualizado e registrado." });
           } else {
               const err = await res.json();
               dialog.showAlert({ type: 'danger', title: 'Erro', description: err.error || "Erro ao salvar." });
           }
-      } catch (error) {
-          dialog.showAlert({ type: 'danger', title: 'Erro', description: "Falha na comunicação com o servidor." });
-      } finally {
-          setIsProcessing(false);
+      } catch (error) { 
+          dialog.showAlert("Erro de conexão."); 
+      } finally { 
+          setIsProcessing(false); 
       }
   };
 
-  // --- FUNÇÕES EXISTENTES (MANTIDAS) ---
-
-  const handleUnlinkCompany = async () => {
-      const confirmed = await dialog.showConfirm({
-          title: 'Desvincular Empresa',
-          description: 'O usuário perderá o acesso à empresa atual. Tem certeza?',
-          confirmText: 'Sim, desvincular',
-          type: 'warning'
-      });
-      if (!confirmed) return;
-
-      const res = await fetch('/api/admin/users', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + localStorage.getItem('token')
-          },
-          body: JSON.stringify({ id: editingUser.id, unlinkCompany: true })
-      });
-
-      if(res.ok) {
-          dialog.showAlert("Empresa desvinculada com sucesso.");
-          setEditingUser(null);
-          carregarUsuarios();
-      } else {
-          dialog.showAlert({ type: 'danger', title: 'Erro', description: "Erro ao desvincular." });
-      }
+  // --- FUNÇÕES UTILITÁRIAS ---
+  const handleUnlinkCompany = async () => { 
+      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+localStorage.getItem('token')}, body: JSON.stringify({ id: editingUser.id, unlinkCompany: true }) });
+      if(res.ok) { dialog.showAlert("Empresa desvinculada."); setEditingUser(null); carregarUsuarios(); }
   };
-
-  const handleUpdateCnpj = async () => {
-      if(!novoCnpj || novoCnpj.length < 14) return dialog.showAlert({ type: 'warning', description: "Digite um CNPJ válido (14 dígitos)." });
-      
-      const res = await fetch('/api/admin/users', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + localStorage.getItem('token')
-          },
-          body: JSON.stringify({ 
-              id: editingUser.id, 
-              empresaId: editingUser.empresa?.id,
-              newCnpj: novoCnpj
-          })
-      });
-
-      const data = await res.json();
-      if(res.ok) {
-          dialog.showAlert({ type: 'success', description: data.message });
-          setEditingUser(null);
-          carregarUsuarios();
-      } else {
-          dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error || "Erro ao processar." });
-      }
+  const handleUpdateCnpj = async () => { 
+      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+localStorage.getItem('token')}, body: JSON.stringify({ id: editingUser.id, empresaId: editingUser.empresa?.id, newCnpj: novoCnpj }) });
+      if(res.ok) { dialog.showAlert("CNPJ atualizado."); setEditingUser(null); carregarUsuarios(); }
+  };
+  const handleSendReset = async () => { await fetch('/api/auth/forgot-password', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ email: editingUser.email }) }); dialog.showAlert("Email enviado."); };
+  const handleResetEmail = async () => { 
+      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+localStorage.getItem('token')}, body: JSON.stringify({ id: editingUser.id, resetEmail: true }) });
+      if(res.ok) { dialog.showAlert("Email resetado."); setEditingUser(null); carregarUsuarios(); }
   };
   
-  const handleSendReset = async () => {
-      const confirmed = await dialog.showConfirm({
-          title: 'Resetar Senha',
-          description: `Enviar e-mail de redefinição para ${editingUser.email}?`,
-          confirmText: 'Enviar E-mail'
-      });
-      if(!confirmed) return;
-
-      try {
-          const res = await fetch('/api/auth/forgot-password', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: editingUser.email })
-          });
-          
-          if(res.ok) dialog.showAlert({ type: 'success', description: "E-mail de recuperação enviado!" });
-          else dialog.showAlert({ type: 'danger', description: "Erro ao enviar e-mail." });
-
-      } catch (e) { dialog.showAlert("Erro de conexão."); }
-  };
-
-  const handleResetEmail = async () => {
-    const confirmed = await dialog.showConfirm({
-        title: 'Forçar Troca de E-mail',
-        description: `O e-mail atual (${editingUser.email}) será removido. No próximo login (via CPF), o usuário será obrigado a cadastrar um novo.\n\nDeseja continuar?`,
-        type: 'danger',
-        confirmText: 'Sim, Resetar E-mail'
-    });
-    if(!confirmed) return;
-
-    try {
-        const res = await fetch('/api/admin/users', {
-            method: 'PUT',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + localStorage.getItem('token')
-            },
-            body: JSON.stringify({ id: editingUser.id, resetEmail: true })
-        });
-        
-        if(res.ok) {
-            dialog.showAlert({ type: 'success', title: 'Feito', description: "E-mail resetado com sucesso." });
-            setEditingUser(null);
-            carregarUsuarios();
-        } else {
-            dialog.showAlert({ type: 'danger', description: "Erro ao resetar e-mail." });
-        }
-    } catch (e) { dialog.showAlert("Erro de conexão."); }
-  };
-
   const abrirEdicao = (user: any) => {
       const ciclo = user.planoCiclo || 'MENSAL';
-      // Se for SEM_PLANO, trata como SUSPENDED no select
       const slug = user.plano === 'SEM_PLANO' ? 'SUSPENDED' : (user.plano || 'GRATUITO');
-      
-      setEditingUser({
-          ...user,
-          planoCombinado: `${slug}|${ciclo}`
-      });
+      setEditingUser({ ...user, planoCombinado: `${slug}|${ciclo}` });
       setNovoCnpj(user.empresa ? user.empresa.documento : '');
-      
-      // Reseta modal
-      setJustificativa('');
-      setAdminPassword('');
+      setJustificativa(''); setAdminPassword('');
   }
 
-  const acessarSuporte = async (targetId: string) => {
-    const adminId = localStorage.getItem('userId');
-    if (adminId) localStorage.setItem('adminBackUpId', adminId);
+  // === 3. ABRIR HISTÓRICO ===
+  const abrirHistorico = (user: any) => {
+      setHistoryUser(user);
+      setLoadingHistory(true);
+      setHistoryData([]); // Limpa dados anteriores
 
-    try {
-        const res = await fetch('/api/admin/impersonate', {
-            method: 'POST', body: JSON.stringify({ targetUserId: targetId })
-        });
-        const data = await res.json();
-        
-        if (data.success) {
-            localStorage.removeItem('empresaContextId'); 
-            localStorage.setItem('userId', data.fakeSession.id);
-            localStorage.setItem('userRole', data.fakeSession.role);
-            localStorage.setItem('isSupportMode', 'true');
-            router.push('/cliente/dashboard');
-        } else {
-             dialog.showAlert({ type: 'danger', description: "Falha ao iniciar sessão." });
-        }
-    } catch (error) { 
-        dialog.showAlert({ type: 'danger', description: "Erro ao acessar conta do cliente." }); 
+      fetch(`/api/admin/users/${user.id}/history`, {
+          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+      })
+      .then(async (r) => {
+          if (r.status === 404) {
+              console.error("Rota de histórico não encontrada (404). Verifique se o arquivo app/api/admin/users/[id]/history/route.ts existe.");
+              return []; 
+          }
+          const json = await r.json();
+          return Array.isArray(json) ? json : [];
+      })
+      .then(setHistoryData)
+      .catch((err) => {
+          console.error(err);
+          setHistoryData([]);
+      })
+      .finally(() => setLoadingHistory(false));
+  };
+
+  const acessarSuporte = async (targetId: string) => {
+    const res = await fetch('/api/admin/impersonate', { method: 'POST', body: JSON.stringify({ targetUserId: targetId }) });
+    const data = await res.json();
+    if(data.success) { 
+        localStorage.setItem('userId', data.fakeSession.id); 
+        localStorage.setItem('userRole', data.fakeSession.role); 
+        localStorage.setItem('isSupportMode', 'true'); 
+        router.push('/cliente/dashboard'); 
     }
   };
 
@@ -252,7 +177,80 @@ export default function GestaoClientes() {
         </div>
       </div>
 
-      {/* === MODAL DE JUSTIFICATIVA E SENHA (NOVO) === */}
+      {/* === MODAL DE HISTÓRICO (TIMELINE) === */}
+      {historyUser && (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white p-0 rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+                <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+                    <div>
+                        <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                            <History className="text-blue-600"/> Histórico de Assinaturas
+                        </h3>
+                        <p className="text-sm text-slate-500">Cliente: <strong>{historyUser.nome}</strong></p>
+                    </div>
+                    <button onClick={() => setHistoryUser(null)}><X size={24} className="text-slate-400 hover:text-red-500"/></button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+                    {loadingHistory ? (
+                        <div className="flex items-center justify-center py-10 text-slate-400 gap-2">
+                            <RefreshCw className="animate-spin"/> Carregando...
+                        </div>
+                    ) : historyData.length === 0 ? (
+                        <div className="text-center text-slate-400 py-10 flex flex-col items-center">
+                            <p>Nenhum registro de histórico encontrado.</p>
+                            <p className="text-xs mt-1">(Verifique se a API /history retornou 404)</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {historyData.map((item: any) => (
+                                <div key={item.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex flex-col md:flex-row gap-4 relative overflow-hidden">
+                                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${item.origem === 'MANUAL_ADMIN' ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
+                                    
+                                    <div className="flex-1 pl-2">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <span className="text-lg font-bold text-slate-800">{item.plano}</span>
+                                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold border uppercase ${item.status === 'ATIVO' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                                                {item.status}
+                                            </span>
+                                        </div>
+                                        <div className="text-xs text-slate-500 flex flex-wrap gap-4 font-mono">
+                                            <span className="flex items-center gap-1"><Clock size={12}/> Início: {item.dataInicio ? new Date(item.dataInicio).toLocaleDateString() : '-'}</span>
+                                            {item.dataFim ? (
+                                                <span>Fim: {new Date(item.dataFim).toLocaleDateString()}</span>
+                                            ) : (
+                                                <span className="text-green-600 font-bold">Vitalício</span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="md:w-1/2 md:border-l border-t md:border-t-0 pl-0 md:pl-4 pt-4 md:pt-0 border-slate-100 flex flex-col justify-center">
+                                        <div className="flex items-start gap-2">
+                                            {item.origem === 'MANUAL_ADMIN' ? (
+                                                <UserCog size={18} className="text-amber-600 mt-0.5 shrink-0"/>
+                                            ) : (
+                                                <CheckCircle size={18} className="text-blue-600 mt-0.5 shrink-0"/>
+                                            )}
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">
+                                                    {item.origem === 'MANUAL_ADMIN' ? `Alterado por: ${item.adminNome}` : 'Via Sistema'}
+                                                </p>
+                                                <p className="text-sm text-slate-700 leading-snug italic bg-slate-50 p-2 rounded border border-slate-100">
+                                                    "{item.justificativa}"
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* === MODAL DE JUSTIFICATIVA E SENHA (AUDITORIA) === */}
       {showConfirmModal && (
           <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
               <div className="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm border-t-4 border-amber-500">
@@ -389,7 +387,7 @@ export default function GestaoClientes() {
                         >
                             <option value="SUSPENDED|DEFAULT" className="text-red-600 font-bold bg-red-50">⛔ SUSPENDER ACESSO / SEM PLANO</option>
                             <hr />
-                            {planosDisponiveis.map(p => {
+                            {(planosDisponiveis || []).map((p: any) => {
                                 if (Number(p.priceMonthly) === 0) {
                                     return <option key={`${p.slug}|MENSAL`} value={`${p.slug}|MENSAL`}>{p.name} (Gratuito)</option>
                                 }
@@ -449,6 +447,15 @@ export default function GestaoClientes() {
                             )}
                         </td>
                         <td className="p-4 text-right flex justify-end gap-2 items-center">
+                            {/* BOTÃO HISTÓRICO */}
+                            <button 
+                                onClick={() => abrirHistorico(cli)} 
+                                className="text-slate-600 hover:bg-slate-100 p-2 border border-slate-200 rounded transition" 
+                                title="Histórico de Assinaturas"
+                            >
+                                <History size={16}/>
+                            </button>
+                            
                             <button onClick={() => abrirEdicao(cli)} className="text-blue-600 hover:bg-blue-50 p-2 border border-blue-100 rounded transition" title="Gerenciar">
                                 <Edit size={16}/>
                             </button>
