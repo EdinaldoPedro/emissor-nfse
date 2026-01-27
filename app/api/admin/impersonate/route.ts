@@ -1,36 +1,48 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
   try {
+    // 1. Verificação de Segurança (NOVO)
+    const user = await getAuthenticatedUser(request);
+    if (!user) return unauthorized();
+
+    // Apenas Staff pode acessar
+    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+    if (!isStaff) return forbidden();
+
     const { targetUserId } = await request.json();
-    
-    // 1. Busca o usuário alvo
+
+    if (!targetUserId) {
+      return NextResponse.json({ error: 'ID do usuário alvo não fornecido.' }, { status: 400 });
+    }
+
     const targetUser = await prisma.user.findUnique({
-      where: { id: targetUserId }
+      where: { id: targetUserId },
+      include: { empresa: true }
     });
 
     if (!targetUser) {
-      return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
+      return NextResponse.json({ error: 'Usuário alvo não encontrado.' }, { status: 404 });
     }
 
-    // 2. Retorna os dados necessários para o Frontend "fingir" ser ele
-    // Nota: Em um sistema com JWT, aqui você geraria um token novo.
-    // Como estamos usando localStorage, vamos retornar os IDs.
+    // Retorna os dados da sessão "falsa" para o frontend usar
     return NextResponse.json({
       success: true,
       fakeSession: {
         id: targetUser.id,
         nome: targetUser.nome,
+        email: targetUser.email,
         role: targetUser.role,
-        // Adicionamos uma flag para o front saber que é modo suporte (opcional visual)
-        isImpersonating: true 
+        empresaId: targetUser.empresaId
       }
     });
 
   } catch (error) {
-    return NextResponse.json({ error: 'Erro ao gerar acesso.' }, { status: 500 });
+    console.error(error);
+    return NextResponse.json({ error: 'Erro interno ao tentar acessar conta.' }, { status: 500 });
   }
 }

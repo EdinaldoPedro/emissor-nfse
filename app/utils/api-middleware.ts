@@ -1,51 +1,42 @@
 import { NextResponse } from 'next/server';
+import { verifyJWT } from '@/app/utils/auth';
 import { PrismaClient } from '@prisma/client';
-import { verifyJWT } from './auth';
 
 const prisma = new PrismaClient();
 
-export interface AuthenticatedUser {
-  id: string;
-  role: string;
-  empresaId: string | null;
-}
-
-export async function getAuthenticatedUser(request: Request): Promise<AuthenticatedUser | null> {
-  // 1. Busca o token no Header Authorization
+export async function getAuthenticatedUser(request: Request) {
+  // 1. Busca o cabeçalho de autorização
   const authHeader = request.headers.get('Authorization');
-  
-  // Fallback temporário para não quebrar seu front antigo (remove isso depois de atualizar o front)
-  const legacyId = request.headers.get('x-user-id');
 
+  // 2. Se não tiver token, já retorna nulo (Bloqueia acesso)
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      // Se não tem token, mas tem o ID legado, fazemos uma checagem "fraca" (melhor que nada, mas inseguro)
-      // O ideal é remover esse bloco else if no futuro.
-      if (legacyId) {
-          const user = await prisma.user.findUnique({ where: { id: legacyId } });
-          return user ? { id: user.id, role: user.role, empresaId: user.empresaId } : null;
-      }
-      return null;
+    return null;
   }
 
+  // 3. Valida o Token
   const token = authHeader.split(' ')[1];
+  try {
+    const payload = await verifyJWT(token);
+    
+    // 4. Busca o usuário no banco para garantir que ele ainda existe/está ativo
+    if (payload && payload.sub) {
+        const user = await prisma.user.findUnique({
+            where: { id: payload.sub }
+        });
+        return user; // Retorna o usuário autenticado de verdade
+    }
+    return null;
 
-  // 2. Valida a assinatura do Token
-  const payload = await verifyJWT(token);
-  if (!payload || !payload.sub) return null;
-
-  // 3. (Item 4) Consulta o banco para garantir que o usuário ainda existe e pegar dados frescos
-  const user = await prisma.user.findUnique({
-      where: { id: payload.sub as string },
-      select: { id: true, role: true, empresaId: true } // Seleciona apenas o necessário
-  });
-
-  return user as AuthenticatedUser;
+  } catch (error) {
+    return null;
+  }
 }
 
+// Helpers de resposta (Mantenha-os no final do arquivo)
 export function unauthorized() {
-    return NextResponse.json({ error: 'Acesso não autorizado. Faça login novamente.' }, { status: 401 });
+  return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 }
 
 export function forbidden() {
-    return NextResponse.json({ error: 'Sem permissão para esta ação.' }, { status: 403 });
+  return NextResponse.json({ error: 'Acesso proibido' }, { status: 403 });
 }
