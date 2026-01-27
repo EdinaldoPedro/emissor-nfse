@@ -46,14 +46,14 @@ async function resolveUser(request: Request) {
 
 // === POST: EMISSÃO DE NOTA ===
 export async function POST(request: Request) {
-const user = await resolveUser(request);
+  const user = await resolveUser(request);
   if (!user) return unauthorized();
 
   const planCheck = await checkPlanLimits(user.id, 'EMITIR');
   if (!planCheck.allowed) {
       return NextResponse.json({ 
           error: planCheck.reason,
-          code: planCheck.status // Frontend pode usar isso para mostrar modal de upgrade
+          code: planCheck.status 
       }, { status: 403 });
   }
 
@@ -63,7 +63,7 @@ const user = await resolveUser(request);
 
   try {
     const body = await request.json();
-    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes } = body;
+    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes, numeroDPS, serieDPS } = body;
 
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
@@ -86,8 +86,25 @@ const user = await resolveUser(request);
     }
     vendaIdLog = venda.id;
 
-    const novoNumeroDPS = (prestador.ultimoDPS || 0) + 1;
-    await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: novoNumeroDPS } });
+    // === LÓGICA DE NUMERAÇÃO DPS ===
+    let dpsFinal = 0;
+    const serieFinal = serieDPS || prestador.serieDPS || '900';
+
+    if (numeroDPS) {
+        // Se veio manual (retry ou edição), usa o informado
+        dpsFinal = parseInt(numeroDPS);
+        
+        // Se o número informado for MAIOR que o último salvo, atualiza o contador
+        // para evitar conflitos nas próximas notas automáticas.
+        if (dpsFinal > (prestador.ultimoDPS || 0)) {
+            await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
+        }
+    } else {
+        // Lógica automática (Padrão)
+        dpsFinal = (prestador.ultimoDPS || 0) + 1;
+        await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
+    }
+    // ===============================
 
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
@@ -96,39 +113,19 @@ const user = await resolveUser(request);
     }
     if (!cnaeFinal) throw new Error("CNAE é obrigatório para emissão.");
 
-    // === LÓGICA DE INTELIGÊNCIA FISCAL (PRIORIDADES) ===
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
 
-    // 1. Padrão Estático (Hardcoded no utils)
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
          itemLc = infoEstatica.itemLC;
          codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
-    // 2. Regra Global (Admin - GlobalCnae) - Sobrescreve estático
     const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
     if (regraGlobal) {
         if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
         if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
-    }
-
-    // 3. Regra Municipal Específica (Admin - TributacaoMunicipal) - Sobrescreve tudo
-    if (prestador.codigoIbge) {
-        const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
-            where: {
-                cnae: cnaeFinal,
-                codigoIbge: prestador.codigoIbge
-            }
-        });
-
-        if (regraMunicipal) {
-            console.log(`[MOTOR FISCAL] Aplicando regra municipal específica para IBGE ${prestador.codigoIbge}`);
-            if (regraMunicipal.codigoTributacaoMunicipal) {
-                 // itemLc = regraMunicipal.codigoTributacaoMunicipal; 
-            }
-        }
     }
 
     // Prepara dados para a Factory
@@ -147,8 +144,8 @@ const user = await resolveUser(request);
             retencoes: retencoes
         },
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
-        numeroDPS: novoNumeroDPS,
-        serieDPS: prestador.serieDPS || '900'
+        numeroDPS: dpsFinal,
+        serieDPS: serieFinal
     };
 
     const strategy = EmissorFactory.getStrategy(prestador);
@@ -156,7 +153,7 @@ const user = await resolveUser(request);
 
     await createLog({
         level: 'INFO', action: 'EMISSAO_INICIADA',
-        message: `Iniciando transmissão DPS ${novoNumeroDPS}.`,
+        message: `Iniciando transmissão DPS ${dpsFinal} (Série ${serieFinal}).`,
         empresaId: prestador.id,
         vendaId: venda.id,
         details: { payloadOriginal: dadosParaEstrategia, xmlGerado: resultado.xmlGerado }
@@ -166,8 +163,10 @@ const user = await resolveUser(request);
         await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
         await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
-        if(planCheck.historyId) await incrementUsage(planCheck.historyId);
     }
+
+    // Incrementa uso se sucesso
+    if(planCheck.historyId) await incrementUsage(planCheck.historyId);
 
     const nota = await prisma.notaFiscal.create({
         data: {

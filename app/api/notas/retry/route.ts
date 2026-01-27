@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const { vendaId, dadosAtualizados } = await request.json();
 
-    // 1. Busca a venda original para pegar os dados de contexto (Empresa/Cliente)
+    // 1. Busca a venda original
     const venda = await prisma.venda.findUnique({
         where: { id: vendaId },
         include: { empresa: true, cliente: true }
@@ -27,8 +27,7 @@ export async function POST(request: Request) {
         vendaId: venda.id
     });
 
-    // 3. Atualiza os dados no banco antes de tentar emitir
-    // Isso garante que se a emissão ler do banco, lerá os dados novos
+    // 3. Atualiza os dados no banco
     await prisma.venda.update({
         where: { id: vendaId },
         data: {
@@ -38,15 +37,14 @@ export async function POST(request: Request) {
         }
     });
 
-    // 4. Define a URL Base Dinamicamente
-    // Se estiver rodando localmente, tenta pegar o host da requisição original
+    // 4. Define a URL Base
     const host = request.headers.get('host') || 'localhost:3000';
     const protocol = host.includes('localhost') ? 'http' : 'https';
     const baseUrl = process.env.URL_API_LOCAL || `${protocol}://${host}`;
     
     console.log(`[RETRY] Disparando para: ${baseUrl}/api/notas`);
 
-    // 5. Chamada Interna para a API de Emissão
+    // 5. Chamada Interna
     const resEmissao = await fetch(`${baseUrl}/api/notas`, {
         method: 'POST',
         headers: { 
@@ -55,19 +53,20 @@ export async function POST(request: Request) {
             'x-empresa-id': venda.empresaId 
         },
         body: JSON.stringify({
-            vendaId: venda.id, // <--- CORREÇÃO CRUCIAL: Passa o ID para o controller saber que é atualização
+            vendaId: venda.id,
             clienteId: venda.clienteId,
             valor: dadosAtualizados.valor || venda.valor,
             descricao: dadosAtualizados.descricao || venda.descricao,
-            codigoCnae: dadosAtualizados.cnae // Mapeia o campo cnae do form para codigoCnae da API
+            codigoCnae: dadosAtualizados.cnae,
+            // === NOVOS CAMPOS PARA CONTROLE DE DPS ===
+            numeroDPS: dadosAtualizados.numeroDPS,
+            serieDPS: dadosAtualizados.serieDPS
         })
     });
 
-    // 6. Tratamento da Resposta
     const resultado = await resEmissao.json();
 
     if (!resEmissao.ok) {
-        // Se a emissão falhou, atualiza status para ERRO
         await prisma.venda.update({ where: { id: vendaId }, data: { status: 'ERRO_EMISSAO' } });
         return NextResponse.json(resultado, { status: resEmissao.status });
     }

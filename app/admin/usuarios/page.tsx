@@ -25,7 +25,7 @@ export default function GestaoClientes() {
   const [adminPassword, setAdminPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // === NOVO: ESTADOS PARA HISTÓRICO DE PLANOS ===
+  // === ESTADOS PARA HISTÓRICO DE PLANOS ===
   const [historyUser, setHistoryUser] = useState<any>(null);
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -133,14 +133,14 @@ export default function GestaoClientes() {
   const abrirHistorico = (user: any) => {
       setHistoryUser(user);
       setLoadingHistory(true);
-      setHistoryData([]); // Limpa dados anteriores
+      setHistoryData([]); 
 
       fetch(`/api/admin/users/${user.id}/history`, {
           headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
       })
       .then(async (r) => {
           if (r.status === 404) {
-              console.error("Rota de histórico não encontrada (404). Verifique se o arquivo app/api/admin/users/[id]/history/route.ts existe.");
+              console.error("Rota de histórico não encontrada (404).");
               return []; 
           }
           const json = await r.json();
@@ -155,8 +155,13 @@ export default function GestaoClientes() {
   };
 
   const acessarSuporte = async (targetId: string) => {
+    // 1. SALVAR QUEM É O ADMIN ANTES DE TROCAR (IMPORTANTE!)
+    const adminId = localStorage.getItem('userId');
+    if (adminId) localStorage.setItem('adminBackUpId', adminId);
+
     const res = await fetch('/api/admin/impersonate', { method: 'POST', body: JSON.stringify({ targetUserId: targetId }) });
     const data = await res.json();
+    
     if(data.success) { 
         localStorage.setItem('userId', data.fakeSession.id); 
         localStorage.setItem('userRole', data.fakeSession.role); 
@@ -177,7 +182,7 @@ export default function GestaoClientes() {
         </div>
       </div>
 
-      {/* === MODAL DE HISTÓRICO (TIMELINE) === */}
+      {/* === MODAL DE HISTÓRICO === */}
       {historyUser && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white p-0 rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">

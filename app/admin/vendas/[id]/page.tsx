@@ -143,13 +143,22 @@ function LogRow({ log }: { log: any }) {
 export default function DetalheVendaCompleto() {
   const { id } = useParams();
   const router = useRouter();
+  const dialog = useDialog();
+
   const [venda, setVenda] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<'dados' | 'xml' | 'logs'>('dados');
-  const [formData, setFormData] = useState({ descricao: '', valor: '', cnae: '' });
-  const dialog = useDialog();
+  
+  // === ESTADO DO FORMULÁRIO (Incluindo DPS) ===
+  const [formData, setFormData] = useState({ 
+    descricao: '', 
+    valor: '', 
+    cnae: '',
+    numeroDPS: '', // Novo
+    serieDPS: ''   // Novo
+  });
 
   const fetchVenda = (silent = false) => {
     if (!silent && !venda) setLoading(true);
@@ -157,25 +166,33 @@ export default function DetalheVendaCompleto() {
         .then(r => r.json())
         .then(data => {
             setVenda(data);
+            
+            // Só atualiza o form se não estiver editando, para não sobrescrever o que o usuário digita
             if (!isEditing && !silent) {
                 let cnaeSalvo = data.notas?.[0]?.cnae || '';
+                let dpsSalvo = '';
+                let serieSalva = '';
                 
-                // Tenta recuperar CNAE do payload se não houver nota
-                if (!cnaeSalvo) {
-                    try {
-                        const logComPayload = data.logs.find((l: any) => l.details && (l.details.includes('payloadOriginal') || l.details.includes('codigoCnae')));
-                        if (logComPayload) {
-                            let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
-                            if (raw.payloadOriginal) raw = raw.payloadOriginal;
-                            cnaeSalvo = raw?.servico?.cnae || raw?.servico?.codigoCnae || '';
-                        }
-                    } catch(e) {}
-                }
+                // Tenta recuperar dados (CNAE e DPS) dos logs de tentativas anteriores
+                try {
+                    const logComPayload = data.logs.find((l: any) => l.details && (l.details.includes('payloadOriginal') || l.details.includes('codigoCnae')));
+                    if (logComPayload) {
+                        let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
+                        if (raw.payloadOriginal) raw = raw.payloadOriginal;
+                        
+                        cnaeSalvo = cnaeSalvo || raw?.servico?.cnae || raw?.servico?.codigoCnae || '';
+                        // Pega o número que foi tentado
+                        dpsSalvo = raw?.numeroDPS || '';
+                        serieSalva = raw?.serieDPS || '';
+                    }
+                } catch(e) {}
 
                 setFormData({
                     descricao: data.descricao || '',
                     valor: data.valor ? String(data.valor).replace('.', ',') : '',
-                    cnae: cnaeSalvo
+                    cnae: cnaeSalvo,
+                    numeroDPS: dpsSalvo,
+                    serieDPS: serieSalva
                 });
             }
         })
@@ -184,6 +201,8 @@ export default function DetalheVendaCompleto() {
   };
 
   useEffect(() => { fetchVenda(); }, [id]);
+  
+  // Polling para atualizar status se estiver processando
   useEffect(() => {
       let interval: NodeJS.Timeout;
       if (venda && venda.status === 'PROCESSANDO') { interval = setInterval(() => fetchVenda(true), 3000); }
@@ -202,15 +221,21 @@ export default function DetalheVendaCompleto() {
       const payloadEnvio = { ...formData, valor: parseValor(formData.valor) };
       
       try {
+          // Atualiza dados básicos da venda
           await fetch(`/api/admin/vendas/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadEnvio) });
           
           if (reenviar) {
-              const resRetry = await fetch('/api/notas/retry', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: JSON.stringify({ vendaId: id, dadosAtualizados: payloadEnvio }) });
+              const resRetry = await fetch('/api/notas/retry', { 
+                  method: 'POST', 
+                  headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, 
+                  // Envia também numeroDPS e serieDPS para a API de retry usar
+                  body: JSON.stringify({ vendaId: id, dadosAtualizados: payloadEnvio }) 
+              });
+              
               const dataRetry = await resRetry.json();
               if(!resRetry.ok) throw new Error(dataRetry.error || "Erro no processamento.");
               
               await dialog.showAlert({ type: 'success', title: 'Processando', description: "🚀 Reenvio iniciado! Acompanhe na aba de Logs." });
-              // REMOVIDO: alert("🚀 Reenvio iniciado! Acompanhe na aba de Logs.");
               
               setIsEditing(false);
               setVenda((prev: any) => ({ ...prev, status: 'PROCESSANDO' }));
@@ -218,14 +243,11 @@ export default function DetalheVendaCompleto() {
               setTimeout(() => fetchVenda(true), 1000);
           } else {
               await dialog.showAlert({ type: 'success', title: 'Salvo', description: "Dados atualizados com sucesso." });
-              // REMOVIDO: alert("✅ Salvo.");
-              
               setIsEditing(false);
               fetchVenda();
           }
       } catch (error: any) { 
         dialog.showAlert({ type: 'danger', title: 'Erro', description: error.message });
-        // REMOVIDO: alert("❌ " + error.message);
         setTimeout(() => fetchVenda(true), 1000); 
       } finally { 
         setProcessing(false); 
@@ -263,12 +285,11 @@ export default function DetalheVendaCompleto() {
                       venda.status === 'ERRO_EMISSAO' ? 'bg-red-100 text-red-700 border-red-200' : 
                       venda.status === 'PROCESSANDO' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-700';
 
-  // --- LÓGICA DE EXTRAÇÃO DO PAYLOAD (JSON) ---
+  // --- LÓGICA DE EXTRAÇÃO DO PAYLOAD PARA EXIBIÇÃO (JSON PRETTY) ---
   let prettyPayload = "// Payload indisponível";
   let xmlEnvioParaDownload = null;
 
   try { 
-      // Procura nos logs o evento de emissão (sucesso ou falha)
       const logComPayload = venda.logs.find((l: any) => 
           (l.action === 'NOTA_AUTORIZADA' || l.action === 'FALHA_EMISSAO' || l.action === 'DPS_GERADA') 
           && l.details
@@ -276,21 +297,15 @@ export default function DetalheVendaCompleto() {
 
       if (logComPayload) {
           let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
-          
-          // Se tiver o campo novo 'payloadOriginal', usa ele
           if (raw.payloadOriginal) {
                raw = raw.payloadOriginal;
           }
-
           prettyPayload = JSON.stringify(raw, null, 2); 
           if (raw?.xmlGerado) xmlEnvioParaDownload = raw.xmlGerado;
-      }
-      // Fallback antigo
-      else if (venda.payloadJson) {
+      } else if (venda.payloadJson) {
           const raw = JSON.parse(venda.payloadJson);
           prettyPayload = JSON.stringify(raw, null, 2);
       }
-      
   } catch(e) {}
 
   return (
@@ -337,6 +352,36 @@ export default function DetalheVendaCompleto() {
                     <section className={`bg-white rounded-xl shadow-sm border p-6 transition-all ${isEditing ? 'border-blue-300 ring-4 ring-blue-50' : 'border-slate-200'}`}>
                         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2 border-b pb-2"><Building size={16}/> Dados do Serviço</h3>
                         <div className="space-y-4">
+                            {/* === NOVOS CAMPOS DE CONTROLE DPS (SÓ APARECEM NA EDIÇÃO) === */}
+                            {isEditing && (
+                                <div className="grid grid-cols-2 gap-6 bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                                    <div className="col-span-2 text-xs font-bold text-yellow-800 uppercase mb-1 flex items-center gap-1">
+                                        <AlertTriangle size={12}/> Controle de Numeração (DPS)
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 mb-1">Número DPS</label>
+                                        <input 
+                                            className="w-full p-2 border rounded font-mono text-sm bg-white focus:ring-2 focus:ring-yellow-400 outline-none" 
+                                            value={formData.numeroDPS} 
+                                            onChange={e => setFormData({...formData, numeroDPS: e.target.value})}
+                                            placeholder="Automático (Vazio)"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 mb-1">Série</label>
+                                        <input 
+                                            className="w-full p-2 border rounded font-mono text-sm bg-white focus:ring-2 focus:ring-yellow-400 outline-none" 
+                                            value={formData.serieDPS} 
+                                            onChange={e => setFormData({...formData, serieDPS: e.target.value})}
+                                            placeholder="Ex: 900"
+                                        />
+                                    </div>
+                                    <p className="col-span-2 text-[10px] text-yellow-700">
+                                        * Mantenha o número igual ao da tentativa falha para reaproveitar o sequencial, ou deixe em branco para gerar um novo (incrementar).
+                                    </p>
+                                </div>
+                            )}
+
                             <div>
                                 <label className="block text-xs font-bold text-slate-400 mb-1">Descrição</label>
                                 {isEditing ? <textarea className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-800 text-sm" rows={4} value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value})}/> : <div className="p-3 bg-slate-50 rounded border text-slate-700 whitespace-pre-wrap text-sm border-slate-100">{venda.descricao}</div>}
