@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { syncCnaesGlobalmente } from '@/app/services/syncService'; 
 import forge from 'node-forge';
+import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
 // GET
 export async function GET(request: Request) {
-  const userId = request.headers.get('x-user-id');
+  const { targetId, errorResponse } = await validateRequest(request);
+  if (errorResponse) return errorResponse;
+
+  const userId = targetId;
   const contextEmpresaId = request.headers.get('x-empresa-id');
 
   if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });

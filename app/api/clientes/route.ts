@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { upsertEmpresaAndLinkUser } from "../../services/empresaService";
+import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
@@ -24,8 +25,12 @@ async function getEmpresaContexto(userId: string, contextId: string | null) {
 
 // GET: Lista de Clientes (COM TODOS OS DADOS)
 export async function GET(request: Request) {
+    const { targetId, errorResponse } = await validateRequest(request);
+      if (errorResponse) return errorResponse;
+
   try {
-    const userId = request.headers.get('x-user-id');
+  
+    const userId = targetId;
     const contextId = request.headers.get('x-empresa-id'); 
 
     if (!userId) return NextResponse.json([], { status: 200 });

@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldAlert, LogOut } from 'lucide-react'; 
-import AppTour from '@/components/AppTour'; // <--- NOVO IMPORT
+import { ShieldAlert, LogOut, ArrowLeftCircle } from 'lucide-react'; // Ícone novo
+import AppTour from '@/components/AppTour';
 
 export default function ClienteLayout({ children }: { children: React.ReactNode }) {
   const [isSupport, setIsSupport] = useState(false);
@@ -10,26 +10,30 @@ export default function ClienteLayout({ children }: { children: React.ReactNode 
   const router = useRouter();
 
   useEffect(() => {
-    // Verifica se estamos no modo suporte
     setIsSupport(localStorage.getItem('isSupportMode') === 'true');
-    // Verifica se é contador acessando (tem um ID de empresa no contexto)
     setIsContadorContext(!!localStorage.getItem('empresaContextId')); 
   }, []);
 
   const sairDoSuporte = () => {
-    // RECUPERA O ADMIN
+    // 1. Recupera o ID original
     const adminId = localStorage.getItem('adminBackUpId');
+    
     if (adminId) {
+        // 2. Restaura a identidade do Admin
         localStorage.setItem('userId', adminId);
-        localStorage.setItem('userRole', 'ADMIN');
         
-        // Limpa sujeira
+        // Dica: Se o seu sistema usa 'userRole' para menu, restaure também se possível, 
+        // ou force um refresh para o backend enviar os dados novos.
+        // Por segurança, removemos as flags de "falso cliente"
         localStorage.removeItem('adminBackUpId');
         localStorage.removeItem('isSupportMode');
+        localStorage.removeItem('empresaContextId'); 
         
-        router.push('/admin/usuarios'); // Volta direto pra lista
+        // 3. Força a ida para o painel admin
+        window.location.href = '/admin/usuarios'; // Use window.location para forçar refresh limpo
     } else {
-        router.push('/login'); // Fallback se der erro
+        // Se perdeu o backup, infelizmente tem que relogar
+        router.push('/login');
     }
   };
 
