@@ -34,7 +34,13 @@ export default function MeusChamados() {
 
   const carregarDados = async () => {
     const userId = localStorage.getItem('userId');
-    const headers = { 'x-user-id': userId || '' };
+    const token = localStorage.getItem('token'); // <--- TOKEN
+    
+    // Header seguro
+    const headers = { 
+        'x-user-id': userId || '',
+        'Authorization': `Bearer ${token}` 
+    };
     
     setLoading(true);
     try {
@@ -69,10 +75,16 @@ export default function MeusChamados() {
       if(!confirm(termo)) return;
 
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token');
+
       try {
           const res = await fetch('/api/contador/vinculo', {
               method: 'PUT',
-              headers: {'Content-Type': 'application/json', 'x-user-id': userId || ''},
+              headers: {
+                  'Content-Type': 'application/json', 
+                  'x-user-id': userId || '',
+                  'Authorization': `Bearer ${token}` // <--- HEADER
+              },
               body: JSON.stringify({ vinculoId, acao })
           });
           
@@ -130,7 +142,7 @@ export default function MeusChamados() {
             </div>
         </div>
 
-        {/* --- ÁREA DE SOLICITAÇÕES DE ACESSO (CONTADOR) --- */}
+        {/* ÁREA DE SOLICITAÇÕES */}
         {solicitacoes.length > 0 && (
             <div className="bg-white border-l-4 border-orange-500 rounded-xl shadow-sm p-6 animate-in fade-in slide-in-from-top-4">
                 <div className="flex items-start gap-4 mb-4">
@@ -180,8 +192,6 @@ export default function MeusChamados() {
 
         {/* LISTA DE CHAMADOS */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            
-            {/* Barra de Filtro */}
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
                 <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm uppercase tracking-wide">
                     <Filter size={16} className="text-slate-400"/> Meus Tickets

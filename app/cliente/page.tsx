@@ -45,15 +45,27 @@ export default function MeusClientes() {
   const carregarClientes = async () => {
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
-    if (!userId) return;
+    const token = localStorage.getItem('token'); // <--- TOKEN
+
+    if (!userId || !token) return;
 
     try {
       const res = await fetch('/api/clientes', { 
-          headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } 
+          headers: { 
+              'x-user-id': userId, 
+              'x-empresa-id': contextId || '',
+              'Authorization': `Bearer ${token}` // <--- HEADER
+          } 
       });
       const dados = await res.json();
-      setClientes(dados);
-      setFilteredClientes(dados);
+      
+      // Se não for array, deve ser erro
+      if (Array.isArray(dados)) {
+          setClientes(dados);
+          setFilteredClientes(dados);
+      } else {
+          console.error("Erro ao carregar clientes:", dados);
+      }
     } catch (erro) { console.error(erro); } 
     finally { setLoading(false); }
   };
@@ -77,6 +89,7 @@ export default function MeusClientes() {
 
   const handleBuscarDocumento = async () => {
     const docLimpo = clienteAtual.documento.replace(/\D/g, '');
+    const token = localStorage.getItem('token');
     
     if (docLimpo.length === 11) {
         if (validarCPF(clienteAtual.documento)) {
@@ -92,7 +105,10 @@ export default function MeusClientes() {
         try {
             const res = await fetch('/api/external/cnpj', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}` // <--- HEADER (Se a rota externa exigir)
+                },
                 body: JSON.stringify({ cnpj: docLimpo })
             });
             const dados = await res.json();
@@ -173,12 +189,18 @@ export default function MeusClientes() {
     setSalvando(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
+    const token = localStorage.getItem('token');
 
     try {
       const metodo = clienteAtual.id ? 'PUT' : 'POST';
       const res = await fetch('/api/clientes', {
         method: metodo,
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-empresa-id': contextId || '' },
+        headers: { 
+            'Content-Type': 'application/json', 
+            'x-user-id': userId || '', 
+            'x-empresa-id': contextId || '',
+            'Authorization': `Bearer ${token}` // <--- HEADER
+        },
         body: JSON.stringify(clienteAtual)
       });
 
@@ -199,11 +221,16 @@ export default function MeusClientes() {
 
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
+    const token = localStorage.getItem('token');
 
     try {
       const res = await fetch(`/api/clientes?id=${id}`, {
         method: 'DELETE',
-        headers: { 'x-user-id': userId || '', 'x-empresa-id': contextId || '' }
+        headers: { 
+            'x-user-id': userId || '', 
+            'x-empresa-id': contextId || '',
+            'Authorization': `Bearer ${token}` // <--- HEADER
+        }
       });
       if (res.ok) { carregarClientes(); }
       else dialog.showAlert({ type: 'danger', description: "Erro ao excluir." });
@@ -214,7 +241,7 @@ export default function MeusClientes() {
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* CABEÇALHO ATUALIZADO COM BOTÃO VOLTAR */}
+        {/* CABEÇALHO */}
         <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
                 <button onClick={() => router.back()} className="p-2 hover:bg-slate-200 rounded-full transition text-slate-600">
@@ -233,7 +260,7 @@ export default function MeusClientes() {
             )}
         </div>
 
-        {/* MODAL */}
+        {/* MODAL (MANTIDO IGUAL) */}
         {isFormOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -279,7 +306,6 @@ export default function MeusClientes() {
                                 />
                             </div>
                             
-                            {/* CAMPOS EXCLUSIVOS PARA PJ */}
                             {isPJ && (
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Nome Fantasia</label>
@@ -356,7 +382,7 @@ export default function MeusClientes() {
             </div>
         )}
 
-        {/* LISTAGEM */}
+        {/* LISTAGEM (MANTIDO IGUAL) */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="relative w-full md:w-72">

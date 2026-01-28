@@ -1,11 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Building2, Search, User, Loader2, Edit, Save, X, MapPin, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
-// 1. Importamos o Dialog
 import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function BaseEmpresas() {
-  const dialog = useDialog(); // 2. Inicializamos
+  const dialog = useDialog();
   
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +26,11 @@ export default function BaseEmpresas() {
 
   const carregarEmpresas = (pagina: number, busca: string) => {
     setLoading(true);
-    fetch(`/api/admin/empresas?page=${pagina}&limit=10&search=${busca}`)
+    const token = localStorage.getItem('token'); // <--- Pega Token
+
+    fetch(`/api/admin/empresas?page=${pagina}&limit=10&search=${busca}`, {
+        headers: { 'Authorization': `Bearer ${token}` } // <--- Envia Token
+    })
       .then(r => r.json())
       .then(res => {
         setEmpresas(res.data || []);
@@ -39,15 +42,18 @@ export default function BaseEmpresas() {
   };
 
   const handleSave = async () => {
+      const token = localStorage.getItem('token');
       try {
           const res = await fetch('/api/admin/empresas', {
               method: 'PUT',
-              headers: {'Content-Type': 'application/json'},
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}` // <--- Envia Token
+              },
               body: JSON.stringify(editingEmpresa)
           });
           
           if(res.ok) {
-              // 3. Atualizado para Alert bonito
               await dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Cadastro atualizado!" });
               setEditingEmpresa(null);
               carregarEmpresas(page, termo);
@@ -57,32 +63,34 @@ export default function BaseEmpresas() {
       } catch (e) { dialog.showAlert("Erro de conexão."); }
   };
 
-  // === 4. DELETE COM PROMPT PADRÃO (SEGURANÇA) ===
   const handleDelete = async (id: string) => {
-      // Usa o showPrompt que exige digitar "EXCLUIR"
       const confirmacao = await dialog.showPrompt({
           type: 'danger',
-          title: 'Zona de Perigo: Excluir Empresa',
-          description: 'Esta ação apagará PERMANENTEMENTE a empresa, seus usuários vinculados e todo o histórico de notas emitidas.\n\nPara confirmar, digite a palavra EXCLUIR abaixo:',
+          title: 'Zona de Perigo',
+          description: 'Esta ação apagará PERMANENTEMENTE a empresa. Digite EXCLUIR:',
           validationText: 'EXCLUIR',
           placeholder: "Digite 'EXCLUIR'"
       });
       
       if (confirmacao !== 'EXCLUIR') return;
 
+      const token = localStorage.getItem('token');
       try {
-          const res = await fetch(`/api/admin/empresas?id=${id}`, { method: 'DELETE' });
+          const res = await fetch(`/api/admin/empresas?id=${id}`, { 
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` } // <--- Envia Token
+          });
           const data = await res.json();
 
           if (res.ok) {
-              await dialog.showAlert({ type: 'success', description: "Empresa removida com sucesso." });
-              setEditingEmpresa(null); // Fecha modal se estiver aberto
+              await dialog.showAlert({ type: 'success', description: "Empresa removida." });
+              setEditingEmpresa(null);
               carregarEmpresas(page, termo);
           } else {
               dialog.showAlert({ type: 'danger', title: 'Falha', description: data.error });
           }
       } catch (e) {
-          dialog.showAlert("Erro de conexão ao tentar excluir.");
+          dialog.showAlert("Erro de conexão.");
       }
   };
 
@@ -92,7 +100,7 @@ export default function BaseEmpresas() {
         <div>
             <h1 className="text-2xl font-bold text-slate-800">Base de Empresas</h1>
             <p className="text-sm text-slate-500">
-                {totalItems} registros encontrados. Gerencie dados cadastrais de Tomadores e Prestadores.
+                {totalItems} registros encontrados.
             </p>
         </div>
         <div className="relative">
@@ -131,7 +139,7 @@ export default function BaseEmpresas() {
                     </div>
                     
                     <div>
-                        <label className="block font-bold text-slate-500 mb-1">CNPJ (Somente Leitura)</label>
+                        <label className="block font-bold text-slate-500 mb-1">CNPJ</label>
                         <input className="w-full p-2 border rounded bg-gray-100 text-gray-500 cursor-not-allowed" value={editingEmpresa.documento} disabled />
                     </div>
                     <div>
@@ -149,7 +157,7 @@ export default function BaseEmpresas() {
                     </div>
 
                     <div className="md:col-span-2 mt-4 pt-4 border-t">
-                        <h4 className="font-bold text-blue-600 mb-3 flex items-center gap-2"><MapPin size={16}/> Endereço / Localização</h4>
+                        <h4 className="font-bold text-blue-600 mb-3 flex items-center gap-2"><MapPin size={16}/> Endereço</h4>
                         <div className="grid grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-xs text-gray-400">CEP</label>
@@ -176,16 +184,15 @@ export default function BaseEmpresas() {
                 </div>
 
                 <div className="mt-6 flex justify-between items-center border-t pt-4">
-                    {/* Botão de Excluir com Estilo Danger */}
                     <button 
                         onClick={() => handleDelete(editingEmpresa.id)} 
                         className="text-red-500 hover:bg-red-50 px-4 py-2 rounded flex items-center gap-2 font-bold transition text-xs border border-transparent hover:border-red-200"
                     >
-                        <Trash2 size={16}/> Excluir Cadastro
+                        <Trash2 size={16}/> Excluir
                     </button>
 
                     <button onClick={handleSave} className="bg-green-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-green-700 font-bold shadow-lg shadow-green-100">
-                        <Save size={18}/> Salvar Alterações
+                        <Save size={18}/> Salvar
                     </button>
                 </div>
             </div>

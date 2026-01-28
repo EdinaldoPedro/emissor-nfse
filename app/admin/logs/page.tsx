@@ -8,11 +8,19 @@ export default function SystemLogs() {
   const [filter, setFilter] = useState('');
 
   const carregar = () => {
-    fetch('/api/admin/logs').then(r => r.json()).then(setLogs);
+    const token = localStorage.getItem('token');
+    fetch('/api/admin/logs', {
+        headers: { 'Authorization': `Bearer ${token}` } // <--- Token
+    }).then(r => r.json()).then(data => {
+        if(Array.isArray(data.data)) setLogs(data.data);
+    });
   };
 
   useEffect(() => { carregar(); }, []);
 
+  // ... (RESTO IGUAL) ...
+  // Apenas a função 'carregar' mudou
+  
   const getIcon = (level: string) => {
       switch(level) {
           case 'ERRO': return <AlertTriangle className="text-red-500" size={18}/>;
@@ -44,10 +52,8 @@ export default function SystemLogs() {
         </div>
       </div>
 
-      {/* ÁREA PRINCIPAL (SPLIT VIEW) */}
+      {/* ÁREA PRINCIPAL */}
       <div className="flex gap-6 flex-1 overflow-hidden">
-          
-          {/* LISTA DE LOGS */}
           <div className="flex-1 bg-white rounded-xl shadow-sm border overflow-y-auto">
               <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 border-b sticky top-0">
@@ -85,7 +91,6 @@ export default function SystemLogs() {
               </table>
           </div>
 
-          {/* DETALHES (O SCRIPT/JSON) */}
           {selectedLog && (
               <div className="w-1/3 bg-slate-900 text-slate-300 rounded-xl p-4 flex flex-col shadow-xl">
                   <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
@@ -94,19 +99,15 @@ export default function SystemLogs() {
                   </div>
                   
                   <div className="space-y-4 font-mono text-xs overflow-y-auto flex-1">
-                      <div>
-                          <span className="text-slate-500">ID:</span> {selectedLog.id}
-                      </div>
-                      <div>
-                          <span className="text-slate-500">Data:</span> {new Date(selectedLog.createdAt).toLocaleString()}
-                      </div>
+                      <div><span className="text-slate-500">ID:</span> {selectedLog.id}</div>
+                      <div><span className="text-slate-500">Data:</span> {new Date(selectedLog.createdAt).toLocaleString()}</div>
                       <div>
                           <span className="text-slate-500">Empresa:</span><br/>
                           <span className="text-yellow-400">{selectedLog.empresa?.razaoSocial || 'N/A'}</span>
                       </div>
                       
                       <div className="bg-black/50 p-2 rounded border border-slate-700">
-                          <p className="text-blue-400 mb-1">// Payload / Detalhes Técnicos</p>
+                          <p className="text-blue-400 mb-1">// Payload / Detalhes</p>
                           <pre className="whitespace-pre-wrap break-all text-green-400">
                               {selectedLog.details || 'Nenhum detalhe adicional.'}
                           </pre>

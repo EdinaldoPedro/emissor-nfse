@@ -9,8 +9,11 @@ export default function ListaEmissores() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Busca na API correta de monitoramento
-    fetch('/api/admin/emissoes')
+    const token = localStorage.getItem('token');
+    
+    fetch('/api/admin/emissoes', {
+        headers: { 'Authorization': `Bearer ${token}` } // <--- Token adicionado
+    })
       .then(async (r) => {
         if (!r.ok) throw new Error('Falha ao buscar emissores');
         return r.json();
@@ -21,7 +24,7 @@ export default function ListaEmissores() {
       })
       .catch((err) => {
         console.error(err);
-        setError('Não foi possível carregar a lista de monitoramento.');
+        setError('Não foi possível carregar a lista.');
         setLoading(false);
       });
   }, []);
@@ -33,12 +36,8 @@ export default function ListaEmissores() {
     </div>
   );
 
-  if(error) return (
-      <div className="p-8 text-center text-red-500 bg-red-50 rounded-lg m-6 border border-red-200">
-          <AlertTriangle className="mx-auto mb-2" size={32}/>
-          <p>{error}</p>
-      </div>
-  );
+  // ... (RESTO DO ARQUIVO IGUAL)
+  if(error) return <div className="p-8 text-center text-red-500">{error}</div>;
 
   return (
     <div className="p-6">
@@ -62,7 +61,6 @@ export default function ListaEmissores() {
             emissores.map(emp => (
                 <Link key={emp.id} href={`/admin/emissoes/${emp.id}`}>
                     <div className="bg-white p-6 rounded-xl shadow-sm border hover:border-blue-400 transition cursor-pointer group relative overflow-hidden">
-                        {/* Indicador lateral de status (Vermelho se teve erro recente) */}
                         <div className={`absolute left-0 top-0 bottom-0 w-1 ${emp.errosRecentes > 0 ? 'bg-red-500' : 'bg-green-500'}`}></div>
 
                         <div className="flex justify-between items-start pl-4">

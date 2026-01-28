@@ -12,13 +12,30 @@ export default function ClienteDashboard() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    if(userId) {
-        fetch('/api/perfil', { headers: {'x-user-id': userId}})
-        .then(res => res.json())
+    const token = localStorage.getItem('token'); // <--- 1. PEGA O TOKEN
+
+    if(userId && token) {
+        fetch('/api/perfil', { 
+            headers: {
+                'x-user-id': userId,
+                'Authorization': `Bearer ${token}` // <--- 2. ENVIA O TOKEN
+            }
+        })
+        .then(res => {
+            if (res.status === 401) {
+                // Se der 401, o token venceu ou é inválido
+                window.location.href = '/login';
+                return null;
+            }
+            return res.json();
+        })
         .then(data => {
-            setNomeUsuario(data.nome);
-            setPlanoDetalhes(data.planoDetalhado);
-        });
+            if(data) {
+                setNomeUsuario(data.nome);
+                setPlanoDetalhes(data.planoDetalhado);
+            }
+        })
+        .catch(console.error);
     }
   }, []);
   
@@ -29,10 +46,8 @@ export default function ClienteDashboard() {
   const isAdminPlan = planoDetalhes?.slug === 'ADMIN_ACCESS';
   
   // === LÓGICA DE TRAVAMENTO ===
-  // Bloqueia se: Expirado OU Inativo (Sem plano)
   const isBloqueado = planoDetalhes?.status === 'EXPIRADO' || planoDetalhes?.status === 'INATIVO' || (diasRestantes !== null && diasRestantes < 0);
   
-  // Define texto do alerta
   const tituloAlerta = planoDetalhes?.status === 'INATIVO' ? 'Nenhum Plano Ativo' : 'Plano Expirado';
   const descAlerta = planoDetalhes?.status === 'INATIVO' 
     ? 'Para começar a emitir notas, você precisa escolher um plano.' 
@@ -54,7 +69,6 @@ export default function ClienteDashboard() {
 
       <div className="p-8 max-w-6xl mx-auto space-y-8">
         
-        {/* === ALERTA DE BLOQUEIO (VERMELHO) === */}
         {isBloqueado && (
             <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-r-xl shadow-sm flex flex-col md:flex-row justify-between items-center gap-4 animate-in slide-in-from-top">
                 <div className="flex items-center gap-4">
@@ -72,7 +86,6 @@ export default function ClienteDashboard() {
             </div>
         )}
 
-        {/* BANNER TRIAL (Só mostra se ativo e válido) */}
         {!isAdminPlan && !isBloqueado && planoDetalhes?.slug === 'TRIAL' && diasRestantes !== null && diasRestantes >= 0 && (
             <div className="tour-emitir-card bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-2xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4 animate-in slide-in-from-top duration-500">
                 <div className="flex items-center gap-4">
