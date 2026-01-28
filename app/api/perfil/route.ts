@@ -149,6 +149,7 @@ export async function GET(request: Request) {
     email: user.email,
     cpf: user.cpf,
     telefone: user.telefone,
+    cargo: user.cargo,
     tutorialStep: user.tutorialStep, 
     
     configuracoes: {
@@ -184,7 +185,8 @@ export async function PUT(request: Request) {
 
     const userDataToUpdate: any = {
         nome: body.nome,
-        telefone: body.telefone
+        telefone: body.telefone,
+        cargo: body.perfil?.cargo || body.cargo
     };
 
     if (body.configuracoes) {

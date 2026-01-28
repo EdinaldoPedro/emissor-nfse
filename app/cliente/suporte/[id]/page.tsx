@@ -15,8 +15,12 @@ export default function DetalheTicketCliente() {
 
   const carregar = () => {
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token'); // <--- 1. Token
       fetch(`/api/suporte/tickets/${id}`, {
-          headers: { 'x-user-id': userId || '' }
+          headers: { 
+              'x-user-id': userId || '',
+              'Authorization': `Bearer ${token}` // <--- 2. Envio
+          }
       }).then(r => r.json()).then(setTicket);
   };
 
@@ -41,10 +45,15 @@ export default function DetalheTicketCliente() {
   const enviarMsg = async () => {
       if(!novaMsg.trim() && !anexo) return;
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token'); // <--- 1. Token
       
       await fetch('/api/suporte/tickets/mensagem', {
           method: 'POST',
-          headers: {'Content-Type':'application/json', 'x-user-id': userId || ''},
+          headers: {
+              'Content-Type':'application/json', 
+              'x-user-id': userId || '',
+              'Authorization': `Bearer ${token}` // <--- 2. Envio
+          },
           body: JSON.stringify({ 
               ticketId: id, 
               mensagem: novaMsg,

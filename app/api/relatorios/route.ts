@@ -1,21 +1,25 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { checkPlanLimits } from '@/app/services/planService'; // <--- IMPORTADO
+import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
 export async function GET(request: Request) {
-  const userId = request.headers.get('x-user-id');
+  const { targetId, errorResponse } = await validateRequest(request);
+  if (errorResponse) return errorResponse;
+
+  const userId = targetId;
   const contextId = request.headers.get('x-empresa-id');
   
   if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
   // === TRAVA DE SEGURANÇA (RELATÓRIOS) ===
   // Bloqueia acesso se estiver INATIVO ou EXPIRADO
-  const planCheck = await checkPlanLimits(userId, 'EMITIR'); // Usa regra rigorosa
+  const planCheck = await checkPlanLimits(userId, 'EMITIR');
   if (!planCheck.allowed) {
       return NextResponse.json({ 
-          error: 'Acesso a relatórios bloqueado. ' + planCheck.reason,
+          error: 'Acesso bloqueado: ' + planCheck.reason,
           code: planCheck.status 
       }, { status: 403 });
   }

@@ -139,11 +139,18 @@ export default function EmitirNotaPage() {
   // === CARREGAMENTO INICIAL ===
   useEffect(() => {
     const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId');
-    if(!userId) { router.push('/login'); return; }
+    if(!userId || !token) { router.push('/login'); return; }
 
     // Perfil
-    fetch('/api/perfil', { headers: { 'x-user-id': userId } })
+    fetch('/api/perfil', { 
+        headers: { 
+            'x-user-id': userId,
+            'Authorization': `Bearer ${token}`,
+            'x-empresa-id': contextId || ''
+        } 
+    })
       .then(res => res.json())
       .then(data => {
          if(data && !data.error) {
@@ -164,8 +171,14 @@ export default function EmitirNotaPage() {
          }
       }).catch(console.error);
 
-    // Clientes
-    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
+    // Clientes (Corrigido para enviar token e header correto)
+    fetch('/api/clientes', { 
+        headers: { 
+            'x-user-id': userId, 
+            'x-empresa-id': contextId || '',
+            'Authorization': `Bearer ${token}` 
+        } 
+    })
       .then(res => res.json())
       .then(data => {
           if (Array.isArray(data)) setClientes(data);
@@ -175,7 +188,12 @@ export default function EmitirNotaPage() {
     // Modo Retry
     if (retryId) {
         setLoadingRetry(true);
-        fetch(`/api/vendas/${retryId}`, { headers: { 'x-user-id': userId } })
+        fetch(`/api/vendas/${retryId}`, { 
+            headers: { 
+                'x-user-id': userId,
+                'Authorization': `Bearer ${token}` 
+            } 
+        })
             .then(async res => {
                 if (res.ok) {
                     const venda = await res.json();
@@ -197,65 +215,129 @@ export default function EmitirNotaPage() {
     }
   }, [router, retryId]);
 
-  // Autocomplete Cliente
+  // Autocomplete Cliente (Corrigido para buscar na lista local primeiro)
   useEffect(() => {
     const docLimpo = novoCliente.documento.replace(/\D/g, '');
     if (docLimpo.length === 11 || docLimpo.length === 14) {
         const local = clientes.find(c => c.documento && c.documento.replace(/\D/g, '') === docLimpo);
-        if (local) preencherFormulario(local);
-        else buscarNaBaseGlobal(docLimpo);
+        if (local) {
+            preencherFormulario(local);
+        }
     }
-  }, [novoCliente.documento, clientes]);
+  }, [novoCliente.documento, clientes]); // Adicionado 'clientes' na dependência
 
   const preencherFormulario = (dados: any) => {
       setNovoCliente(prev => ({
-          ...prev, nome: dados.nome || dados.razaoSocial, nomeFantasia: dados.nomeFantasia || '', inscricaoMunicipal: dados.inscricaoMunicipal || '', email: dados.email || '', cep: dados.cep || '', logradouro: dados.logradouro || '', numero: dados.numero || '', bairro: dados.bairro || '', cidade: dados.cidade || '', uf: dados.uf || '', codigoIbge: dados.codigoIbge || ''
+          ...prev, 
+          nome: dados.nome || dados.razaoSocial, 
+          nomeFantasia: dados.nomeFantasia || '', 
+          inscricaoMunicipal: dados.inscricaoMunicipal || '', 
+          email: dados.email || '', 
+          cep: dados.cep || '', 
+          logradouro: dados.logradouro || '', 
+          numero: dados.numero || '', 
+          bairro: dados.bairro || '', 
+          cidade: dados.cidade || '', 
+          uf: dados.uf || '', 
+          codigoIbge: dados.codigoIbge || ''
       }));
       setClienteEncontrado(true);
       setTimeout(() => setClienteEncontrado(false), 3000);
   };
 
-  const buscarNaBaseGlobal = async (docLimpo: string) => {
-      setBuscandoDoc(true);
-      try {
-          const userId = localStorage.getItem('userId');
-          const res = await fetch('/api/clientes/check', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: JSON.stringify({ documento: docLimpo }) });
-          if (res.ok) { const dados = await res.json(); if (dados) { preencherFormulario(dados); return true; } }
-      } catch (e) { console.error(e); } finally { setBuscandoDoc(false); }
-      return false;
-  };
-
+  // Função Unificada de Busca (Local -> Remota)
   const buscarDocumentoNovo = async () => {
     const docLimpo = novoCliente.documento.replace(/\D/g, '');
-    const local = clientes.find(c => c.documento.replace(/\D/g, '') === docLimpo);
-    if (local) { preencherFormulario(local); return; }
     
-    if(docLimpo.length === 11) {
-        if(validarCPF(novoCliente.documento)) dialog.showAlert({ type: 'success', title: 'CPF Válido', description: 'Preencha os dados.' });
-        else dialog.showAlert({ type: 'warning', description: 'CPF Inválido.' });
-        return;
+    // 1. Tenta achar na lista local (cache)
+    const local = clientes.find(c => c.documento.replace(/\D/g, '') === docLimpo);
+    if (local) { 
+        preencherFormulario(local); 
+        dialog.showAlert({ type: 'success', description: 'Cliente encontrado na sua base!' });
+        return; 
     }
+    
+    const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token');
+
+    // 2. Se for CNPJ, busca na API Externa
     if(docLimpo.length === 14) {
         setBuscandoDoc(true);
         try {
-            const res = await fetch('/api/external/cnpj', { method: 'POST', body: JSON.stringify({ cnpj: docLimpo }) });
+            const res = await fetch('/api/external/cnpj', { 
+                method: 'POST', 
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}` 
+                }, 
+                body: JSON.stringify({ cnpj: docLimpo }) 
+            });
             const dados = await res.json();
             if(res.ok) {
                 setNovoCliente(prev => ({ ...prev, ...dados, nome: dados.razaoSocial, nomeFantasia: dados.nomeFantasia, codigoIbge: dados.codigoIbge || '' }));
-                dialog.showAlert({ type: 'success', description: 'Dados encontrados!' });
-            } else { dialog.showAlert("CNPJ não encontrado."); }
+                dialog.showAlert({ type: 'success', description: 'Dados encontrados na Receita!' });
+            } else { 
+                dialog.showAlert("CNPJ não encontrado na base externa."); 
+            }
         } catch (e) { dialog.showAlert("Erro de conexão."); } finally { setBuscandoDoc(false); }
         return;
     }
+    
+    // 3. Se for CPF
+    if(docLimpo.length === 11) {
+        if(validarCPF(novoCliente.documento)) {
+             // Tenta buscar na base global de clientes (se existir essa rota)
+             setBuscandoDoc(true);
+             try {
+                const res = await fetch('/api/clientes/check', {
+                    method: 'POST', 
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'x-user-id': userId || '',
+                        'Authorization': `Bearer ${token}`
+                    }, 
+                    body: JSON.stringify({ documento: docLimpo })
+                });
+                if (res.ok) {
+                    const dados = await res.json();
+                    if (dados) {
+                         preencherFormulario(dados);
+                         dialog.showAlert({ type: 'success', description: 'Cliente encontrado na base global!' });
+                    } else {
+                        dialog.showAlert({ type: 'info', title: 'CPF Válido', description: 'Preencha os dados manualmente.' });
+                    }
+                } else {
+                    dialog.showAlert({ type: 'info', title: 'CPF Válido', description: 'Preencha os dados manualmente.' });
+                }
+             } catch(e) {
+                 dialog.showAlert({ type: 'info', title: 'CPF Válido', description: 'Preencha os dados manualmente.' });
+             } finally {
+                 setBuscandoDoc(false);
+             }
+        } else { 
+            dialog.showAlert({ type: 'warning', description: 'CPF Inválido.' }); 
+        }
+        return;
+    }
+
     dialog.showAlert("Documento inválido.");
   }
 
   const buscarCepNovo = async () => {
       const cepLimpo = novoCliente.cep.replace(/\D/g, '');
       if (cepLimpo.length !== 8) return;
+      
+      const token = localStorage.getItem('token');
       setBuscandoCep(true);
       try {
-          const res = await fetch('/api/external/cep', { method: 'POST', body: JSON.stringify({ cep: cepLimpo }) });
+          const res = await fetch('/api/external/cep', { 
+              method: 'POST', 
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}` 
+              },
+              body: JSON.stringify({ cep: cepLimpo }) 
+          });
           const dados = await res.json();
           if (res.ok) { setNovoCliente(prev => ({ ...prev, logradouro: dados.logradouro, bairro: dados.bairro, cidade: dados.localidade || dados.cidade, uf: dados.uf, codigoIbge: dados.codigoIbge })); } 
           else { dialog.showAlert({ type: 'warning', description: 'CEP não encontrado.' }); }
@@ -277,13 +359,23 @@ export default function EmitirNotaPage() {
   const handleNext = async () => {
     if (step === 1 && modoCliente === 'novo') {
         const userId = localStorage.getItem('userId');
+        const token = localStorage.getItem('token');
         const docLimpo = novoCliente.documento.replace(/\D/g, '');
+        
         if (docLimpo.length === 11 && !validarCPF(novoCliente.documento)) return dialog.showAlert({ type: 'danger', title: 'Erro', description: "CPF Inválido." });
         if (!novoCliente.nome) return dialog.showAlert("Informe o Nome/Razão Social.");
         
         setLoading(true); 
         try {
-            const res = await fetch('/api/clientes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, body: JSON.stringify(novoCliente) });
+            const res = await fetch('/api/clientes', { 
+                method: 'POST', 
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'x-user-id': userId || '',
+                    'Authorization': `Bearer ${token}` 
+                }, 
+                body: JSON.stringify(novoCliente) 
+            });
             if (res.ok) {
                 const criado = await res.json();
                 setNfData({ ...nfData, clienteId: criado.id, clienteNome: criado.nome });
@@ -304,6 +396,7 @@ export default function EmitirNotaPage() {
     setProgressStatus("Preparando envio...");
 
     const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token');
     
     try {
       const payloadRetencoes = {
@@ -320,7 +413,11 @@ export default function EmitirNotaPage() {
 
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+        headers: { 
+            'Content-Type': 'application/json', 
+            'x-user-id': userId || '',
+            'Authorization': `Bearer ${token}` 
+        },
         body: JSON.stringify({
           clienteId: nfData.clienteId,
           valor: nfData.valor,
