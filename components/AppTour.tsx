@@ -63,32 +63,40 @@ export default function AppTour() {
     }
   };
 
-  // === 3. INICIALIZAÇÃO (LÓGICA CORRIGIDA) ===
+  // === 3. INICIALIZAÇÃO BLINDADA ===
   useEffect(() => {
+    // Roda apenas no cliente
     if (typeof window === 'undefined') return;
 
-    // Reseta estado para evitar lixo de memória
-    setRun(false);
-    setStepIndex(0);
-
     const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token');
 
-    if (userId) {
-      // Busca perfil no banco
-      // IMPORTANTE: Adicionei timestamp para evitar cache do navegador (fix do problema de "não resetou")
-      fetch(`/api/perfil?t=${Date.now()}`, { headers: { 'x-user-id': userId } })
+    if (userId && token) {
+      // Adiciona timestamp para evitar cache do navegador e forçar dados frescos
+      fetch(`/api/perfil?t=${Date.now()}`, { 
+          headers: { 
+              'x-user-id': userId,
+              'Authorization': `Bearer ${token}` 
+          } 
+      })
         .then(r => r.json())
         .then(user => {
-            // Agora 'user.tutorialStep' vai existir porque corrigimos a API!
-            // Se step < 4 (0, 1, 2, 3), roda o tutorial.
+            // Só roda se o step for menor que 4 (não concluído) e se for um número válido
             if (typeof user.tutorialStep === 'number' && user.tutorialStep < 4) {
                configurarPassos(); 
-               setTimeout(() => setRun(true), 800); // Delay para UI carregar
+               
+               // Pequeno delay para garantir que o DOM renderizou
+               setTimeout(() => {
+                   setStepIndex(0); // Garante início do zero
+                   setRun(true);
+               }, 1000);
+            } else {
+                setRun(false); // Garante que pare se já tiver terminado
             }
         })
         .catch(err => console.error("Erro Tour:", err));
     }
-  }, [pathname]);
+  }, [pathname]); // Recarrega ao mudar de rota
 
   const handleJoyrideCallback = async (data: CallBackProps) => {
     const { status, index, type } = data;
@@ -99,7 +107,7 @@ export default function AppTour() {
       setRun(false);
       setStepIndex(0);
 
-      // Salva e Navega
+      // Salva e Navega para o próximo fluxo
       if (pathname.includes('/configuracoes/minha-conta')) {
           await atualizarBanco(2);
           router.push('/configuracoes');
@@ -109,24 +117,30 @@ export default function AppTour() {
           router.push('/cliente/dashboard');
       } 
       else if (pathname.includes('/cliente/dashboard')) {
-          await atualizarBanco(4);
+          await atualizarBanco(4); // 4 = Concluído geral
       }
     }
   };
 
   const atualizarBanco = async (step: number) => {
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token');
       if(!userId) return;
+      
       await fetch('/api/perfil/tutorial', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+          headers: { 
+              'Content-Type': 'application/json', 
+              'x-user-id': userId,
+              'Authorization': `Bearer ${token}` 
+          },
           body: JSON.stringify({ step })
       });
   };
 
   return (
     <Joyride
-      key={pathname} // IMPORTANTE: Força remontagem ao trocar rota
+      key={pathname} // Força remontagem ao trocar rota
       steps={steps}
       run={run}
       stepIndex={stepIndex} 

@@ -30,14 +30,14 @@ export default function MinhaContaPage() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); // <--- 1. Pega o Token
+    const token = localStorage.getItem('token'); 
 
     if (!userId || !token) { router.push('/login'); return; }
 
     fetch('/api/perfil', { 
         headers: { 
             'x-user-id': userId,
-            'Authorization': `Bearer ${token}` // <--- 2. Envia o Token
+            'Authorization': `Bearer ${token}` 
         } 
     })
       .then(res => {
@@ -48,6 +48,12 @@ export default function MinhaContaPage() {
         setData(prev => ({
             ...prev,
             ...apiData,
+            // CORREÇÃO: Mapeia o cargo vindo da API para o estado local
+            perfil: {
+                cargo: apiData.cargo || '', 
+                empresa: apiData.razaoSocial || '',
+                avatarUrl: ''
+            },
             planoDetalhado: apiData.planoDetalhado || prev.planoDetalhado,
             planoCiclo: apiData.planoCiclo || 'MENSAL'
         }));
@@ -64,25 +70,21 @@ export default function MinhaContaPage() {
           setLoading(false); 
       });
   }, [router]);
-
-  // ... (RESTANTE DO CÓDIGO PERMANECE IGUAL) ...
-  // Lembre-se de verificar se as funções 'handleSalvar' ou 'handlePlanChange' 
-  // também precisam do token. Normalmente sim.
   
   const handlePlanChange = async (newSlug: string, newCiclo: string) => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); // <--- Token
+    const token = localStorage.getItem('token'); 
     try {
         const res = await fetch('/api/admin/users', { 
             method: 'PUT',
             headers: { 
                 'Content-Type': 'application/json', 
                 'x-user-id': userId || '',
-                'Authorization': `Bearer ${token}` // <--- Token
+                'Authorization': `Bearer ${token}` 
             },
             body: JSON.stringify({ id: userId, plano: newSlug, planoCiclo: newCiclo }) 
         });
-        // ... (resto da função)
+        
         if(res.ok) {
             setShowPlans(false);
             setMsg('✅ Plano atualizado! Recarregando...');
@@ -97,11 +99,13 @@ export default function MinhaContaPage() {
       e.preventDefault();
       setSaving(true);
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); // <--- Token
+      const token = localStorage.getItem('token'); 
       try {
         const { planoDetalhado, planoCiclo, ...restData } = data;
         const payload = {
             ...restData,
+            // Envia o cargo explicitamente na raiz ou dentro de perfil (o backend aceita ambos agora)
+            cargo: restData.perfil.cargo, 
             configuracoes: {
                 ...restData.configuracoes,
                 darkMode: darkMode,
@@ -114,28 +118,30 @@ export default function MinhaContaPage() {
           headers: { 
               'Content-Type': 'application/json', 
               'x-user-id': userId || '',
-              'Authorization': `Bearer ${token}` // <--- Token
+              'Authorization': `Bearer ${token}` 
           },
           body: JSON.stringify(payload) 
         });
+        
         if (res.ok) { 
             setMsg('✅ Salvo!'); 
             setTimeout(() => setMsg(''), 3000); 
         } else {
             const err = await res.json();
-            alert("Erro ao salvar: " + err.error); // <--- AGORA VAI TE MOSTRAR O ERRO
+            alert("Erro ao salvar: " + (err.error || err.message));
         }
       } catch(e) {
-          alert("Erro de conexão."); // <--- AVISO DE CONEXÃO
+          alert("Erro de conexão."); 
       } finally { 
           setSaving(false); 
       }
-};
+  };
   
   const handleResetTutorial = async () => {
       const userId = localStorage.getItem('userId');
       const token = localStorage.getItem('token');
       if(!userId) return;
+      
       try {
           await fetch('/api/perfil/tutorial', {
               method: 'POST',
@@ -146,12 +152,12 @@ export default function MinhaContaPage() {
               },
               body: JSON.stringify({ step: 0 }) 
           });
-          window.location.reload(); 
-      } catch (e) {}
+          // Força recarregamento completo para reiniciar o AppTour
+          window.location.href = '/configuracoes/minha-conta'; 
+      } catch (e) {
+          alert("Erro ao reiniciar tutorial.");
+      }
   };
-
-  // ... (RETORNO DO JSX PERMANECE O MESMO) ...
-  // Apenas copie o JSX do arquivo original abaixo desta linha se necessário
   
   // Cálculos visuais
   const p = data.planoDetalhado;
@@ -299,7 +305,10 @@ export default function MinhaContaPage() {
                     <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1 dark:text-gray-400">Cargo / Função</label>
                         <input className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:bg-slate-900 dark:border-slate-600 dark:text-white" 
-                               value={data.perfil.cargo} onChange={e => setData({...data, perfil: {...data.perfil, cargo: e.target.value}})} />
+                               value={data.perfil.cargo} 
+                               onChange={e => setData({...data, perfil: {...data.perfil, cargo: e.target.value}})} 
+                               placeholder="Ex: Gerente"
+                        />
                     </div>
                 </div>
               </div>
