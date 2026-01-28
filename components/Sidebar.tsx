@@ -19,6 +19,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token'); // <--- 1. Pega Token
     const role = localStorage.getItem('userRole');
     
     if (role) {
@@ -27,18 +28,25 @@ export default function Sidebar() {
     }
 
     const fetchData = async () => {
-        if(userId) {
+        if(userId && token) {
             try {
                 const contextId = localStorage.getItem('empresaContextId');
                 
                 const res = await fetch('/api/perfil', { 
-                    headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' }
+                    headers: { 
+                        'x-user-id': userId, 
+                        'x-empresa-id': contextId || '',
+                        'Authorization': `Bearer ${token}` // <--- 2. Envia Token
+                    }
                 });
                 if(res.ok) setUserData(await res.json());
 
                 if (!checkIsStaff(role)) {
                     const resNotif = await fetch('/api/clientes/notificacoes', {
-                        headers: { 'x-user-id': userId }
+                        headers: { 
+                            'x-user-id': userId,
+                            'Authorization': `Bearer ${token}` // <--- 3. Envia Token aqui também
+                        }
                     });
                     if (resNotif.ok) {
                         const dataNotif = await resNotif.json();
@@ -50,10 +58,11 @@ export default function Sidebar() {
     };
 
     if (isOpen) fetchData(); 
-    fetchData();
+    // fetchData(); // Opcional: chamar ao montar se quiser dados antes de abrir
 
   }, [isOpen]); 
 
+  // ... (RESTO IGUAL) ...
   const handleLogout = () => {
     localStorage.clear();
     router.push('/login');
@@ -61,7 +70,6 @@ export default function Sidebar() {
 
   const abrirMenu = () => {
       setIsOpen(true);
-      // DISPARA EVENTO PARA O TUTORIAL SABER QUE ABRIU
       if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('tour:menu-opened'));
       }
@@ -113,7 +121,6 @@ export default function Sidebar() {
 
         <div className="p-6 space-y-8 flex-1 overflow-y-auto">
           
-          {/* SEÇÃO MINHA CONTA - CLASSE DO TOUR ADICIONADA */}
           <section className="tour-sidebar-perfil">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <User size={14} /> {t('menu', 'settings')}
@@ -134,7 +141,6 @@ export default function Sidebar() {
 
           <hr className="dark:border-slate-800" />
 
-          {/* SEÇÃO MINHA EMPRESA - CLASSE DO TOUR ADICIONADA */}
           <section className="tour-sidebar-empresa">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Briefcase size={14} /> Minha Empresa
@@ -160,7 +166,6 @@ export default function Sidebar() {
 
           <hr className="dark:border-slate-800" />
 
-          {/* SEÇÃO GESTÃO - CLASSE DO TOUR */}
           <section className="tour-sidebar-gestao">
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Settings size={14} /> Gestão

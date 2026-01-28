@@ -1,26 +1,26 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
 // GET: Lista vínculos
 export async function GET(request: Request) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
+  // 1. BLINDAGEM DE SEGURANÇA
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
 
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get('mode'); // 'contador' ou 'cliente'
 
   try {
-    const user = await prisma.user.findUnique({ 
-        where: { id: userId },
-        include: { empresa: true }
-    });
-
     // MODO CONTADOR: Lista empresas que eu atendo (ou pedi acesso)
     if (mode === 'contador') {
+        // Validação extra: Só quem tem role 'CONTADOR' (ou admin) deveria ver isso
+        if (!['CONTADOR', 'MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+
         const vinculos = await prisma.contadorVinculo.findMany({
-            where: { contadorId: userId },
+            where: { contadorId: user.id },
             include: { empresa: true },
             orderBy: { updatedAt: 'desc' }
         });
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 
     // MODO CLIENTE: Lista solicitações pendentes para MINHA empresa
     if (mode === 'cliente') {
-        if (!user?.empresaId) return NextResponse.json([]);
+        if (!user.empresaId) return NextResponse.json([]);
         
         const solicitacoes = await prisma.contadorVinculo.findMany({
             where: { 
@@ -50,8 +50,13 @@ export async function GET(request: Request) {
 
 // POST: Contador solicita vínculo
 export async function POST(request: Request) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+
+  // Apenas contadores podem solicitar
+  if (user.role !== 'CONTADOR' && !['MASTER','ADMIN'].includes(user.role)) {
+      return NextResponse.json({ error: 'Apenas contadores podem solicitar vínculo.' }, { status: 403 });
+  }
 
   try {
     const { cnpj } = await request.json();
@@ -69,7 +74,7 @@ export async function POST(request: Request) {
     // 2. Verifica se já existe vínculo
     const existente = await prisma.contadorVinculo.findUnique({
         where: {
-            contadorId_empresaId: { contadorId: userId, empresaId: empresaAlvo.id }
+            contadorId_empresaId: { contadorId: user.id, empresaId: empresaAlvo.id }
         }
     });
 
@@ -80,7 +85,7 @@ export async function POST(request: Request) {
     // 3. Cria solicitação PENDENTE
     await prisma.contadorVinculo.create({
         data: {
-            contadorId: userId,
+            contadorId: user.id,
             empresaId: empresaAlvo.id,
             status: 'PENDENTE'
         }
@@ -95,22 +100,18 @@ export async function POST(request: Request) {
 
 // PUT: Cliente aprova/rejeita
 export async function PUT(request: Request) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
 
   try {
     const { vinculoId, acao } = await request.json(); // acao: 'APROVAR' | 'REJEITAR'
     
-    // Verifica se o usuário é dono da empresa do vínculo
-    const user = await prisma.user.findUnique({ 
-        where: { id: userId }, 
-        include: { empresa: true } 
-    });
-
+    // O usuário DEVE ser o dono da empresa do vínculo para aprovar
+    // Ou seja, user.empresaId deve bater com vinculo.empresaId
     const vinculo = await prisma.contadorVinculo.findUnique({ where: { id: vinculoId } });
 
-    if (!vinculo || vinculo.empresaId !== user?.empresaId) {
-        return NextResponse.json({ error: 'Não autorizado.' }, { status: 403 });
+    if (!vinculo || vinculo.empresaId !== user.empresaId) {
+        return forbidden();
     }
 
     if (acao === 'REJEITAR') {

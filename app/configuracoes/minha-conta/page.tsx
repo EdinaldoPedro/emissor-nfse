@@ -20,7 +20,6 @@ export default function MinhaContaPage() {
     perfil: { cargo: '', empresa: '', avatarUrl: '' },
     configuracoes: { darkMode: false, idioma: 'pt-BR', notificacoesEmail: true },
     metadata: { createdAt: '', lastLoginAt: '', ipOrigem: '' },
-    // Campos detalhados
     planoDetalhado: { 
         nome: '', slug: '', status: '', 
         usoEmissoes: 0, limiteEmissoes: 0, 
@@ -31,10 +30,20 @@ export default function MinhaContaPage() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    if (!userId) { router.push('/login'); return; }
+    const token = localStorage.getItem('token'); // <--- 1. Pega o Token
 
-    fetch('/api/perfil', { headers: { 'x-user-id': userId } })
-      .then(res => res.json())
+    if (!userId || !token) { router.push('/login'); return; }
+
+    fetch('/api/perfil', { 
+        headers: { 
+            'x-user-id': userId,
+            'Authorization': `Bearer ${token}` // <--- 2. Envia o Token
+        } 
+    })
+      .then(res => {
+          if (res.status === 401) { throw new Error("Sessão expirada"); }
+          return res.json();
+      })
       .then(apiData => {
         setData(prev => ({
             ...prev,
@@ -49,31 +58,31 @@ export default function MinhaContaPage() {
         }
         setLoading(false);
       })
-      .catch(err => { console.error(err); setLoading(false); });
+      .catch(err => { 
+          console.error(err); 
+          if(err.message === "Sessão expirada") router.push('/login');
+          setLoading(false); 
+      });
   }, [router]);
 
-  const handleResetTutorial = async () => {
-      const userId = localStorage.getItem('userId');
-      if(!userId) return;
-      try {
-          await fetch('/api/perfil/tutorial', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
-              body: JSON.stringify({ step: 0 }) 
-          });
-          window.location.reload(); 
-      } catch (e) {}
-  };
-
+  // ... (RESTANTE DO CÓDIGO PERMANECE IGUAL) ...
+  // Lembre-se de verificar se as funções 'handleSalvar' ou 'handlePlanChange' 
+  // também precisam do token. Normalmente sim.
+  
   const handlePlanChange = async (newSlug: string, newCiclo: string) => {
     const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token'); // <--- Token
     try {
-        const res = await fetch('/api/admin/users', { // Usa a rota admin para processar a troca com a lógica de histórico
+        const res = await fetch('/api/admin/users', { 
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'x-user-id': userId || '',
+                'Authorization': `Bearer ${token}` // <--- Token
+            },
             body: JSON.stringify({ id: userId, plano: newSlug, planoCiclo: newCiclo }) 
         });
-
+        // ... (resto da função)
         if(res.ok) {
             setShowPlans(false);
             setMsg('✅ Plano atualizado! Recarregando...');
@@ -81,13 +90,14 @@ export default function MinhaContaPage() {
         } else {
             alert("Erro ao alterar plano.");
         }
-    } catch (e) { alert("Erro de conexão."); }
+    } catch(e) { alert("Erro de conexão."); }
   };
 
   const handleSalvar = async (e: React.FormEvent) => {
       e.preventDefault();
       setSaving(true);
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token'); // <--- Token
       try {
         const { planoDetalhado, planoCiclo, ...restData } = data;
         const payload = {
@@ -101,13 +111,38 @@ export default function MinhaContaPage() {
 
         const res = await fetch('/api/perfil', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+          headers: { 
+              'Content-Type': 'application/json', 
+              'x-user-id': userId || '',
+              'Authorization': `Bearer ${token}` // <--- Token
+          },
           body: JSON.stringify(payload) 
         });
         if (res.ok) { setMsg('✅ Salvo!'); setTimeout(() => setMsg(''), 3000); }
       } catch(e) {} finally { setSaving(false); }
   };
+  
+  const handleResetTutorial = async () => {
+      const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token');
+      if(!userId) return;
+      try {
+          await fetch('/api/perfil/tutorial', {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json', 
+                  'x-user-id': userId,
+                  'Authorization': `Bearer ${token}` 
+              },
+              body: JSON.stringify({ step: 0 }) 
+          });
+          window.location.reload(); 
+      } catch (e) {}
+  };
 
+  // ... (RETORNO DO JSX PERMANECE O MESMO) ...
+  // Apenas copie o JSX do arquivo original abaixo desta linha se necessário
+  
   // Cálculos visuais
   const p = data.planoDetalhado;
   const isIlimitado = p.limiteEmissoes === 0;
@@ -259,7 +294,7 @@ export default function MinhaContaPage() {
                 </div>
               </div>
 
-              {/* PREFERÊNCIAS (COM BOTÃO DE RESET DISCRETO) */}
+              {/* PREFERÊNCIAS */}
               <div className="tour-preferencias bg-white p-8 rounded-xl shadow-sm border border-gray-100 dark:bg-slate-800 dark:border-slate-700">
                 <h3 className="text-lg font-semibold text-gray-700 mb-6 flex items-center gap-2 dark:text-white">
                     <Settings size={20}/> Preferências
@@ -288,7 +323,6 @@ export default function MinhaContaPage() {
                         </select>
                     </div>
 
-                    {/* BOTÃO RESETAR - SÓ ÍCONE E TEXTO (DISCRETO) */}
                     <div className="pt-4 mt-4 border-t border-gray-100 dark:border-slate-700">
                         <button 
                             type="button" 

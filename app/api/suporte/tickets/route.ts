@@ -1,16 +1,19 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
-// GET (Mantido igual)
 export async function GET(request: Request) {
-    const userId = request.headers.get('x-user-id');
-    if (!userId) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    const user = await getAuthenticatedUser(request);
+    if (!user) return unauthorized();
+
     try {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        const isStaff = ['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(user?.role || '');
-        const whereClause = isStaff ? {} : { solicitanteId: userId };
+        const isStaff = ['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(user.role);
+        
+        // Se for staff, vê tudo (ou filtrado por atendente no futuro). Se cliente, só os dele.
+        const whereClause = isStaff ? {} : { solicitanteId: user.id };
+        
         const tickets = await prisma.ticket.findMany({
             where: whereClause,
             include: {
@@ -21,26 +24,26 @@ export async function GET(request: Request) {
             orderBy: { updatedAt: 'desc' }
         });
         return NextResponse.json(tickets);
-    } catch (e: any) { return NextResponse.json({ error: 'Erro ao buscar tickets' }, { status: 500 }); }
+    } catch (e: any) { 
+        return NextResponse.json({ error: 'Erro ao buscar tickets' }, { status: 500 }); 
+    }
 }
 
-// POST: Criar Novo Ticket (COM VERIFICAÇÃO)
 export async function POST(request: Request) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
 
   try {
     const body = await request.json();
     const { assuntoId, tituloManual, descricao, anexoBase64, anexoNome, prioridade, checkDuplicity, vendaIdReferencia } = body; 
 
-    // === VERIFICAÇÃO DE DUPLICIDADE (NOVA LÓGICA) ===
+    // Verificação de Duplicidade
     if (checkDuplicity && vendaIdReferencia) {
-        // Procura tickets abertos que contenham o ID da venda no título
         const duplicado = await prisma.ticket.findFirst({
             where: {
-                solicitanteId: userId,
-                assunto: { contains: vendaIdReferencia.split('-')[0] }, // Busca pelo ID curto
-                status: { notIn: ['RESOLVIDO', 'FECHADO'] } // Apenas abertos
+                solicitanteId: user.id,
+                assunto: { contains: vendaIdReferencia.split('-')[0] }, 
+                status: { notIn: ['RESOLVIDO', 'FECHADO'] }
             }
         });
 
@@ -49,7 +52,7 @@ export async function POST(request: Request) {
                 warning: 'DUPLICATE_FOUND', 
                 message: `Já existe o ticket #${duplicado.protocolo} aberto para esta venda.`,
                 ticketId: duplicado.id
-            }, { status: 409 }); // 409 Conflict
+            }, { status: 409 });
         }
     }
 
@@ -78,7 +81,7 @@ export async function POST(request: Request) {
         categoria: 'Suporte Técnico',
         descricao: descricao || 'Sem descrição',
         status: 'ABERTO',
-        solicitanteId: userId,
+        solicitanteId: user.id,
         anexoBase64: anexoBase64 || null,
         anexoNome: anexoNome || null
       }
@@ -87,7 +90,7 @@ export async function POST(request: Request) {
     await prisma.ticketMensagem.create({
         data: {
             ticketId: ticket.id,
-            usuarioId: userId,
+            usuarioId: user.id,
             mensagem: descricao || 'Abertura de chamado'
         }
     });

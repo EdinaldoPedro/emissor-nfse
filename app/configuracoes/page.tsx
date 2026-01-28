@@ -18,7 +18,6 @@ export default function ConfiguracoesEmpresa() {
   
   const [atividades, setAtividades] = useState<any[]>([]); 
 
-  // Certificado
   const [certFile, setCertFile] = useState<string | null>(null);
   const [certSenha, setCertSenha] = useState('');
   const [dadosCertificado, setDadosCertificado] = useState<{ativo: boolean, vencimento: string | null}>({ ativo: false, vencimento: null });
@@ -52,7 +51,9 @@ export default function ConfiguracoesEmpresa() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    if (!userId) { router.push('/login'); return; }
+    const token = localStorage.getItem('token'); // <--- 1. Pega o Token
+
+    if (!userId || !token) { router.push('/login'); return; }
 
     async function carregarDados() {
       try {
@@ -62,7 +63,8 @@ export default function ConfiguracoesEmpresa() {
         const res = await fetch('/api/perfil', { 
             headers: { 
                 'x-user-id': userId,
-                'x-empresa-id': contextId || '' 
+                'x-empresa-id': contextId || '',
+                'Authorization': `Bearer ${token}` // <--- 2. Envia o Token
             } 
         });
 
@@ -85,6 +87,8 @@ export default function ConfiguracoesEmpresa() {
 
           if (!dados.temCertificado) setModoEdicaoCertificado(true);
           if (dados.cadastroCompleto) setIsLocked(true);
+        } else if (res.status === 401) {
+            router.push('/login');
         }
       } catch (error) { console.error("Erro ao carregar perfil"); }
     }
@@ -93,15 +97,19 @@ export default function ConfiguracoesEmpresa() {
 
   const handleResetTutorial = async () => {
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token'); // <--- Token
       if(!userId) return;
 
       if(!confirm("Deseja ver o tutorial desta página novamente?")) return;
 
       try {
-          // Reseta para o passo 2 (Configurações)
           await fetch('/api/perfil/tutorial', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+              headers: { 
+                  'Content-Type': 'application/json', 
+                  'x-user-id': userId,
+                  'Authorization': `Bearer ${token}` // <--- Token
+              },
               body: JSON.stringify({ step: 2 }) 
           });
           window.location.reload();
@@ -112,6 +120,7 @@ export default function ConfiguracoesEmpresa() {
 
   const consultarCNPJ = async (forcarAtualizacao = false) => {
     const docLimpo = empresa.documento.replace(/\D/g, '');
+    const token = localStorage.getItem('token'); // <--- Token
     
     if (isLocked && !forcarAtualizacao) return; 
     if (docLimpo.length !== 14) { alert("CNPJ inválido."); return; }
@@ -120,7 +129,10 @@ export default function ConfiguracoesEmpresa() {
     try {
       const res = await fetch('/api/external/cnpj', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` // <--- Token
+        },
         body: JSON.stringify({ cnpj: docLimpo })
       });
       const dados = await res.json();
@@ -171,6 +183,7 @@ export default function ConfiguracoesEmpresa() {
     setLoading(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
+    const token = localStorage.getItem('token'); // <--- Token
 
     try {
       const res = await fetch('/api/perfil', {
@@ -178,7 +191,8 @@ export default function ConfiguracoesEmpresa() {
         headers: { 
             'Content-Type': 'application/json', 
             'x-user-id': userId || '',
-            'x-empresa-id': contextId || ''
+            'x-empresa-id': contextId || '',
+            'Authorization': `Bearer ${token}` // <--- Token
         },
         body: JSON.stringify({ 
             ...empresa, 
@@ -201,6 +215,7 @@ export default function ConfiguracoesEmpresa() {
     finally { setLoading(false); }
   };
 
+  // ... (JSX MANTIDO) ...
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-12">
       <div className="max-w-4xl mx-auto">
@@ -218,7 +233,6 @@ export default function ConfiguracoesEmpresa() {
                 </div>
             </div>
 
-            {/* BOTÃO REINICIAR TUTORIAL */}
             <button 
                 onClick={handleResetTutorial}
                 className="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition border border-blue-200"
@@ -255,7 +269,7 @@ export default function ConfiguracoesEmpresa() {
             </div>
         )}
 
-        <form onSubmit={handleSalvar} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <form onSubmit={(e) => handleSalvar(e)} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2">
@@ -265,7 +279,7 @@ export default function ConfiguracoesEmpresa() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">CNPJ</label>
-                <div className="flex gap-2 tour-cnpj-search"> {/* <--- TOUR ALVO */}
+                <div className="flex gap-2 tour-cnpj-search">
                   <div className="relative flex-1">
                     <Building2 className="absolute left-3 top-3 text-gray-400" size={20} />
                     <input type="text" className={`w-full pl-10 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono ${isLocked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`} placeholder="00000000000191" value={empresa.documento || ''} onChange={e => setEmpresa({...empresa, documento: e.target.value})} maxLength={18} disabled={isLocked} />
@@ -281,7 +295,7 @@ export default function ConfiguracoesEmpresa() {
               <div><label className="block text-sm font-medium text-gray-700 mb-2">Razão Social</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.razaoSocial || ''} readOnly /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-2">Nome Fantasia</label><input type="text" className="w-full p-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed" value={empresa.nomeFantasia || ''} readOnly /></div>
 
-              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 tour-tributacao"> {/* <--- TOUR ALVO */}
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 tour-tributacao">
                   <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Inscrição Municipal <span className="text-blue-600 text-xs">(Editável)</span></label>
                       <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
@@ -296,7 +310,6 @@ export default function ConfiguracoesEmpresa() {
                   </div>
               </div>
 
-              {/* CNAEs */}
               <div className="md:col-span-2 bg-gray-50 p-4 rounded-lg border border-gray-200 mt-2 opacity-80">
                 <div className="flex justify-between items-center mb-2">
                     <h4 className="text-sm font-bold text-gray-600 flex items-center gap-2">📋 Atividades (CNAEs) - Automático</h4>
@@ -323,7 +336,6 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
-          {/* DPS - TOUR ALVO */}
           <div className="p-8 border-b border-gray-100 bg-blue-50/30 tour-dps-config">
             <h3 className="text-lg font-semibold text-blue-800 mb-6 flex items-center gap-2">
               <Settings size={20} /> Numeração e Ambiente (DPS)
@@ -350,7 +362,6 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
-          {/* SEÇÃO 2: ENDEREÇO */}
           <div className="p-8 border-b border-gray-100">
             <h3 className="text-lg font-semibold text-blue-600 mb-6 flex items-center gap-2"><MapPin size={20} /> Endereço da Empresa</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -364,7 +375,6 @@ export default function ConfiguracoesEmpresa() {
             </div>
           </div>
 
-          {/* CERTIFICADO - TOUR ALVO */}
           <div className="p-8 bg-slate-50 border-t border-slate-200 tour-certificado">
             <h3 className="text-lg font-semibold text-slate-700 mb-6 flex items-center gap-2">
                 <Lock size={20} /> Certificado Digital A1
@@ -417,7 +427,6 @@ export default function ConfiguracoesEmpresa() {
                 {msg.texto}
               </div>
             )}
-            {/* TOUR ALVO: Botão Salvar */}
             <button type="submit" disabled={loading} className="tour-save-btn w-full md:w-auto px-12 py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-green-200 transform hover:scale-[1.02]">
               {loading ? 'Processando...' : <><Save size={20} /> Salvar Configurações</>}
             </button>
