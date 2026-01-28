@@ -118,9 +118,19 @@ export default function MinhaContaPage() {
           },
           body: JSON.stringify(payload) 
         });
-        if (res.ok) { setMsg('✅ Salvo!'); setTimeout(() => setMsg(''), 3000); }
-      } catch(e) {} finally { setSaving(false); }
-  };
+        if (res.ok) { 
+            setMsg('✅ Salvo!'); 
+            setTimeout(() => setMsg(''), 3000); 
+        } else {
+            const err = await res.json();
+            alert("Erro ao salvar: " + err.error); // <--- AGORA VAI TE MOSTRAR O ERRO
+        }
+      } catch(e) {
+          alert("Erro de conexão."); // <--- AVISO DE CONEXÃO
+      } finally { 
+          setSaving(false); 
+      }
+};
   
   const handleResetTutorial = async () => {
       const userId = localStorage.getItem('userId');
