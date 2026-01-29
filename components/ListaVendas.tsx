@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { Search, FileText, MoreVertical, Ban, RefreshCcw, Loader2, AlertCircle, FileCode, Printer, AlertTriangle, X, LifeBuoy } from 'lucide-react';
+// CORREÇÃO: Adicionado ChevronLeft e ChevronRight aos imports
+import { Search, FileText, MoreVertical, Ban, RefreshCcw, Loader2, AlertCircle, FileCode, Printer, AlertTriangle, X, LifeBuoy, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 

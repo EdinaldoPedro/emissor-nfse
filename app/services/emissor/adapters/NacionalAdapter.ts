@@ -28,7 +28,9 @@ export class NacionalAdapter {
     public toXml(rps: ICanonicalRps): string {
         const p = rps.prestador;
         const t = rps.tomador;
-        const s = rps.servico;
+        // CORREÇÃO: 'as any' adicionado para permitir acesso a 'codigoNbs' e 'codigoTributacaoMunicipal'
+        // mesmo que não estejam estritamente definidos na interface ICanonicalRps
+        const s = rps.servico as any;
         const m = rps.meta;
         
         // Blindagem de Retenções

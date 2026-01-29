@@ -60,12 +60,20 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 
   const api = {
     showAlert: async (opts: DialogOptions | string) => {
-      const config = typeof opts === 'string' ? { description: opts, type: 'info' } : opts;
-      await openDialog({ ...config, type: config.type || 'info', confirmText: 'OK' });
+      // CORREÇÃO: Garante a tipagem ao criar o objeto config
+      const config: DialogOptions = typeof opts === 'string' 
+        ? { description: opts, type: 'info' } 
+        : { ...opts, type: opts.type || 'info' }; // Fallback explícito
+      
+      await openDialog({ ...config, confirmText: 'OK' });
     },
     showConfirm: async (opts: DialogOptions | string) => {
-      const config = typeof opts === 'string' ? { description: opts, type: 'warning' } : opts;
-      return await openDialog({ ...config, type: config.type || 'warning' });
+      // CORREÇÃO: Mesma lógica para o confirm
+      const config: DialogOptions = typeof opts === 'string' 
+        ? { description: opts, type: 'warning' } 
+        : { ...opts, type: opts.type || 'warning' };
+
+      return await openDialog(config);
     },
     showPrompt: async (opts: DialogOptions) => {
       return await openDialog({ ...opts, type: 'prompt' });

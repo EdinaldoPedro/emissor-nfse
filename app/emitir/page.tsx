@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, Briefcase, Loader2, User, Home, Check, AlertTriangle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
@@ -31,7 +31,8 @@ interface ClienteDB {
   codigoIbge?: string;
 }
 
-export default function EmitirNotaPage() {
+// === COMPONENTE DE CONTEÚDO (Lógica Principal) ===
+function EmitirNotaContent() {
   const router = useRouter();
   const searchParams = useSearchParams(); 
   const retryId = searchParams.get('retry');
@@ -41,7 +42,7 @@ export default function EmitirNotaPage() {
   const [loading, setLoading] = useState(false);
   const [loadingRetry, setLoadingRetry] = useState(false);
   
-  // === NOVO: ESTADOS DE PROGRESSO VISUAL ===
+  // === ESTADOS DE PROGRESSO VISUAL ===
   const [progressStatus, setProgressStatus] = useState("Iniciando...");
   const [progressPercent, setProgressPercent] = useState(0);
   
@@ -171,7 +172,7 @@ export default function EmitirNotaPage() {
          }
       }).catch(console.error);
 
-    // Clientes (Corrigido para enviar token e header correto)
+    // Clientes
     fetch('/api/clientes', { 
         headers: { 
             'x-user-id': userId, 
@@ -215,7 +216,7 @@ export default function EmitirNotaPage() {
     }
   }, [router, retryId]);
 
-  // Autocomplete Cliente (Corrigido para buscar na lista local primeiro)
+  // Autocomplete Cliente
   useEffect(() => {
     const docLimpo = novoCliente.documento.replace(/\D/g, '');
     if (docLimpo.length === 11 || docLimpo.length === 14) {
@@ -224,7 +225,7 @@ export default function EmitirNotaPage() {
             preencherFormulario(local);
         }
     }
-  }, [novoCliente.documento, clientes]); // Adicionado 'clientes' na dependência
+  }, [novoCliente.documento, clientes]); 
 
   const preencherFormulario = (dados: any) => {
       setNovoCliente(prev => ({
@@ -286,7 +287,7 @@ export default function EmitirNotaPage() {
     // 3. Se for CPF
     if(docLimpo.length === 11) {
         if(validarCPF(novoCliente.documento)) {
-             // Tenta buscar na base global de clientes (se existir essa rota)
+             // Tenta buscar na base global de clientes
              setBuscandoDoc(true);
              try {
                 const res = await fetch('/api/clientes/check', {
@@ -436,7 +437,6 @@ export default function EmitirNotaPage() {
         setProgressPercent(90);
         setProgressStatus("NFS-e Autorizada! Buscando dados...");
         
-        // Pequena pausa para o usuário ver que deu certo
         await new Promise(r => setTimeout(r, 1000));
         
         setProgressPercent(100);
@@ -448,12 +448,11 @@ export default function EmitirNotaPage() {
         // 4. Erro: Alerta e Redireciona
         await dialog.showAlert({ type: 'danger', title: 'Falha na Emissão', description: resposta.error || 'A prefeitura rejeitou o lote.' });
         
-        // CORREÇÃO PEDIDA: Se falhar, volta para o Dashboard para não travar a tela
         router.push('/cliente/dashboard');
       }
     } catch (error) { 
         dialog.showAlert("Erro de Conexão. Verifique sua internet."); 
-        router.push('/cliente/dashboard'); // Redireciona também no erro de rede
+        router.push('/cliente/dashboard');
     } 
     finally { 
         setLoading(false); 
@@ -566,14 +565,14 @@ export default function EmitirNotaPage() {
                 )}
             </div>
             
-            {/* === ÁREA DE IMPOSTOS E RETENÇÕES (Lógica Dinâmica) === */}
+            {/* === ÁREA DE IMPOSTOS E RETENÇÕES === */}
             {perfilEmpresa?.regimeTributario !== 'MEI' && (
                 <div className="mt-6 border-t pt-4">
                     <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
                         <Calculator size={16}/> Retenções e Impostos
                     </h4>
 
-                    {/* 1. ISS RETIDO (SN e LP) */}
+                    {/* 1. ISS RETIDO */}
                     <div className="mb-4 bg-slate-50 p-3 rounded border">
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
@@ -581,7 +580,7 @@ export default function EmitirNotaPage() {
                         </label>
                     </div>
 
-                    {/* 2. INSS (Condicionado ao CNAE) */}
+                    {/* 2. INSS */}
                     {permiteINSS && (
                         <div className="bg-slate-50 p-3 rounded border mb-4 animate-in fade-in slide-in-from-top-2">
                             <div className="flex justify-between items-center mb-2">
@@ -610,7 +609,7 @@ export default function EmitirNotaPage() {
                         </div>
                     )}
 
-                    {/* 3. IMPOSTOS FEDERAIS (Só Lucro Presumido/Real) */}
+                    {/* 3. IMPOSTOS FEDERAIS */}
                     {['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario) && (
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                             {['pis', 'cofins', 'csll', 'ir'].map(imposto => (
@@ -680,7 +679,6 @@ export default function EmitirNotaPage() {
                     {loading ? <Loader2 className="animate-spin" size={18}/> : (step === 1 && modoCliente === 'novo' ? 'Cadastrar e Avançar' : 'Próximo')} <ArrowRight size={18} />
                 </button>
             ) : (
-                /* === MUDANÇA: BARRA DE PROGRESSO AO EMITIR === */
                 loading ? (
                     <div className="w-full max-w-xs">
                         <div className="flex justify-between text-xs font-bold text-blue-600 mb-1">
@@ -706,4 +704,13 @@ export default function EmitirNotaPage() {
       </div>
     </div>
   );
+}
+
+// === EXPORTAÇÃO COM SUSPENSE (Para corrigir o erro de build) ===
+export default function EmitirNotaPage() {
+    return (
+        <Suspense fallback={<div className="h-screen flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> Carregando...</div>}>
+            <EmitirNotaContent />
+        </Suspense>
+    );
 }

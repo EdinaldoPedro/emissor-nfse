@@ -27,11 +27,11 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
             // 2. Inteligência Fiscal
             const isMei = prestador.regimeTributario === 'MEI';
-            const aliquotaFinal = isMei ? 0 : (servico.valor > 0 ? (servico.aliquota || Number(prestador.aliquotaPadrao) || 0) : 0);
+            // Garante acesso a propriedade opcional 'aliquota'
+            const aliquotaFinal = isMei ? 0 : (servico.valor > 0 ? ((servico as any).aliquota || Number(prestador.aliquotaPadrao) || 0) : 0);
             const valorIss = (servico.valor * aliquotaFinal) / 100;
 
-            // === 3. TRATAMENTO DE RETENÇÕES (CORREÇÃO DE ROBUSTEZ) ===
-            // Garante que se vier null/undefined do banco/front, viram zeros aqui.
+            // === 3. TRATAMENTO DE RETENÇÕES ===
             const r = (servico as any).retencoes || {}; 
             const retencoes = {
                 pis: { valor: Number(r.pis?.valor) || 0, retido: !!r.pis?.retido },
@@ -41,9 +41,9 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                 csll: { valor: Number(r.csll?.valor) || 0, retido: !!r.csll?.retido }
             };
 
-            // Cálculo do Líquido (Valor Bruto - ISS Retido - Federais Retidos)
+            // Cálculo do Líquido
             let totalRetido = 0;
-            if (servico.issRetido) totalRetido += valorIss;
+            if ((servico as any).issRetido) totalRetido += valorIss;
             if (retencoes.pis.retido) totalRetido += retencoes.pis.valor;
             if (retencoes.cofins.retido) totalRetido += retencoes.cofins.valor;
             if (retencoes.inss.retido) totalRetido += retencoes.inss.valor;
@@ -65,7 +65,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     },
                     configuracoes: {
                         aliquotaPadrao: Number(prestador.aliquotaPadrao),
-                        issRetido: servico.issRetido !== undefined ? servico.issRetido : prestador.issRetidoPadrao,
+                        issRetido: (servico as any).issRetido !== undefined ? (servico as any).issRetido : prestador.issRetidoPadrao,
                         tipoTributacao: prestador.tipoTributacaoPadrao,
                         regimeEspecial: prestador.regimeEspecialTributacao
                     }
@@ -92,17 +92,18 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     codigoTributacaoNacional: servico.codigoTribNacional,
                     itemListaServico: servico.itemLc,
                     
-                    // Repassa propriedades para o Adapter saber se adiciona tags ou não
-                    codigoNbs: (servico as any).codigoNbs, // Caso venha do backend
-                    codigoTributacaoMunicipal: (servico as any).codigoTributacaoMunicipal, // Caso venha do backend
+                    // Repassa propriedades para o Adapter
+                    codigoNbs: (servico as any).codigoNbs,
+                    codigoTributacaoMunicipal: (servico as any).codigoTributacaoMunicipal,
 
                     aliquotaAplicada: aliquotaFinal,
                     valorIss: valorIss,
-                    issRetido: servico.issRetido || false,
+                    issRetido: (servico as any).issRetido || false,
                     tipoTributacao: prestador.tipoTributacaoPadrao || '1',
                     
-                    retencoes: retencoes // Agora garantido que não é undefined
-                },
+                    retencoes: retencoes
+                } as any, 
+                
                 meta: {
                     ambiente: ambiente,
                     serie: serieDPS,
@@ -186,7 +187,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     numeroNota: numeroReal || '0',
                     protocolo: protocoloRecuperado, 
                     xmlDistribuicao: Buffer.from(xmlRetorno).toString('base64'),
-                    pdfBase64: null,
+                    pdfBase64: undefined, // CORREÇÃO: undefined ao invés de null
                     motivo: 'Consulta realizada com sucesso.'
                 };
             }

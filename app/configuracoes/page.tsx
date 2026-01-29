@@ -51,7 +51,7 @@ export default function ConfiguracoesEmpresa() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); // <--- 1. Pega o Token
+    const token = localStorage.getItem('token'); 
 
     if (!userId || !token) { router.push('/login'); return; }
 
@@ -62,9 +62,9 @@ export default function ConfiguracoesEmpresa() {
 
         const res = await fetch('/api/perfil', { 
             headers: { 
-                'x-user-id': userId,
+                'x-user-id': userId || '', // CORREÇÃO AQUI: Adicionado || ''
                 'x-empresa-id': contextId || '',
-                'Authorization': `Bearer ${token}` // <--- 2. Envia o Token
+                'Authorization': `Bearer ${token}` 
             } 
         });
 
@@ -97,7 +97,7 @@ export default function ConfiguracoesEmpresa() {
 
   const handleResetTutorial = async () => {
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); // <--- Token
+      const token = localStorage.getItem('token');
       if(!userId) return;
 
       if(!confirm("Deseja ver o tutorial desta página novamente?")) return;
@@ -107,8 +107,8 @@ export default function ConfiguracoesEmpresa() {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json', 
-                  'x-user-id': userId,
-                  'Authorization': `Bearer ${token}` // <--- Token
+                  'x-user-id': userId || '', // CORREÇÃO AQUI TAMBÉM (Preventiva)
+                  'Authorization': `Bearer ${token}` 
               },
               body: JSON.stringify({ step: 2 }) 
           });
@@ -120,7 +120,7 @@ export default function ConfiguracoesEmpresa() {
 
   const consultarCNPJ = async (forcarAtualizacao = false) => {
     const docLimpo = empresa.documento.replace(/\D/g, '');
-    const token = localStorage.getItem('token'); // <--- Token
+    const token = localStorage.getItem('token'); 
     
     if (isLocked && !forcarAtualizacao) return; 
     if (docLimpo.length !== 14) { alert("CNPJ inválido."); return; }
@@ -131,7 +131,7 @@ export default function ConfiguracoesEmpresa() {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` // <--- Token
+            'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ cnpj: docLimpo })
       });
@@ -183,16 +183,16 @@ export default function ConfiguracoesEmpresa() {
     setLoading(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
-    const token = localStorage.getItem('token'); // <--- Token
+    const token = localStorage.getItem('token'); 
 
     try {
       const res = await fetch('/api/perfil', {
         method: 'PUT',
         headers: { 
             'Content-Type': 'application/json', 
-            'x-user-id': userId || '',
+            'x-user-id': userId || '', // Aqui já estava correto
             'x-empresa-id': contextId || '',
-            'Authorization': `Bearer ${token}` // <--- Token
+            'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ 
             ...empresa, 
@@ -215,7 +215,6 @@ export default function ConfiguracoesEmpresa() {
     finally { setLoading(false); }
   };
 
-  // ... (JSX MANTIDO) ...
   return (
     <div className="min-h-screen bg-gray-50 p-6 md:p-12">
       <div className="max-w-4xl mx-auto">

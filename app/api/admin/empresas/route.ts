@@ -12,9 +12,10 @@ export async function GET(request: Request) {
 
   const skip = (page - 1) * limit;
 
+  // CORREÇÃO: Adicionado 'as const' para o modo de busca
   const whereClause = search ? {
     OR: [
-      { razaoSocial: { contains: search, mode: 'insensitive' } }, 
+      { razaoSocial: { contains: search, mode: 'insensitive' as const } }, 
       { documento: { contains: search } }
     ]
   } : {};

@@ -36,7 +36,8 @@ export async function GET(request: Request) {
     try {
         new https.Agent({
             pfx: pfxBuffer,
-            passphrase: empresa.senhaCertificado
+            // CORREÇÃO: O '|| undefined' converte o 'null' do banco para 'undefined' que o TypeScript aceita
+            passphrase: empresa.senhaCertificado || undefined
         });
         logs.push("✅ HTTPS Agent criado com sucesso! (Senha Correta)");
     } catch (e: any) {

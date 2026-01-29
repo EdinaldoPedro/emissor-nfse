@@ -26,18 +26,24 @@ export async function POST(request: Request) {
         if (!venda) return NextResponse.json({ error: "Venda não encontrada" });
 
         let xml = '';
+        
+        // Encontra um log que tenha XML
         const logComXml = venda.logs.find(l => 
             l.details && typeof l.details === 'string' && l.details.includes('<DPS')
         );
 
-        if (logComXml) {
-            if (logComXml.details.startsWith('{')) {
+        if (logComXml && logComXml.details) { // CORREÇÃO: Garante que details existe
+            const details = logComXml.details; // Atribui a uma const para o TS entender que é string
+
+            if (details.startsWith('{')) {
                 try {
-                    const json = JSON.parse(logComXml.details);
+                    const json = JSON.parse(details);
                     xml = json.xmlGerado || json.xml || '';
-                } catch (e) { if (logComXml.details.includes('<DPS')) xml = logComXml.details; }
+                } catch (e) { 
+                    if (details.includes('<DPS')) xml = details; 
+                }
             } else {
-                xml = logComXml.details;
+                xml = details;
             }
         }
 
@@ -56,8 +62,6 @@ export async function POST(request: Request) {
         const signatureBuffer = Buffer.from(signatureValueBase64, 'base64');
 
         // === SIMULAÇÃO DE INJEÇÃO VIRTUAL NO SIGNED INFO ===
-        // O XML salvo não tem xmlns no SignedInfo, mas o cálculo da assinatura teve.
-        // Precisamos injetar para validar.
         let signedInfoToVerify = signedInfoBlock;
         if (!signedInfoToVerify.includes('xmlns="http://www.w3.org/2000/09/xmldsig#"')) {
             signedInfoToVerify = signedInfoToVerify.replace('<SignedInfo>', '<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">');

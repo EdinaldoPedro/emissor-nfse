@@ -10,7 +10,9 @@ export function extractCertAndKeyFromPfx(pfxBase64: string, password: string) {
         const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
         // @ts-ignore
         const certBag = certBags[forge.pki.oids.certBag]?.[0];
-        if (!certBag) throw new Error("Certificado não encontrado no PFX");
+        
+        // CORREÇÃO: Verifica se certBag OU certBag.cert são nulos/indefinidos
+        if (!certBag || !certBag.cert) throw new Error("Certificado não encontrado no PFX");
         
         const certPem = forge.pki.certificateToPem(certBag.cert);
 
@@ -26,7 +28,8 @@ export function extractCertAndKeyFromPfx(pfxBase64: string, password: string) {
             keyBag = keyBags2[forge.pki.oids.keyBag]?.[0];
         }
 
-        if (!keyBag) throw new Error("Chave privada não encontrada no PFX");
+        // CORREÇÃO: Verifica se keyBag OU keyBag.key são nulos/indefinidos
+        if (!keyBag || !keyBag.key) throw new Error("Chave privada não encontrada no PFX");
 
         const keyPem = forge.pki.privateKeyToPem(keyBag.key);
 

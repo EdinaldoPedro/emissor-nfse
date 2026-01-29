@@ -222,7 +222,11 @@ export default function AdminPlanos() {
                         <div>
                             <div className="flex items-center gap-2">
                                 <h3 className="font-bold text-lg text-slate-800">{plan.name}</h3>
-                                {plan.privado && <Shield size={14} className="text-slate-400" title="Plano Privado/Interno"/>}
+                                {plan.privado && (
+                                    <div title="Plano Privado/Interno">
+                                        <Shield size={14} className="text-slate-400" />
+                                    </div>
+                                )}
                             </div>
                             <p className="text-xs text-slate-500 font-mono">{plan.slug}</p>
                         </div>

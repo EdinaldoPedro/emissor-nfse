@@ -28,7 +28,8 @@ export async function POST(request: Request) {
             const isGzip = bufferBanco[0] === 0x1f && bufferBanco[1] === 0x8b;
             const pdfFinal = isGzip ? zlib.gunzipSync(bufferBanco) : bufferBanco;
 
-            return new NextResponse(pdfFinal, {
+            // CORREÇÃO: 'as any' para o TypeScript aceitar o Buffer
+            return new NextResponse(pdfFinal as any, {
                 headers: { 'Content-Type': 'application/pdf' }
             });
         }
@@ -63,7 +64,8 @@ export async function POST(request: Request) {
 
         console.log(`[ROBÔ] PDF Salvo e Compactado (${pdfBuffer.length} -> ${pdfGzip.length} bytes)`);
 
-        return new NextResponse(pdfBuffer, {
+        // CORREÇÃO: 'as any' para o TypeScript aceitar o Buffer
+        return new NextResponse(pdfBuffer as any, {
             status: 200,
             headers: {
                 'Content-Type': 'application/pdf',
@@ -74,7 +76,7 @@ export async function POST(request: Request) {
 
     } catch (error: any) {
         console.error("[ERRO PDF]", error.message);
-        // Fallback: Se o robô falhar, você pode retornar o gerador interno aqui se quiser
+        // Fallback: Se o robô falhar, retorna o erro 500
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
