@@ -37,7 +37,7 @@ export default function MeusClientes() {
   const [termoBusca, setTermoBusca] = useState('');
   
   const [clienteAtual, setClienteAtual] = useState<Cliente>({ 
-    id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', documento: '', cep: '', logradouro: '', numero: '', bairro: '', cidade: '', uf: '', codigoIbge: ''
+    id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', documento: '', cidade: '', uf: '', cep: '', logradouro: '', numero: '', bairro: '', codigoIbge: ''
   });
 
   const isPJ = clienteAtual.documento.replace(/\D/g, '').length > 11;
@@ -45,7 +45,7 @@ export default function MeusClientes() {
   const carregarClientes = async () => {
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
-    const token = localStorage.getItem('token'); // <--- TOKEN
+    const token = localStorage.getItem('token'); 
 
     if (!userId || !token) return;
 
@@ -54,12 +54,11 @@ export default function MeusClientes() {
           headers: { 
               'x-user-id': userId, 
               'x-empresa-id': contextId || '',
-              'Authorization': `Bearer ${token}` // <--- HEADER
+              'Authorization': `Bearer ${token}` 
           } 
       });
       const dados = await res.json();
       
-      // Se não for array, deve ser erro
       if (Array.isArray(dados)) {
           setClientes(dados);
           setFilteredClientes(dados);
@@ -87,10 +86,12 @@ export default function MeusClientes() {
     }
   }, [termoBusca, clientes]);
 
+  // === BUSCA INTELIGENTE COM AUTO-COMPLETE DE CEP ===
   const handleBuscarDocumento = async () => {
     const docLimpo = clienteAtual.documento.replace(/\D/g, '');
     const token = localStorage.getItem('token');
     
+    // CPF
     if (docLimpo.length === 11) {
         if (validarCPF(clienteAtual.documento)) {
             dialog.showAlert({ type: 'success', title: 'CPF Válido', description: 'Preencha os dados pessoais manualmente.' });
@@ -100,32 +101,66 @@ export default function MeusClientes() {
         return;
     }
 
+    // CNPJ
     if (docLimpo.length === 14) {
         setBuscandoDoc(true);
         try {
+            // 1. Busca dados do CNPJ
             const res = await fetch('/api/external/cnpj', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}` // <--- HEADER (Se a rota externa exigir)
+                    'Authorization': `Bearer ${token}` 
                 },
                 body: JSON.stringify({ cnpj: docLimpo })
             });
             const dados = await res.json();
 
             if (res.ok) {
+                // === AUTOMAÇÃO: Se não vier IBGE mas vier CEP, busca o CEP automaticamente ===
+                let ibgeFinal = dados.codigoIbge;
+                let logradouroFinal = dados.logradouro;
+                let bairroFinal = dados.bairro;
+                let cidadeFinal = dados.cidade;
+                let ufFinal = dados.uf;
+
+                if ((!ibgeFinal || ibgeFinal.length < 7) && dados.cep) {
+                    console.log("CNPJ sem IBGE. Buscando CEP automaticamente...");
+                    try {
+                        const cepClean = dados.cep.replace(/\D/g, '');
+                        const resCep = await fetch('/api/external/cep', { 
+                            method: 'POST', 
+                            body: JSON.stringify({ cep: cepClean }) 
+                        });
+                        const dataCep = await resCep.json();
+                        
+                        if (resCep.ok && dataCep.codigoIbge) {
+                            ibgeFinal = dataCep.codigoIbge;
+                            // Atualiza endereço com dados do correio (geralmente mais precisos/padronizados)
+                            if(dataCep.logradouro) logradouroFinal = dataCep.logradouro;
+                            if(dataCep.bairro) bairroFinal = dataCep.bairro;
+                            if(dataCep.localidade) cidadeFinal = dataCep.localidade; // ViaCEP usa localidade
+                            if(dataCep.cidade) cidadeFinal = dataCep.cidade; // Outras APIs
+                            if(dataCep.uf) ufFinal = dataCep.uf;
+                        }
+                    } catch (errCep) {
+                        console.error("Falha na automação do CEP:", errCep);
+                    }
+                }
+                // =========================================================================
+
                 setClienteAtual(prev => ({
                     ...prev,
                     nome: dados.razaoSocial,
                     nomeFantasia: dados.nomeFantasia,
                     email: dados.email || prev.email,
                     cep: dados.cep,
-                    logradouro: dados.logradouro,
+                    logradouro: logradouroFinal,
                     numero: dados.numero,
-                    bairro: dados.bairro,
-                    cidade: dados.cidade,
-                    uf: dados.uf,
-                    codigoIbge: dados.codigoIbge
+                    bairro: bairroFinal,
+                    cidade: cidadeFinal,
+                    uf: ufFinal,
+                    codigoIbge: ibgeFinal // Agora preenchido automaticamente!
                 }));
                 dialog.showAlert({ type: 'success', description: 'Dados da empresa carregados.' });
             } else { 
@@ -151,7 +186,7 @@ export default function MeusClientes() {
                   ...prev,
                   logradouro: dados.logradouro,
                   bairro: dados.bairro,
-                  cidade: dados.cidade,
+                  cidade: dados.cidade || dados.localidade,
                   uf: dados.uf,
                   codigoIbge: dados.codigoIbge
               }));
@@ -182,8 +217,10 @@ export default function MeusClientes() {
     if (clienteAtual.nome.trim().length < 5) {
         return dialog.showAlert({ type: 'warning', description: 'Nome/Razão Social muito curto.' });
     }
+    
+    // Agora o sistema tenta buscar sozinho, mas se ainda assim falhar, avisa o usuário
     if (!clienteAtual.codigoIbge) {
-        return dialog.showAlert({ type: 'warning', description: 'Busque o CEP para preencher o código IBGE.' });
+        return dialog.showAlert({ type: 'warning', description: 'Atenção: Código IBGE não preenchido. Busque o CEP novamente.' });
     }
 
     setSalvando(true);
@@ -199,7 +236,7 @@ export default function MeusClientes() {
             'Content-Type': 'application/json', 
             'x-user-id': userId || '', 
             'x-empresa-id': contextId || '',
-            'Authorization': `Bearer ${token}` // <--- HEADER
+            'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify(clienteAtual)
       });
@@ -229,7 +266,7 @@ export default function MeusClientes() {
         headers: { 
             'x-user-id': userId || '', 
             'x-empresa-id': contextId || '',
-            'Authorization': `Bearer ${token}` // <--- HEADER
+            'Authorization': `Bearer ${token}` 
         }
       });
       if (res.ok) { carregarClientes(); }
@@ -260,7 +297,7 @@ export default function MeusClientes() {
             )}
         </div>
 
-        {/* MODAL (MANTIDO IGUAL) */}
+        {/* MODAL */}
         {isFormOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -367,6 +404,10 @@ export default function MeusClientes() {
                                     <input className="w-full p-2 border rounded bg-gray-100 text-gray-600 text-sm cursor-not-allowed" 
                                         value={clienteAtual.uf || ''} readOnly tabIndex={-1}
                                     />
+                                </div>
+                                {/* CAMPO IBGE AGORA VISÍVEL PARA CONFERÊNCIA */}
+                                <div className="md:col-span-1 hidden">
+                                    <input type="hidden" value={clienteAtual.codigoIbge || ''} />
                                 </div>
                             </div>
                         </div>

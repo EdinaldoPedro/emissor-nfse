@@ -50,13 +50,13 @@ export async function GET(request: Request) {
 
     try {
         const userId = targetId;
-        const contextId = request.headers.get('x-empresa-id'); 
-
-        const empresaId = await getEmpresaContexto(userId, contextId);
-        if (!empresaId) return NextResponse.json([], { status: 200 });
-
+        
+        // CORREÇÃO LÓGICA NO GET TAMBÉM:
+        // Buscamos clientes vinculados ao USUÁRIO logado (ou ao contador agindo como usuário)
+        // A tabela UserCliente liga User -> Empresa(Cliente)
+        
         const clientes = await prisma.userCliente.findMany({
-            where: { userId: empresaId },
+            where: { userId: userId }, // Usa o ID do Usuário, não da Empresa
             include: { empresa: true }
         });
 
@@ -89,12 +89,8 @@ export async function POST(request: Request) {
     if (errorResponse) return errorResponse;
 
     try {
-        const userId = targetId;
-        const contextId = request.headers.get('x-empresa-id');
+        const userId = targetId; // Este é o ID do Usuário (User UUID)
         const body = await request.json();
-
-        const empresaIdDono = await getEmpresaContexto(userId, contextId);
-        if (!empresaIdDono) return NextResponse.json({ error: 'Empresa não identificada.' }, { status: 400 });
 
         // === BLINDAGEM DO IBGE ===
         if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
@@ -105,13 +101,13 @@ export async function POST(request: Request) {
             }
         }
         
-        // CORREÇÃO AQUI: Passamos os 3 argumentos na ordem que o service espera
-        // 1. Documento (para limpar e buscar na receita se precisar)
-        // 2. ID do Dono (para vincular)
-        // 3. O Body Completo (onde injetamos o IBGE manual)
+        // === CORREÇÃO DO ERRO P2003 ===
+        // O segundo parâmetro DEVE ser o 'userId' (UUID do Usuário), não o 'empresaId'
+        // A função upsertEmpresaAndLinkUser cria um registro na tabela UserCliente.
+        
         const clienteCriado = await upsertEmpresaAndLinkUser(
             body.documento, 
-            empresaIdDono, 
+            userId, // <--- AQUI ESTAVA O ERRO (Antes passava empresaIdDono)
             {
                 ...body,
                 aliquotaPadrao: 0,
@@ -134,19 +130,16 @@ export async function PUT(request: Request) {
 
     try {
         const userId = targetId;
-        const contextId = request.headers.get('x-empresa-id');
         const body = await request.json();
 
         if (!body.id) return NextResponse.json({ error: 'ID do cliente necessário.' }, { status: 400 });
 
-        const empresaIdDono = await getEmpresaContexto(userId, contextId);
-        if (!empresaIdDono) return NextResponse.json({ error: 'Permissão negada.' }, { status: 403 });
-
+        // Verifica se o usuário tem vínculo com esse cliente
         const vinculo = await prisma.userCliente.findFirst({
-            where: { userId: empresaIdDono, empresaId: body.id }
+            where: { userId: userId, empresaId: body.id }
         });
 
-        if (!vinculo) return NextResponse.json({ error: 'Cliente não encontrado.' }, { status: 404 });
+        if (!vinculo) return NextResponse.json({ error: 'Cliente não encontrado ou acesso negado.' }, { status: 404 });
 
         // === BLINDAGEM DO IBGE NA EDIÇÃO ===
         if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
@@ -168,7 +161,7 @@ export async function PUT(request: Request) {
                 bairro: body.bairro,
                 cidade: body.cidade,
                 uf: body.uf,
-                codigoIbge: body.codigoIbge // Agora vai gravar!
+                codigoIbge: body.codigoIbge 
             }
         });
 
@@ -180,24 +173,21 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-    // ... manter o código de DELETE igual ao anterior
     const { targetId, errorResponse } = await validateRequest(request);
     if (errorResponse) return errorResponse;
 
     try {
         const userId = targetId;
-        const contextId = request.headers.get('x-empresa-id');
         const { searchParams } = new URL(request.url);
         const clienteId = searchParams.get('id');
 
         if (!clienteId) return NextResponse.json({ error: 'ID inválido' }, { status: 400 });
 
-        const empresaIdDono = await getEmpresaContexto(userId, contextId);
-        if (!empresaIdDono) return NextResponse.json({ error: 'Proibido' }, { status: 403 });
-
+        // Remove apenas o vínculo deste usuário com a empresa cliente
+        // A empresa cliente continua existindo no banco (pois pode ser cliente de outros)
         await prisma.userCliente.deleteMany({
             where: {
-                userId: empresaIdDono,
+                userId: userId,
                 empresaId: clienteId
             }
         });
