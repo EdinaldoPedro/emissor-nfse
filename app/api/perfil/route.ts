@@ -6,6 +6,26 @@ import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
+// === HELPER: BUSCA IBGE NO BACKEND (SEGURANÇA) ===
+async function buscarIbgePorCep(cep: string): Promise<string | null> {
+    try {
+        const cepLimpo = cep.replace(/\D/g, '');
+        if (cepLimpo.length !== 8) return null;
+        
+        // Busca silenciosa no ViaCEP
+        const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`, { next: { revalidate: 3600 } });
+        const data = await res.json();
+        
+        if (!data.erro && data.ibge) {
+            return data.ibge;
+        }
+        return null;
+    } catch (e) {
+        console.error("Erro ao buscar IBGE (Backend Perfil):", e);
+        return null;
+    }
+}
+
 // GET
 export async function GET(request: Request) {
   const { targetId, errorResponse } = await validateRequest(request);
@@ -24,37 +44,33 @@ export async function GET(request: Request) {
 
   if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
-  // === NOVA IMPLEMENTAÇÃO: LÓGICA DE PLANOS E STAFF ===
+  // === LÓGICA DE PLANOS E STAFF ===
   const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
   let planoDetalhado = null;
 
   if (isStaff) {
-      // Se for ADMIN, gera um plano "virtual" ilimitado
       planoDetalhado = {
           nome: 'Acesso Administrativo',
           slug: 'ADMIN_ACCESS',
           status: 'ATIVO',
           dataInicio: user.createdAt,
-          dataFim: null, // Vitalício
+          dataFim: null, 
           usoEmissoes: 0,
-          limiteEmissoes: 0, // 0 = Ilimitado
+          limiteEmissoes: 0, 
           diasTeste: 0
       };
   } else {
-      // Se for CLIENTE, busca o plano real no histórico
         const planoAtivo = await prisma.planHistory.findFirst({
             where: { userId: user.id, status: 'ATIVO' },
             include: { plan: true },
             orderBy: { createdAt: 'desc' }
         });
 
-        // Verifica se atingiu limite apenas para informação visual
         let statusVisual = planoAtivo?.status || 'INATIVO';
         if (planoAtivo && planoAtivo.plan.maxNotasMensal > 0 && planoAtivo.notasEmitidas >= planoAtivo.plan.maxNotasMensal) {
             statusVisual = 'LIMITE_ATINGIDO';
         }
 
-        // Verifica se data expirou (Dupla checagem visual)
         if (planoAtivo && planoAtivo.dataFim && new Date() > planoAtivo.dataFim) {
             statusVisual = 'EXPIRADO';
         }
@@ -62,7 +78,7 @@ export async function GET(request: Request) {
         planoDetalhado = planoAtivo ? {
             nome: planoAtivo.plan.name,
             slug: planoAtivo.plan.slug,
-            status: statusVisual, // <--- STATUS CALCULADO
+            status: statusVisual,
             dataInicio: planoAtivo.dataInicio,
             dataFim: planoAtivo.dataFim,
             usoEmissoes: planoAtivo.notasEmitidas,
@@ -76,17 +92,14 @@ export async function GET(request: Request) {
             limiteEmissoes: 0 
         };
   }
-  // ====================================================
 
   // 2. Lógica de Contexto
   let empresaAlvoId = null;
 
   if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
-      // Se for STAFF, permite acesso direto (bypass)
       if (isStaff) {
           empresaAlvoId = contextEmpresaId;
       } else {
-          // Se for cliente/contador, valida o vínculo
           const vinculo = await prisma.contadorVinculo.findUnique({
               where: {
                   contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId }
@@ -135,7 +148,6 @@ export async function GET(request: Request) {
   const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
 
   return NextResponse.json({
-    // Dados da Empresa
     ...restEmpresa,
     emailComercial: emailEmpresa,
     temCertificado: !!certificadoA1,
@@ -143,7 +155,6 @@ export async function GET(request: Request) {
     cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
     atividades: atividadesEnriquecidas,
 
-    // Dados do Usuário
     role: user.role,
     nome: user.nome,
     email: user.email,
@@ -158,10 +169,7 @@ export async function GET(request: Request) {
         notificacoesEmail: user.notificacoesEmail
     },
     
-    // === DETALHES DO PLANO (IMPLEMENTADO) ===
     planoDetalhado,
-
-    // Campos legados para compatibilidade
     planoSlug: user.plano, 
     planoCiclo: user.planoCiclo,
     
@@ -169,7 +177,7 @@ export async function GET(request: Request) {
   });
 }
 
-// PUT
+// PUT (AQUI ESTÁ A CORREÇÃO DE SEGURANÇA)
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextEmpresaId = request.headers.get('x-empresa-id');
@@ -200,6 +208,19 @@ export async function PUT(request: Request) {
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
       
+      // === CORREÇÃO: GARANTIA DE IBGE ===
+      // Se o front mandou CEP mas não mandou IBGE (comum na atualização via Receita),
+      // nós buscamos manualmente agora.
+      if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
+          console.log(`[PERFIL] Detectada falta de IBGE. Buscando para CEP: ${body.cep}`);
+          const ibgeResgatado = await buscarIbgePorCep(body.cep);
+          if (ibgeResgatado) {
+              body.codigoIbge = ibgeResgatado;
+              console.log(`[PERFIL] IBGE recuperado e salvo: ${ibgeResgatado}`);
+          }
+      }
+      // ==================================
+
       const dadosEmpresa: any = {
           razaoSocial: body.razaoSocial,
           nomeFantasia: body.nomeFantasia,
@@ -211,7 +232,7 @@ export async function PUT(request: Request) {
           bairro: body.bairro,
           cidade: body.cidade,
           uf: body.uf,
-          codigoIbge: body.codigoIbge,
+          codigoIbge: body.codigoIbge, // Agora garantido pela lógica acima
           email: body.emailComercial || body.email,
           cadastroCompleto: true,
           serieDPS: body.serieDPS, 
@@ -265,12 +286,17 @@ export async function PUT(request: Request) {
                       temRetencaoInss: c.temRetencaoInss || false
                   }))
               });
-              await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);
+              
+              // Garante sincronia usando o IBGE que acabamos de salvar
+              if (empresaSalva.codigoIbge) {
+                  await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);
+              }
           }
       }
     }
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Erro no Profile PUT:", error);
     return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
   }
 }

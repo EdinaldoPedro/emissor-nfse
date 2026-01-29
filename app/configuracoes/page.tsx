@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { 
   Building2, Save, ArrowLeft, Search, MapPin, Briefcase, 
-  Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings, HelpCircle
+  Lock, CheckCircle, Trash2, Info, Upload, FileKey, Settings 
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -62,7 +62,7 @@ export default function ConfiguracoesEmpresa() {
 
         const res = await fetch('/api/perfil', { 
             headers: { 
-                'x-user-id': userId || '', // CORREÇÃO AQUI: Adicionado || ''
+                'x-user-id': userId || '',
                 'x-empresa-id': contextId || '',
                 'Authorization': `Bearer ${token}` 
             } 
@@ -73,6 +73,8 @@ export default function ConfiguracoesEmpresa() {
           setEmpresa(prev => ({ 
               ...prev, 
               ...dados,
+              // Garante que o IBGE vindo do banco seja lido corretamente
+              codigoIbge: dados.codigoIbge || '',
               serieDPS: dados.serieDPS || '900',
               ultimoDPS: dados.ultimoDPS || 0,
               ambiente: dados.ambiente || 'HOMOLOGACAO'
@@ -94,29 +96,6 @@ export default function ConfiguracoesEmpresa() {
     }
     carregarDados();
   }, [router]);
-
-  const handleResetTutorial = async () => {
-      const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token');
-      if(!userId) return;
-
-      if(!confirm("Deseja ver o tutorial desta página novamente?")) return;
-
-      try {
-          await fetch('/api/perfil/tutorial', {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json', 
-                  'x-user-id': userId || '', // CORREÇÃO AQUI TAMBÉM (Preventiva)
-                  'Authorization': `Bearer ${token}` 
-              },
-              body: JSON.stringify({ step: 2 }) 
-          });
-          window.location.reload();
-      } catch (e) {
-          alert("Erro ao reiniciar tutorial.");
-      }
-  };
 
   const consultarCNPJ = async (forcarAtualizacao = false) => {
     const docLimpo = empresa.documento.replace(/\D/g, '');
@@ -150,7 +129,7 @@ export default function ConfiguracoesEmpresa() {
           bairro: dados.bairro,
           cidade: dados.cidade,
           uf: dados.uf,
-          codigoIbge: dados.codigoIbge,
+          codigoIbge: dados.codigoIbge, // Atualiza o IBGE se a API retornar
           email: dados.email || prev.email 
         }));
         setAtividades(dados.cnaes || []);
@@ -190,7 +169,7 @@ export default function ConfiguracoesEmpresa() {
         method: 'PUT',
         headers: { 
             'Content-Type': 'application/json', 
-            'x-user-id': userId || '', // Aqui já estava correto
+            'x-user-id': userId || '', 
             'x-empresa-id': contextId || '',
             'Authorization': `Bearer ${token}` 
         },
@@ -231,14 +210,6 @@ export default function ConfiguracoesEmpresa() {
                     <p className="text-gray-500">Dados obrigatórios para emissão de Nota Fiscal (NFS-e).</p>
                 </div>
             </div>
-
-            <button 
-                onClick={handleResetTutorial}
-                className="flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition border border-blue-200"
-                title="Ver o tutorial novamente"
-            >
-                <HelpCircle size={16}/> Reiniciar Tutorial
-            </button>
         </div>
 
         {isLocked ? (
@@ -370,7 +341,15 @@ export default function ConfiguracoesEmpresa() {
                 <input className="p-3 border rounded-lg" placeholder="Bairro" value={empresa.bairro || ''} onChange={e => setEmpresa({...empresa, bairro: e.target.value})}/>
                 <input className="p-3 border rounded-lg" placeholder="Cidade" value={empresa.cidade || ''} onChange={e => setEmpresa({...empresa, cidade: e.target.value})}/>
                 <input className="p-3 border rounded-lg" placeholder="UF" value={empresa.uf || ''} onChange={e => setEmpresa({...empresa, uf: e.target.value})}/>
-                <input className="p-3 border rounded-lg bg-gray-50" placeholder="IBGE" readOnly value={empresa.codigoIbge || ''}/>
+                
+                {/* Visual discreto (original) restaurado */}
+                <input 
+                    className="p-3 border rounded-lg bg-gray-50" 
+                    placeholder="IBGE" 
+                    readOnly 
+                    value={empresa.codigoIbge || ''}
+                />
+                
             </div>
           </div>
 
