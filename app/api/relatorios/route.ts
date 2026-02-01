@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     const [notas, total] = await prisma.$transaction([
         prisma.notaFiscal.findMany({
             where: whereClause,
-            include: { cliente: { select: { razaoSocial: true } } },
+            include: { cliente: { select: { nome: true } } },
             orderBy: { dataEmissao: 'desc' },
             skip,
             take: limit
