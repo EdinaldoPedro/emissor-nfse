@@ -1,108 +1,168 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, Search } from 'lucide-react';
 
-interface Option {
-  value: string;
-  label: string;
-  subLabel?: string;
-}
+import { useState, useRef, useEffect } from 'react';
+import { ChevronDown, Search, X } from 'lucide-react';
 
 interface SearchableSelectProps {
-  options: Option[];
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
+    options: any[];
+    onSelect?: (item: any) => void; // Novo padrão
+    onChange?: (item: any) => void; // Padrão antigo (Legado)
+    value?: any; // Aceita Objeto ou ID (controle externo)
+    placeholder?: string;
+    labelKey?: string;
+    valueKey?: string;
+    disabled?: boolean;
 }
 
-export default function SearchableSelect({ options, value, onChange, placeholder, disabled }: SearchableSelectProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const wrapperRef = useRef<HTMLDivElement>(null);
+export default function SearchableSelect({ 
+    options = [], 
+    onSelect,
+    onChange,
+    value,
+    placeholder = "Selecione...", 
+    labelKey = "label", 
+    valueKey = "value",
+    disabled = false
+}: SearchableSelectProps) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [internalSelected, setInternalSelected] = useState<any>(null);
+    const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Fecha o menu se clicar fora
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+    // LÓGICA DE CONTROLE DE VALOR (Híbrida)
+    // Se passar 'value' via props, usa ele. Se não, usa o estado interno.
+    // Tenta achar o objeto na lista caso o 'value' seja apenas um ID (string/number).
+    const getSelectedItem = () => {
+        if (value !== undefined && value !== null) {
+            // Se o valor já é um objeto completo, usa ele
+            if (typeof value === 'object' && value !== null) return value;
+            // Se é um ID, tenta encontrar nas opções
+            return options.find(o => o[valueKey] === value) || null;
+        }
+        return internalSelected;
+    };
+
+    const selectedItem = getSelectedItem();
+
+    // Fecha ao clicar fora
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [wrapperRef]);
+
+    // Filtra opções
+    const filteredOptions = options.filter(option => {
+        // Proteção contra undefined/null
+        if (!option) return false;
+        
+        const label = option[labelKey] ? String(option[labelKey]).toLowerCase() : "";
+        const document = option.documento ? String(option.documento) : ""; 
+        const search = searchTerm.toLowerCase();
+        
+        // Busca inteligente (Nome ou Documento)
+        return label.includes(search) || document.includes(search);
+    });
+
+    const handleSelect = (item: any) => {
+        setInternalSelected(item);
+        
+        // Dispara ambos os eventos para garantir compatibilidade
+        if (onSelect) onSelect(item);
+        if (onChange) onChange(item);
+        
         setIsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+        setSearchTerm("");
+    };
 
-  // Encontra o item selecionado para exibir no botão
-  const selectedOption = options.find(opt => opt.value === value);
+    const clearSelection = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setInternalSelected(null);
+        if (onSelect) onSelect(null);
+        if (onChange) onChange(null);
+        setSearchTerm("");
+    };
 
-  // Filtra as opções baseado no que foi digitado
-  const filteredOptions = options.filter(opt => 
-    opt.label.toLowerCase().includes(search.toLowerCase()) || 
-    (opt.subLabel && opt.subLabel.toLowerCase().includes(search.toLowerCase())) ||
-    opt.value.toLowerCase().includes(search.toLowerCase())
-  );
-
-  return (
-    <div className="relative w-full" ref={wrapperRef}>
-      {/* Botão Principal (Aparência de Input) */}
-      <div 
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full p-2 border rounded flex justify-between items-center bg-white cursor-pointer ${disabled ? 'bg-gray-100 cursor-not-allowed opacity-70' : 'hover:border-blue-400'}`}
-      >
-        <div className="truncate text-sm text-gray-700">
-          {selectedOption ? (
-            <div className="flex flex-col text-left">
-              <span className="font-medium">{selectedOption.label}</span>
-              {selectedOption.subLabel && <span className="text-xs text-gray-400">{selectedOption.subLabel}</span>}
-            </div>
-          ) : (
-            <span className="text-gray-400">{placeholder || 'Selecione...'}</span>
-          )}
-        </div>
-        <ChevronDown size={16} className="text-gray-400 min-w-[16px]" />
-      </div>
-
-      {/* Lista Dropdown */}
-      {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-white border rounded shadow-xl max-h-60 overflow-hidden flex flex-col">
-          {/* Campo de Busca Interno */}
-          <div className="p-2 border-b bg-gray-50 flex items-center gap-2 sticky top-0">
-            <Search size={14} className="text-gray-400"/>
-            <input 
-              autoFocus
-              className="w-full bg-transparent outline-none text-sm"
-              placeholder="Digite para filtrar..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-
-          {/* Lista de Opções */}
-          <div className="overflow-y-auto flex-1">
-            {filteredOptions.length === 0 ? (
-              <div className="p-3 text-xs text-gray-400 text-center">Nenhum resultado.</div>
-            ) : (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value}
-                  onClick={() => {
-                    onChange(opt.value);
-                    setIsOpen(false);
-                    setSearch(''); // Limpa busca ao selecionar
-                  }}
-                  className={`p-2 px-3 text-sm cursor-pointer hover:bg-blue-50 flex justify-between items-center border-b border-gray-50 last:border-0 ${value === opt.value ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
-                >
-                  <div className="flex flex-col">
-                    <span className="font-medium">{opt.label}</span>
-                    {opt.subLabel && <span className="text-xs text-gray-400">{opt.subLabel}</span>}
-                  </div>
-                  {value === opt.value && <Check size={14} className="text-blue-600"/>}
+    return (
+        <div className="relative w-full" ref={wrapperRef}>
+            {/* INPUT VISUAL */}
+            <div 
+                onClick={() => !disabled && setIsOpen(!isOpen)}
+                className={`w-full border rounded-lg p-3 flex justify-between items-center bg-white cursor-pointer transition-all ${
+                    isOpen ? 'ring-2 ring-blue-500 border-blue-500' : 'hover:border-slate-400'
+                } ${disabled ? 'bg-slate-100 cursor-not-allowed opacity-60' : ''}`}
+            >
+                <div className="flex-1 truncate">
+                    {selectedItem ? (
+                        <span className="text-slate-800 font-medium">
+                            {selectedItem[labelKey] || selectedItem.nome || selectedItem.razaoSocial || selectedItem.descricao} 
+                            {selectedItem.documento && <span className="text-slate-400 text-xs ml-2 font-normal">({selectedItem.documento})</span>}
+                        </span>
+                    ) : (
+                        <span className="text-slate-400 text-sm">{placeholder}</span>
+                    )}
                 </div>
-              ))
+
+                <div className="flex items-center gap-2">
+                    {selectedItem && !disabled && (
+                        <button onClick={clearSelection} type="button" className="p-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-red-500">
+                            <X size={16} />
+                        </button>
+                    )}
+                    <ChevronDown size={18} className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                </div>
+            </div>
+
+            {/* LISTA DROPDOWN */}
+            {isOpen && !disabled && (
+                <div className="absolute z-50 w-full mt-2 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                    
+                    {/* CAMPO DE BUSCA */}
+                    <div className="p-2 border-b border-slate-100 bg-slate-50 sticky top-0">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                            <input 
+                                autoFocus
+                                className="w-full pl-9 p-2 text-sm border border-slate-300 rounded-md outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                placeholder="Buscar..."
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    {/* OPÇÕES */}
+                    <div className="max-h-60 overflow-y-auto">
+                        {filteredOptions.length === 0 ? (
+                            <div className="p-4 text-center text-xs text-slate-400">
+                                Nenhuma opção encontrada.
+                            </div>
+                        ) : (
+                            filteredOptions.map((option, idx) => (
+                                <button
+                                    key={option[valueKey] || option.id || idx}
+                                    onClick={() => handleSelect(option)}
+                                    type="button"
+                                    className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition border-b border-slate-50 last:border-0 flex justify-between items-center group"
+                                >
+                                    <span>
+                                        {option[labelKey] || option.nome || option.razaoSocial || option.descricao}
+                                        {option.documento && <span className="text-slate-400 text-xs ml-2 group-hover:text-blue-400">({option.documento})</span>}
+                                    </span>
+                                    {/* Indicador de Selecionado */}
+                                    {selectedItem && (selectedItem[valueKey] === option[valueKey] || selectedItem.id === option.id) && (
+                                        <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
+                                    )}
+                                </button>
+                            ))
+                        )}
+                    </div>
+                </div>
             )}
-          </div>
         </div>
-      )}
-    </div>
-  );
+    );
 }
