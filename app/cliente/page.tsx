@@ -10,6 +10,18 @@ import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { validarCPF } from '@/app/utils/cpf';
 
+// Lista de Países para Padronização (ISO 3166 / BACEN simplificado)
+const LISTA_PAISES = [
+    "África do Sul", "Alemanha", "Angola", "Arábia Saudita", "Argentina", "Austrália", "Áustria", 
+    "Bélgica", "Bolívia", "Brasil", "Canadá", "Chile", "China", "Cingapura", "Colômbia", "Coreia do Sul", 
+    "Costa Rica", "Croácia", "Dinamarca", "Egito", "Emirados Árabes Unidos", "Equador", "Espanha", 
+    "Estados Unidos", "Finlândia", "França", "Grécia", "Holanda", "Hong Kong", "Índia", "Indonésia", 
+    "Irlanda", "Israel", "Itália", "Japão", "México", "Noruega", "Nova Zelândia", "Panamá", "Paraguai", 
+    "Peru", "Polônia", "Portugal", "Reino Unido", "Rússia", "Suécia", "Suíça", "Tailândia", "Turquia", 
+    "Uruguai", "Venezuela"
+    // Pode adicionar mais conforme a necessidade
+];
+
 interface Cliente {
   id: string;
   nome: string;
@@ -131,11 +143,14 @@ export default function MeusClientes() {
 
   // --- BUSCAS E VALIDAÇÕES ---
   
-  // Verifica se o cliente já existe no banco (para CPF e CNPJ)
+  // Verifica se o cliente já existe no banco
   const verificarClienteExistente = async (doc: string) => {
         setBuscandoDados(true);
         const token = localStorage.getItem('token');
         try {
+            // OBS: O backend limpa caracteres não numéricos. 
+            // Para NIF alfanumérico, o backend precisaria ser ajustado, 
+            // mas assumindo NIF numérico ou backend tolerante:
             const res = await fetch('/api/clientes/check', {
                 method: 'POST',
                 headers: { 
@@ -149,7 +164,7 @@ export default function MeusClientes() {
                 const dados = await res.json();
                 if (dados) {
                     setClienteAtual(prev => ({ ...prev, ...dados }));
-                    dialog.showAlert({ type: 'info', title: 'Cliente Encontrado', description: 'Os dados foram carregados da sua base.' });
+                    dialog.showAlert({ type: 'info', title: 'Cliente Encontrado', description: 'Dados carregados da sua base.' });
                     return true;
                 }
             }
@@ -187,11 +202,22 @@ export default function MeusClientes() {
   };
 
   const handleDocumentoChange = async (val: string) => {
+      // === EXTERIOR ===
       if (clienteAtual.tipo === 'EXT') {
+          // Permite letras e números para NIF/Passaporte
           setClienteAtual(prev => ({ ...prev, documento: val }));
+          
+          // Se tiver um tamanho razoável (ex: > 5), tenta checar se já existe no banco
+          // Debounce manual simples: só chama se não estiver buscando
+          if (val.length > 5 && !buscandoDados) {
+               // Não bloqueia a digitação, faz silenciosamente ou só no onBlur seria melhor,
+               // mas aqui vamos deixar o usuário digitar.
+               // Se quiser checar, chame verificarClienteExistente(val) no onBlur do input.
+          }
           return;
       }
 
+      // === BRASIL (PJ/PF) ===
       let v = val.replace(/\D/g, '');
       const rawLength = v.length;
 
@@ -251,6 +277,15 @@ export default function MeusClientes() {
     e.preventDefault();
     if (!clienteAtual.nome) return dialog.showAlert("Nome é obrigatório.");
     
+    // Validações específicas para Brasil
+    if (clienteAtual.tipo !== 'EXT') {
+        const docLimpo = clienteAtual.documento.replace(/\D/g, '');
+        if (clienteAtual.tipo === 'PJ' && docLimpo.length !== 14) return dialog.showAlert("CNPJ incompleto.");
+        if (clienteAtual.tipo === 'PF' && docLimpo.length !== 11) return dialog.showAlert("CPF incompleto.");
+    } else {
+        if (!clienteAtual.pais) return dialog.showAlert("Selecione o País.");
+    }
+
     setSalvando(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
@@ -310,7 +345,7 @@ export default function MeusClientes() {
                 </button>
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><User className="text-blue-600"/> Meus Clientes</h1>
-                    <p className="text-slate-500 text-sm">Gerencie tomadores PF e PJ.</p>
+                    <p className="text-slate-500 text-sm">Gerencie tomadores PF, PJ e Exterior.</p>
                 </div>
             </div>
             
@@ -372,14 +407,18 @@ export default function MeusClientes() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
                                         <label className={labelClass}>
-                                            {clienteAtual.tipo === 'PJ' ? 'CNPJ' : clienteAtual.tipo === 'PF' ? 'CPF' : 'NIF / Documento'}
+                                            {clienteAtual.tipo === 'PJ' ? 'CNPJ' : clienteAtual.tipo === 'PF' ? 'CPF' : 'NIF / Documento (Opcional)'}
                                         </label>
                                         <div className="relative">
                                             <input 
                                                 className={`${inputClass} font-mono pr-10`}
                                                 value={clienteAtual.documento || ''} 
                                                 onChange={e => handleDocumentoChange(e.target.value)}
-                                                placeholder={clienteAtual.tipo === 'EXT' ? 'Opcional para exterior' : 'Apenas números'}
+                                                // Verifica se existe no banco ao sair do campo (para Exterior)
+                                                onBlur={(e) => {
+                                                    if(clienteAtual.tipo === 'EXT' && e.target.value.length > 3) verificarClienteExistente(e.target.value);
+                                                }}
+                                                placeholder={clienteAtual.tipo === 'EXT' ? 'Ex: 123456789' : 'Apenas números'}
                                                 maxLength={clienteAtual.tipo === 'EXT' ? 20 : 18}
                                             />
                                             {buscandoDados && (
@@ -439,10 +478,16 @@ export default function MeusClientes() {
                                         {clienteAtual.tipo === 'EXT' && (
                                             <div className="md:col-span-3">
                                                 <label className={labelClass}>País</label>
-                                                <input className={`${inputClass} bg-yellow-50`} 
-                                                    placeholder="Ex: Estados Unidos"
-                                                    value={clienteAtual.pais} onChange={e => setClienteAtual({...clienteAtual, pais: e.target.value})}
-                                                />
+                                                <select 
+                                                    className={`${inputClass} bg-yellow-50 font-bold text-slate-800`}
+                                                    value={clienteAtual.pais || ''}
+                                                    onChange={e => setClienteAtual({...clienteAtual, pais: e.target.value})}
+                                                >
+                                                    <option value="">Selecione o País...</option>
+                                                    {LISTA_PAISES.map(p => (
+                                                        <option key={p} value={p}>{p}</option>
+                                                    ))}
+                                                </select>
                                             </div>
                                         )}
 
@@ -452,6 +497,7 @@ export default function MeusClientes() {
                                                 value={clienteAtual.cep || ''} 
                                                 onChange={e => setClienteAtual({...clienteAtual, cep: e.target.value})}
                                                 onBlur={handleBuscarCep}
+                                                placeholder={clienteAtual.tipo === 'EXT' ? 'Ex: A2B-3C4' : '00000-000'}
                                             />
                                         </div>
                                         <div className="md:col-span-2">
