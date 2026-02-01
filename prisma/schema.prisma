@@ -36,23 +36,23 @@ model User {
   cpf       String?  @unique
   telefone  String?
   
-  plano            String?    @default("GRATUITO")
-  planoCiclo       String     @default("MENSAL")
-  planoStatus      String     @default("active")
-  planoExpiresAt   DateTime?
-  cargo            String?
-  avatarUrl        String?
+  plano             String?    @default("GRATUITO")
+  planoCiclo        String     @default("MENSAL")
+  planoStatus       String     @default("active")
+  planoExpiresAt    DateTime?
+  cargo             String?
+  avatarUrl         String?
   
-  // === RECUPERAÇÃO DE SENHA (NOVOS CAMPOS) ===
-  resetToken       String?   @unique
-  resetExpires     DateTime?
+  // === RECUPERAÇÃO DE SENHA ===
+  resetToken        String?    @unique
+  resetExpires      DateTime?
   
-  darkMode          Boolean   @default(false)
-  idioma            String    @default("pt-BR")
-  notificacoesEmail Boolean   @default(true)
+  darkMode          Boolean    @default(false)
+  idioma            String     @default("pt-BR")
+  notificacoesEmail Boolean    @default(true)
   
-  ipOrigem         String?
-  lastLoginAt      DateTime? 
+  ipOrigem          String?
+  lastLoginAt       DateTime? 
   
   empresaId String?  @unique
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
@@ -70,26 +70,26 @@ model User {
   empresasContabeis ContadorVinculo[] @relation("ContadorUser")
 
   // === VALIDAÇÃO DE TROCA DE E-MAIL ===
-  tempEmail         String?    // O novo e-mail que ele quer cadastrar
-  verificationCode  String?    // O código de 6 dígitos
-  verificationExpires DateTime? // Validade do código
+  tempEmail         String?    
+  verificationCode  String?    
+  verificationExpires DateTime? 
 
-  // Controle do Tutorial (0 = Não viu, 1, 2, 3... Etapas, 99 = Concluído)
-  tutorialStep     Int      @default(0)
+  // Controle do Tutorial
+  tutorialStep      Int       @default(0)
 
   // Relacionamento com Histórico
-  historicoPlanos  PlanHistory[]
+  historicoPlanos   PlanHistory[]
 
-  // === NOVOS CAMPOS PARA CONTROLE DE CONSUMO (Lógica de Baldes) ===
-  creditosPlano      Int       @default(0) // Balde A: Zera todo mês (Use-it-or-lose-it)
-  creditosExtras     Int       @default(0) // Balde B: Nunca expira (Rollover)
-  dataRenovacaoCiclo DateTime?             // Data base para zerar o Balde A
+  // === CONTROLE DE CONSUMO ===
+  creditosPlano       Int       @default(0) 
+  creditosExtras      Int       @default(0) 
+  dataRenovacaoCiclo DateTime?             
 
   // Relacionamento com Pedidos
-  pedidos            Pedido[]
+  pedidos             Pedido[]
 }
 
-// --- EMPRESAS ---
+// --- EMPRESAS (Quem emite a nota) ---
 model Empresa {
   id        String   @id @default(uuid())
   documento String   @unique
@@ -113,35 +113,84 @@ model Empresa {
   uf           String?
   codigoIbge   String?
 
-  aliquotaPadrao         Decimal? @default(0.00) @db.Decimal(5, 2) 
-  issRetidoPadrao        Boolean  @default(false)
-  tipoTributacaoPadrao   String?  @default("1") // 1=Exigível
+  aliquotaPadrao           Decimal? @default(0.00) @db.Decimal(5, 2) 
+  issRetidoPadrao         Boolean  @default(false)
+  tipoTributacaoPadrao    String?  @default("1") // 1=Exigível
   regimeEspecialTributacao String? @default("0") // 0=Nenhum
   
   inscricaoMunicipal String?
   regimeTributario   String? @default("MEI")
   
   // Relações
-  donoUser     User?         @relation("DonoEmpresa")
-  vinculadoA   UserCliente[] 
-  atividades   Cnae[]
+  donoUser      User?         @relation("DonoEmpresa")
+  vinculadoA    UserCliente[] 
+  atividades    Cnae[]
   
+  // === NOVA RELAÇÃO: CARTEIRA DE CLIENTES ===
+  clientesCarteira Cliente[] 
+
   // Certificado
   certificadoA1        String?
-  senhaCertificado     String?   
+  senhaCertificado     String?    
   certificadoVencimento DateTime? 
   
+  // Notas Fiscais (Apenas como EMISSOR)
   notasEmitidas    NotaFiscal[] @relation("PrestadorNota")
-  notasRecebidas   NotaFiscal[] @relation("TomadorNota")
   
+  // Vendas (Apenas como EMISSOR)
   vendasRealizadas Venda[]      @relation("VendaPrestador")
-  vendasCompradas  Venda[]      @relation("VendaTomador")
+  
+  // OBS: Removidos 'notasRecebidas' e 'vendasCompradas' pois agora quem compra é o Cliente
 
-  logs             SystemLog[]
+  logs              SystemLog[]
   
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime?
   contadoresLink    ContadorVinculo[] @relation("EmpresaContabil")
+}
+
+// --- NOVO MODEL: CLIENTE (Tomador do Serviço Unificado) ---
+model Cliente {
+  id            String   @id @default(uuid())
+  
+  // Vínculo: De quem é esse cliente? (Da Empresa Emissora)
+  empresaId     String
+  empresa       Empresa  @relation(fields: [empresaId], references: [id])
+
+  // Discriminador e Dados Principais
+  tipo          String   @default("PJ") // "PJ", "PF", "EXT"
+  documento     String?  // CPF, CNPJ ou NIF (Pode ser nulo se Exterior não tiver NIF)
+  nome          String   // Razão Social ou Nome Completo
+  nomeFantasia  String?  // Opcional
+  
+  // Contato
+  email         String?
+  telefone      String?
+
+  // Fiscal
+  inscricaoMunicipal String?
+  inscricaoEstadual  String? 
+  
+  // Endereço Flexível (Suporta BR e Exterior)
+  cep           String?  // CEP (8 dígitos) ou ZipCode (Alfanumérico)
+  logradouro    String?
+  numero        String?
+  complemento   String?
+  bairro        String?
+  cidade        String?
+  uf            String?  // Sigla (SP) ou Província (Florida)
+  pais          String   @default("Brasil") // Novo campo para Exterior
+  codigoIbge    String?  // Obrigatório p/ BR
+
+  // Relacionamentos
+  notas         NotaFiscal[] 
+  vendas        Venda[]      
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Índice para evitar duplicidade dentro da mesma empresa
+  @@index([empresaId, documento])
 }
 
 // --- VENDAS ---
@@ -151,13 +200,14 @@ model Venda {
   empresaId       String
   empresa         Empresa  @relation("VendaPrestador", fields: [empresaId], references: [id])
   
+  // ATUALIZADO: Aponta para Cliente
   clienteId       String
-  cliente         Empresa  @relation("VendaTomador", fields: [clienteId], references: [id])
+  cliente         Cliente  @relation(fields: [clienteId], references: [id])
   
   valor           Decimal  @db.Decimal(10, 2)
   descricao       String
   
-  status          String   @default("PENDENTE") // PENDENTE, CONCLUIDA, ERRO_EMISSAO, CANCELADA
+  status          String   @default("PENDENTE") 
   
   notas           NotaFiscal[]
   logs            SystemLog[]
@@ -179,14 +229,14 @@ model UserCliente {
 }
 
 model Cnae {
-  id          String @id @default(uuid())
-  codigo      String 
-  descricao   String 
-  principal   Boolean @default(false)
-  codigoNbs        String?  // Nomenclatura Brasileira de Serviços
-  temRetencaoInss  Boolean  @default(false) // O Validador que você pediu
-  empresaId   String
-  empresa     Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  id           String @id @default(uuid())
+  codigo       String 
+  descricao    String 
+  principal    Boolean @default(false)
+  codigoNbs         String?  
+  temRetencaoInss   Boolean  @default(false)
+  empresaId    String
+  empresa      Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
 }
 
 // --- NOTAS FISCAIS ---
@@ -214,8 +264,9 @@ model NotaFiscal {
   empresaId       String
   empresa         Empresa @relation("PrestadorNota", fields: [empresaId], references: [id])
 
+  // ATUALIZADO: Aponta para Cliente
   clienteId       String
-  cliente         Empresa @relation("TomadorNota", fields: [clienteId], references: [id])
+  cliente         Cliente @relation(fields: [clienteId], references: [id])
 
   cnae            String?
   codigoServico   String?
@@ -230,7 +281,6 @@ model ConfiguracaoSistema {
   versaoApi      String @default("1.00")
   ambiente       String @default("HOMOLOGACAO")
   
-  // === NOVOS CAMPOS OBRIGATÓRIOS PARA O E-MAIL ===
   smtpHost       String?
   smtpPort       Int?    @default(587)
   smtpUser       String?
@@ -264,24 +314,23 @@ model TributacaoMunicipal {
 }
 
 model Plan {
-  id            String   @id @default(uuid())
-  name          String   
-  slug          String   @unique
-  description   String?
-  priceMonthly  Decimal  @db.Decimal(10, 2)
-  priceYearly   Decimal  @db.Decimal(10, 2)
-  features      String   
-  active        Boolean  @default(true)
-  recommended   Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(uuid())
+  name           String   
+  slug           String   @unique
+  description    String?
+  priceMonthly   Decimal  @db.Decimal(10, 2)
+  priceYearly    Decimal  @db.Decimal(10, 2)
+  features       String   
+  active         Boolean  @default(true)
+  recommended    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  // Limites e Regras
-  maxNotasMensal   Int      @default(0) // 0 = Ilimitado
-  diasTeste        Int      @default(0) // 7 para o plano teste
-  privado          Boolean  @default(false) // Se true, não aparece na vitrine (Ex: Parceiro)
+  maxNotasMensal    Int       @default(0) 
+  diasTeste         Int       @default(0) 
+  privado           Boolean   @default(false) 
 
-  historico        PlanHistory[]
+  historico         PlanHistory[]
 }
 
 model PlanHistory {
@@ -293,11 +342,11 @@ model PlanHistory {
   plan        Plan      @relation(fields: [planId], references: [id])
   
   dataInicio  DateTime  @default(now())
-  dataFim     DateTime? // Null = Vitalício ou Recorrente Ativo
+  dataFim     DateTime? 
   
-  status      String    @default("ATIVO") // ATIVO, EXPIRADO, CANCELADO
+  status      String    @default("ATIVO") 
   
-  notasEmitidas Int     @default(0) // Contador para controle de limite do plano específico
+  notasEmitidas Int      @default(0) 
   
   createdAt   DateTime  @default(now())
 }
@@ -316,27 +365,27 @@ model SystemLog {
 }
 
 model Ticket {
-  id            String   @id @default(uuid())
-  protocolo     Int      @default(autoincrement())
-  assunto       String
-  categoria     String?
-  prioridade    String   @default("MEDIA")
-  descricao     String
-  status        String   @default("ABERTO")
-  clientUnread  Boolean  @default(false)
+  id             String   @id @default(uuid())
+  protocolo      Int      @default(autoincrement())
+  assunto        String
+  categoria      String?
+  prioridade     String   @default("MEDIA")
+  descricao      String
+  status         String   @default("ABERTO")
+  clientUnread   Boolean  @default(false)
 
-  anexoBase64   String?
-  anexoNome     String?
+  anexoBase64    String?
+  anexoNome      String?
 
-  catalogId     String?
-  catalogItem   TicketCatalog? @relation(fields: [catalogId], references: [id])
-  solicitanteId String
-  solicitante   User     @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
-  atendenteId   String?
-  atendente     User?    @relation("AtendenteTicket", fields: [atendenteId], references: [id])
-  mensagens     TicketMensagem[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  catalogId      String?
+  catalogItem    TicketCatalog? @relation(fields: [catalogId], references: [id])
+  solicitanteId  String
+  solicitante    User      @relation("SolicitanteTicket", fields: [solicitanteId], references: [id])
+  atendenteId    String?
+  atendente      User?     @relation("AtendenteTicket", fields: [atendenteId], references: [id])
+  mensagens      TicketMensagem[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model TicketMensagem {
@@ -361,7 +410,7 @@ model ContadorVinculo {
   status    String   @default("PENDENTE") 
   
   contadorId String
-  contador   User     @relation("ContadorUser", fields: [contadorId], references: [id])
+  contador   User      @relation("ContadorUser", fields: [contadorId], references: [id])
   
   empresaId  String
   empresa    Empresa  @relation("EmpresaContabil", fields: [empresaId], references: [id])
@@ -401,20 +450,17 @@ model Pedido {
   userId          String
   user            User     @relation(fields: [userId], references: [id])
   
-  // O que ele comprou?
-  planoSlug       String   // Ex: "INICIAL"
-  ciclo           String   // "MENSAL" ou "ANUAL"
-  notasAdicionais Int      @default(0) // Quantidade de notas extras avulsas
+  planoSlug       String   
+  ciclo           String   
+  notasAdicionais Int      @default(0) 
   
-  // Valores
   valorPlano      Decimal  @db.Decimal(10, 2)
   valorAdicionais Decimal  @db.Decimal(10, 2)
   valorTotal      Decimal  @db.Decimal(10, 2)
   
-  // Controle Financeiro
-  status          String   @default("PENDENTE") // PENDENTE, PAGO, FALHA, CANCELADO
-  formaPagamento  String?  // PIX, CARTAO
-  gatewayId       String?  // ID da transação no banco (futuro)
+  status          String   @default("PENDENTE") 
+  formaPagamento  String?  
+  gatewayId       String?  
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

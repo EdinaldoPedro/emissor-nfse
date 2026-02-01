@@ -1,7 +1,11 @@
-'use client'; 
+'use client';
 
 import { useEffect, useState } from 'react';
-import { Save, X, Plus, Edit, Trash2, Search, MapPin, ArrowLeft, Users, Loader2, Building, User } from 'lucide-react';
+import { 
+    Plus, Search, Edit, Trash2, MapPin, 
+    User, Building2, Globe, Loader2, X, CheckCircle, 
+    ArrowLeft, Save
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { validarCPF } from '@/app/utils/cpf';
@@ -13,6 +17,7 @@ interface Cliente {
   inscricaoMunicipal?: string; 
   email: string;
   documento: string;
+  tipo: 'PJ' | 'PF' | 'EXT';
   cidade?: string;
   uf?: string;
   cep?: string;
@@ -20,29 +25,39 @@ interface Cliente {
   numero?: string;
   bairro?: string;
   codigoIbge?: string;
+  pais?: string;
 }
 
 export default function MeusClientes() {
   const router = useRouter();
   const dialog = useDialog();
   
+  // === ESTADOS DE DADOS ===
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [filteredClientes, setFilteredClientes] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // === ESTADOS DE CONTROLE VISUAL ===
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [modalStep, setModalStep] = useState<'SELECAO' | 'FORMULARIO'>('SELECAO');
+  
   const [salvando, setSalvando] = useState(false);
-  const [buscandoDoc, setBuscandoDoc] = useState(false);
-  const [buscandoCep, setBuscandoCep] = useState(false);
+  const [buscandoDados, setBuscandoDados] = useState(false);
   const [termoBusca, setTermoBusca] = useState('');
   
+  // === ESTADO DO FORMULÁRIO ===
   const [clienteAtual, setClienteAtual] = useState<Cliente>({ 
-    id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', documento: '', cidade: '', uf: '', cep: '', logradouro: '', numero: '', bairro: '', codigoIbge: ''
+    id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', 
+    email: '', documento: '', cidade: '', uf: '', cep: '', 
+    logradouro: '', numero: '', bairro: '', codigoIbge: '',
+    tipo: 'PJ', pais: 'Brasil'
   });
 
-  const isPJ = clienteAtual.documento.replace(/\D/g, '').length > 11;
+  const isPJ = clienteAtual.tipo === 'PJ';
 
+  // --- CARREGAMENTO ---
   const carregarClientes = async () => {
+    setLoading(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
     const token = localStorage.getItem('token'); 
@@ -62,8 +77,6 @@ export default function MeusClientes() {
       if (Array.isArray(dados)) {
           setClientes(dados);
           setFilteredClientes(dados);
-      } else {
-          console.error("Erro ao carregar clientes:", dados);
       }
     } catch (erro) { console.error(erro); } 
     finally { setLoading(false); }
@@ -79,150 +92,165 @@ export default function MeusClientes() {
       const filtrados = clientes.filter(c => 
         c.nome.toLowerCase().includes(lower) || 
         c.documento.includes(lower) || 
-        (c.nomeFantasia && c.nomeFantasia.toLowerCase().includes(lower)) ||
-        (c.email && c.email.toLowerCase().includes(lower))
+        (c.nomeFantasia && c.nomeFantasia.toLowerCase().includes(lower))
       );
       setFilteredClientes(filtrados);
     }
   }, [termoBusca, clientes]);
 
-  // === BUSCA INTELIGENTE COM AUTO-COMPLETE DE CEP ===
-  const handleBuscarDocumento = async () => {
-    const docLimpo = clienteAtual.documento.replace(/\D/g, '');
-    const token = localStorage.getItem('token');
-    
-    // CPF
-    if (docLimpo.length === 11) {
-        if (validarCPF(clienteAtual.documento)) {
-            dialog.showAlert({ type: 'success', title: 'CPF Válido', description: 'Preencha os dados pessoais manualmente.' });
-        } else {
-            dialog.showAlert({ type: 'warning', title: 'Inválido', description: 'CPF incorreto.' });
-        }
-        return;
-    }
+  // --- LÓGICA DO WIZARD ---
+  const abrirNovoCadastro = () => {
+    setClienteAtual({ 
+        id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', 
+        documento: '', cidade: '', uf: '', cep: '', logradouro: '', 
+        numero: '', bairro: '', codigoIbge: '', tipo: 'PJ', pais: 'Brasil' 
+    });
+    setModalStep('SELECAO');
+    setIsFormOpen(true);
+  }
 
-    // CNPJ
-    if (docLimpo.length === 14) {
-        setBuscandoDoc(true);
+  const selecionarTipo = (tipo: 'PJ' | 'PF' | 'EXT') => {
+      setClienteAtual(prev => ({ 
+          ...prev, 
+          tipo,
+          pais: tipo === 'EXT' ? '' : 'Brasil',
+          documento: '' 
+      }));
+      setModalStep('FORMULARIO');
+  };
+
+  const abrirEdicao = (cliente: Cliente) => {
+    setClienteAtual({ ...cliente, pais: cliente.pais || 'Brasil' });
+    setModalStep('FORMULARIO'); 
+    setIsFormOpen(true);
+  }
+
+  const voltarSelecao = () => {
+    if (!clienteAtual.id) setModalStep('SELECAO');
+  }
+
+  // --- BUSCAS E VALIDAÇÕES ---
+  
+  // Verifica se o cliente já existe no banco (para CPF e CNPJ)
+  const verificarClienteExistente = async (doc: string) => {
+        setBuscandoDados(true);
+        const token = localStorage.getItem('token');
         try {
-            // 1. Busca dados do CNPJ
-            const res = await fetch('/api/external/cnpj', {
+            const res = await fetch('/api/clientes/check', {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'application/json', 
                     'Authorization': `Bearer ${token}` 
                 },
-                body: JSON.stringify({ cnpj: docLimpo })
+                body: JSON.stringify({ documento: doc })
             });
-            const dados = await res.json();
-
+            
             if (res.ok) {
-                // === AUTOMAÇÃO: Se não vier IBGE mas vier CEP, busca o CEP automaticamente ===
-                let ibgeFinal = dados.codigoIbge;
-                let logradouroFinal = dados.logradouro;
-                let bairroFinal = dados.bairro;
-                let cidadeFinal = dados.cidade;
-                let ufFinal = dados.uf;
-
-                if ((!ibgeFinal || ibgeFinal.length < 7) && dados.cep) {
-                    console.log("CNPJ sem IBGE. Buscando CEP automaticamente...");
-                    try {
-                        const cepClean = dados.cep.replace(/\D/g, '');
-                        const resCep = await fetch('/api/external/cep', { 
-                            method: 'POST', 
-                            body: JSON.stringify({ cep: cepClean }) 
-                        });
-                        const dataCep = await resCep.json();
-                        
-                        if (resCep.ok && dataCep.codigoIbge) {
-                            ibgeFinal = dataCep.codigoIbge;
-                            // Atualiza endereço com dados do correio (geralmente mais precisos/padronizados)
-                            if(dataCep.logradouro) logradouroFinal = dataCep.logradouro;
-                            if(dataCep.bairro) bairroFinal = dataCep.bairro;
-                            if(dataCep.localidade) cidadeFinal = dataCep.localidade; // ViaCEP usa localidade
-                            if(dataCep.cidade) cidadeFinal = dataCep.cidade; // Outras APIs
-                            if(dataCep.uf) ufFinal = dataCep.uf;
-                        }
-                    } catch (errCep) {
-                        console.error("Falha na automação do CEP:", errCep);
-                    }
+                const dados = await res.json();
+                if (dados) {
+                    setClienteAtual(prev => ({ ...prev, ...dados }));
+                    dialog.showAlert({ type: 'info', title: 'Cliente Encontrado', description: 'Os dados foram carregados da sua base.' });
+                    return true;
                 }
-                // =========================================================================
-
-                setClienteAtual(prev => ({
-                    ...prev,
-                    nome: dados.razaoSocial,
-                    nomeFantasia: dados.nomeFantasia,
-                    email: dados.email || prev.email,
-                    cep: dados.cep,
-                    logradouro: logradouroFinal,
-                    numero: dados.numero,
-                    bairro: bairroFinal,
-                    cidade: cidadeFinal,
-                    uf: ufFinal,
-                    codigoIbge: ibgeFinal // Agora preenchido automaticamente!
-                }));
-                dialog.showAlert({ type: 'success', description: 'Dados da empresa carregados.' });
-            } else { 
-                dialog.showAlert({ type: 'warning', description: "CNPJ não encontrado." }); 
             }
-        } catch (e) { dialog.showAlert("Erro de conexão."); } 
-        finally { setBuscandoDoc(false); }
-        return;
-    }
-    dialog.showAlert("Digite um CPF (11) ou CNPJ (14).");
+        } catch (e) { console.error(e); }
+        finally { setBuscandoDados(false); }
+        return false;
+    };
+
+  // Busca CNPJ na API Externa
+  const executarBuscaCNPJ = async (cnpjLimpo: string) => {
+      setBuscandoDados(true);
+      const token = localStorage.getItem('token');
+      try {
+          const res = await fetch('/api/external/cnpj', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ cnpj: cnpjLimpo })
+          });
+          const dados = await res.json();
+          if (res.ok) {
+              setClienteAtual(prev => ({
+                  ...prev,
+                  nome: dados.razaoSocial, nomeFantasia: dados.nomeFantasia,
+                  email: dados.email, cep: dados.cep,
+                  logradouro: dados.logradouro, numero: dados.numero,
+                  bairro: dados.bairro, cidade: dados.cidade, uf: dados.uf,
+                  codigoIbge: dados.codigoIbge
+              }));
+              dialog.showAlert({ type: 'success', description: 'Dados carregados da Receita!' });
+          } else { 
+              dialog.showAlert("CNPJ não encontrado na Receita."); 
+          }
+      } catch (e) { } 
+      finally { setBuscandoDados(false); }
+  };
+
+  const handleDocumentoChange = async (val: string) => {
+      if (clienteAtual.tipo === 'EXT') {
+          setClienteAtual(prev => ({ ...prev, documento: val }));
+          return;
+      }
+
+      let v = val.replace(/\D/g, '');
+      const rawLength = v.length;
+
+      // Máscara
+      let documentoFormatado = v;
+      if (clienteAtual.tipo === 'PF') {
+          if (v.length <= 11) {
+            documentoFormatado = v.slice(0, 11).replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+          }
+      } else {
+          if (v.length <= 14) {
+            documentoFormatado = v.slice(0, 14).replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
+          }
+      }
+
+      setClienteAtual(prev => ({ ...prev, documento: documentoFormatado }));
+
+      // === AUTOMAÇÃO PF (11 Dígitos) ===
+      if (clienteAtual.tipo === 'PF' && rawLength === 11) {
+          if (!validarCPF(documentoFormatado)) {
+               dialog.showAlert({ type: 'warning', title: 'CPF Inválido', description: 'Verifique os números digitados.' });
+               return;
+          }
+          await verificarClienteExistente(v);
+      }
+
+      // === AUTOMAÇÃO PJ (14 Dígitos) ===
+      if (clienteAtual.tipo === 'PJ' && rawLength === 14) {
+          const achouInterno = await verificarClienteExistente(v);
+          if (!achouInterno) {
+              executarBuscaCNPJ(v);
+          }
+      }
   };
 
   const handleBuscarCep = async () => {
+      if (clienteAtual.tipo === 'EXT') return;
       const cepLimpo = clienteAtual.cep?.replace(/\D/g, '');
       if (!cepLimpo || cepLimpo.length !== 8) return; 
 
-      setBuscandoCep(true);
+      setBuscandoDados(true);
       try {
           const res = await fetch('/api/external/cep', { method: 'POST', body: JSON.stringify({ cep: cepLimpo }) });
           const dados = await res.json();
           if (res.ok) {
               setClienteAtual(prev => ({
                   ...prev,
-                  logradouro: dados.logradouro,
-                  bairro: dados.bairro,
-                  cidade: dados.cidade || dados.localidade,
-                  uf: dados.uf,
+                  logradouro: dados.logradouro, bairro: dados.bairro,
+                  cidade: dados.cidade || dados.localidade, uf: dados.uf,
                   codigoIbge: dados.codigoIbge
               }));
-          } else { dialog.showAlert({ type: 'warning', description: "CEP não encontrado." }); }
-      } catch (e) { console.error(e); } finally { setBuscandoCep(false); }
+          }
+      } catch (e) { } finally { setBuscandoDados(false); }
   };
-
-  const abrirNovoCadastro = () => {
-    setClienteAtual({ id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', documento: '', cidade: '', uf: '', cep: '', logradouro: '', numero: '', bairro: '', codigoIbge: '' });
-    setIsFormOpen(true);
-  }
-
-  const abrirEdicao = (cliente: Cliente) => {
-    setClienteAtual(cliente);
-    setIsFormOpen(true);
-  }
 
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
-    const docLimpo = clienteAtual.documento.replace(/\D/g, '');
+    if (!clienteAtual.nome) return dialog.showAlert("Nome é obrigatório.");
     
-    if (docLimpo.length === 11 && !validarCPF(clienteAtual.documento)) {
-        return dialog.showAlert({ type: 'danger', description: 'CPF inválido.' });
-    }
-    if (docLimpo.length !== 11 && docLimpo.length !== 14) {
-        return dialog.showAlert({ type: 'warning', description: 'Documento deve ter 11 ou 14 dígitos.' });
-    }
-    if (clienteAtual.nome.trim().length < 5) {
-        return dialog.showAlert({ type: 'warning', description: 'Nome/Razão Social muito curto.' });
-    }
-    
-    // Agora o sistema tenta buscar sozinho, mas se ainda assim falhar, avisa o usuário
-    if (!clienteAtual.codigoIbge) {
-        return dialog.showAlert({ type: 'warning', description: 'Atenção: Código IBGE não preenchido. Busque o CEP novamente.' });
-    }
-
     setSalvando(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
@@ -246,33 +274,29 @@ export default function MeusClientes() {
         setIsFormOpen(false);
         carregarClientes();
       } else { 
-          dialog.showAlert({ type: 'danger', description: 'Erro ao salvar.' }); 
+          const err = await res.json();
+          dialog.showAlert({ type: 'danger', description: err.error || 'Erro ao salvar.' }); 
       }
     } catch (error) { dialog.showAlert("Erro de conexão."); } 
     finally { setSalvando(false); }
   };
 
   const handleExcluir = async (id: string) => {
-    const confirmed = await dialog.showConfirm({ type: 'danger', title: 'Excluir?', description: 'Essa ação é irreversível.', confirmText: 'Sim, Excluir' });
-    if (!confirmed) return;
-
+    if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir?', description: 'Confirmar exclusão?' })) return;
     const userId = localStorage.getItem('userId');
-    const contextId = localStorage.getItem('empresaContextId');
     const token = localStorage.getItem('token');
+    const contextId = localStorage.getItem('empresaContextId');
 
-    try {
-      const res = await fetch(`/api/clientes?id=${id}`, {
+    await fetch(`/api/clientes?id=${id}`, {
         method: 'DELETE',
-        headers: { 
-            'x-user-id': userId || '', 
-            'x-empresa-id': contextId || '',
-            'Authorization': `Bearer ${token}` 
-        }
-      });
-      if (res.ok) { carregarClientes(); }
-      else dialog.showAlert({ type: 'danger', description: "Erro ao excluir." });
-    } catch (e) { dialog.showAlert("Erro de conexão."); }
-  }
+        headers: { 'x-user-id': userId || '', 'x-empresa-id': contextId || '', 'Authorization': `Bearer ${token}` }
+    });
+    carregarClientes();
+  };
+
+  // Classes utilitárias para reutilização
+  const labelClass = "block text-xs font-bold text-slate-500 mb-1 uppercase";
+  const inputClass = "w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition text-sm text-slate-700";
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8">
@@ -281,149 +305,205 @@ export default function MeusClientes() {
         {/* CABEÇALHO */}
         <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
-                <button onClick={() => router.back()} className="p-2 hover:bg-slate-200 rounded-full transition text-slate-600">
+                <button onClick={() => router.push('/cliente/dashboard')} className="p-2 hover:bg-slate-200 rounded-full transition text-slate-600">
                     <ArrowLeft size={24} />
                 </button>
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> Meus Clientes</h1>
+                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><User className="text-blue-600"/> Meus Clientes</h1>
                     <p className="text-slate-500 text-sm">Gerencie tomadores PF e PJ.</p>
                 </div>
             </div>
             
-            {!isFormOpen && (
-                <button onClick={abrirNovoCadastro} className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 font-medium shadow-md">
-                    <Plus size={20} /> Novo Cliente
-                </button>
-            )}
+            <button onClick={abrirNovoCadastro} className="bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 font-medium shadow-md">
+                <Plus size={20} /> Novo Cliente
+            </button>
         </div>
 
         {/* MODAL */}
         {isFormOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-                <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <div className="flex justify-between items-center p-6 border-b sticky top-0 bg-white z-10">
-                        <h3 className="font-bold text-lg text-slate-800">
-                            {clienteAtual.id ? 'Editar Cliente' : 'Novo Cadastro'}
-                        </h3>
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+                    
+                    {/* Header do Modal */}
+                    <div className="flex justify-between items-center p-6 border-b bg-white z-10">
+                        <div className="flex items-center gap-3">
+                            {/* Botão voltar só aparece se for formulario de novo cadastro */}
+                            {modalStep === 'FORMULARIO' && !clienteAtual.id && (
+                                <button onClick={voltarSelecao} className="text-slate-400 hover:text-blue-600"><ArrowLeft size={20}/></button>
+                            )}
+                            <h3 className="font-bold text-lg text-slate-800">
+                                {modalStep === 'SELECAO' ? 'Novo Cliente' : clienteAtual.id ? 'Editar Cliente' : `Novo - ${clienteAtual.tipo === 'EXT' ? 'Exterior' : clienteAtual.tipo}`}
+                            </h3>
+                        </div>
                         <button onClick={() => setIsFormOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><X size={24} /></button>
                     </div>
             
-                    <form onSubmit={handleSalvar} className="p-6 space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">CPF / CNPJ</label>
-                                <div className="flex gap-2">
-                                    <input required placeholder="Apenas números" className="p-3 border rounded-lg flex-1 focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                                        value={clienteAtual.documento} onChange={e => setClienteAtual({...clienteAtual, documento: e.target.value})}
-                                    />
-                                    <button type="button" onClick={handleBuscarDocumento} disabled={buscandoDoc} className="bg-blue-50 text-blue-600 px-4 rounded-lg hover:bg-blue-100 transition border border-blue-200">
-                                        {buscandoDoc ? <Loader2 className="animate-spin" size={20}/> : <Search size={20} />}
+                    <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                        
+                        {/* --- ETAPA 1: SELEÇÃO --- */}
+                        {modalStep === 'SELECAO' && (
+                            <div className="space-y-6 py-4">
+                                <p className="text-center text-slate-500">Selecione o tipo de cliente que deseja cadastrar:</p>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <button onClick={() => selecionarTipo('PJ')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition gap-3 group h-40">
+                                        <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center group-hover:scale-110 transition"><Building2 size={24}/></div>
+                                        <span className="font-bold text-slate-700">Pessoa Jurídica</span>
+                                        <span className="text-xs text-slate-400">CNPJ</span>
+                                    </button>
+                                    
+                                    <button onClick={() => selecionarTipo('PF')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-green-500 hover:bg-green-50 transition gap-3 group h-40">
+                                        <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center group-hover:scale-110 transition"><User size={24}/></div>
+                                        <span className="font-bold text-slate-700">Pessoa Física</span>
+                                        <span className="text-xs text-slate-400">CPF</span>
+                                    </button>
+
+                                    <button onClick={() => selecionarTipo('EXT')} className="flex flex-col items-center justify-center p-6 border-2 border-slate-100 rounded-xl hover:border-purple-500 hover:bg-purple-50 transition gap-3 group h-40">
+                                        <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center group-hover:scale-110 transition"><Globe size={24}/></div>
+                                        <span className="font-bold text-slate-700">Exterior</span>
+                                        <span className="text-xs text-slate-400">Internacional</span>
                                     </button>
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Email</label>
-                                <input type="email" placeholder="email@cliente.com" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={clienteAtual.email || ''} onChange={e => setClienteAtual({...clienteAtual, email: e.target.value})}
-                                />
-                            </div>
-                        </div>
-
-                        <div className={`grid grid-cols-1 ${isPJ ? 'md:grid-cols-2' : ''} gap-6`}>
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">
-                                    {isPJ ? 'Razão Social' : 'Nome Completo'}
-                                </label>
-                                <input 
-                                    required 
-                                    className={`w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${isPJ ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : 'bg-white'}`}
-                                    value={clienteAtual.nome} 
-                                    onChange={e => setClienteAtual({...clienteAtual, nome: e.target.value})}
-                                    readOnly={isPJ} 
-                                />
-                            </div>
-                            
-                            {isPJ && (
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Nome Fantasia</label>
-                                    <input className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                        value={clienteAtual.nomeFantasia || ''} onChange={e => setClienteAtual({...clienteAtual, nomeFantasia: e.target.value})}
-                                    />
-                                </div>
-                            )}
-                        </div>
-
-                        {isPJ && (
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Inscrição Municipal (Opcional)</label>
-                                <input placeholder="Ex: 12345" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={clienteAtual.inscricaoMunicipal || ''} onChange={e => setClienteAtual({...clienteAtual, inscricaoMunicipal: e.target.value})}
-                                />
-                            </div>
                         )}
 
-                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 relative">
-                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><MapPin size={16}/> Endereço</h4>
-                            {buscandoCep && <div className="absolute top-4 right-4 flex items-center gap-2 text-xs text-blue-600"><Loader2 className="animate-spin" size={14}/> Buscando...</div>}
+                        {/* --- ETAPA 2: FORMULÁRIO --- */}
+                        {modalStep === 'FORMULARIO' && (
+                            <form onSubmit={handleSalvar} className="space-y-6 animate-in slide-in-from-right-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className={labelClass}>
+                                            {clienteAtual.tipo === 'PJ' ? 'CNPJ' : clienteAtual.tipo === 'PF' ? 'CPF' : 'NIF / Documento'}
+                                        </label>
+                                        <div className="relative">
+                                            <input 
+                                                className={`${inputClass} font-mono pr-10`}
+                                                value={clienteAtual.documento || ''} 
+                                                onChange={e => handleDocumentoChange(e.target.value)}
+                                                placeholder={clienteAtual.tipo === 'EXT' ? 'Opcional para exterior' : 'Apenas números'}
+                                                maxLength={clienteAtual.tipo === 'EXT' ? 20 : 18}
+                                            />
+                                            {buscandoDados && (
+                                                <div className="absolute right-3 top-3 text-blue-500">
+                                                    <Loader2 className="animate-spin" size={20}/>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className={labelClass}>Email</label>
+                                        <input type="email" placeholder="email@cliente.com" className={inputClass}
+                                            value={clienteAtual.email || ''} onChange={e => setClienteAtual({...clienteAtual, email: e.target.value})}
+                                        />
+                                    </div>
+                                </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="md:col-span-1">
-                                    <label className="block text-[10px] font-bold text-slate-400 mb-1">CEP</label>
-                                    <input required placeholder="00000000" className="w-full p-2 border rounded bg-white text-sm font-bold text-blue-700 focus:ring-2 focus:ring-blue-500 outline-none" 
-                                        value={clienteAtual.cep || ''} 
-                                        onChange={e => setClienteAtual({...clienteAtual, cep: e.target.value})}
-                                        onBlur={handleBuscarCep}
-                                    />
+                                <div className={`grid grid-cols-1 ${isPJ ? 'md:grid-cols-2' : ''} gap-6`}>
+                                    <div>
+                                        <label className={labelClass}>
+                                            {isPJ ? 'Razão Social' : 'Nome Completo'}
+                                        </label>
+                                        <input 
+                                            required 
+                                            className={inputClass}
+                                            value={clienteAtual.nome} 
+                                            onChange={e => setClienteAtual({...clienteAtual, nome: e.target.value})}
+                                        />
+                                    </div>
+                                    
+                                    {isPJ && (
+                                        <div>
+                                            <label className={labelClass}>Nome Fantasia</label>
+                                            <input className={inputClass}
+                                                value={clienteAtual.nomeFantasia || ''} onChange={e => setClienteAtual({...clienteAtual, nomeFantasia: e.target.value})}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
-                                <div className="md:col-span-2">
-                                    <label className="block text-[10px] font-bold text-slate-400 mb-1">Logradouro</label>
-                                    <input className="w-full p-2 border rounded bg-gray-100 text-gray-600 text-sm cursor-not-allowed" 
-                                        value={clienteAtual.logradouro || ''} readOnly tabIndex={-1}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 mb-1">Número</label>
-                                    <input required placeholder="Nº" className="w-full p-2 border rounded bg-white text-sm" 
-                                        value={clienteAtual.numero || ''} onChange={e => setClienteAtual({...clienteAtual, numero: e.target.value})}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 mb-1">Bairro</label>
-                                    <input className="w-full p-2 border rounded bg-gray-100 text-gray-600 text-sm cursor-not-allowed" 
-                                        value={clienteAtual.bairro || ''} readOnly tabIndex={-1}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 mb-1">Cidade</label>
-                                    <input className="w-full p-2 border rounded bg-gray-100 text-gray-600 text-sm cursor-not-allowed" 
-                                        value={clienteAtual.cidade || ''} readOnly tabIndex={-1}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 mb-1">UF</label>
-                                    <input className="w-full p-2 border rounded bg-gray-100 text-gray-600 text-sm cursor-not-allowed" 
-                                        value={clienteAtual.uf || ''} readOnly tabIndex={-1}
-                                    />
-                                </div>
-                                {/* CAMPO IBGE AGORA VISÍVEL PARA CONFERÊNCIA */}
-                                <div className="md:col-span-1 hidden">
-                                    <input type="hidden" value={clienteAtual.codigoIbge || ''} />
-                                </div>
-                            </div>
-                        </div>
 
-                        <div className="flex justify-end gap-3 pt-4 border-t">
+                                {isPJ && (
+                                    <div>
+                                        <label className={labelClass}>Inscrição Municipal (Opcional)</label>
+                                        <input placeholder="Ex: 12345" className={inputClass}
+                                            value={clienteAtual.inscricaoMunicipal || ''} onChange={e => setClienteAtual({...clienteAtual, inscricaoMunicipal: e.target.value})}
+                                        />
+                                    </div>
+                                )}
+
+                                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 relative">
+                                    <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2">
+                                        <MapPin size={16}/> Endereço {clienteAtual.tipo === 'EXT' && '(Exterior)'}
+                                    </h4>
+                                    {buscandoDados && <div className="absolute top-4 right-4 flex items-center gap-2 text-xs text-blue-600"><Loader2 className="animate-spin" size={14}/> Buscando...</div>}
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {clienteAtual.tipo === 'EXT' && (
+                                            <div className="md:col-span-3">
+                                                <label className={labelClass}>País</label>
+                                                <input className={`${inputClass} bg-yellow-50`} 
+                                                    placeholder="Ex: Estados Unidos"
+                                                    value={clienteAtual.pais} onChange={e => setClienteAtual({...clienteAtual, pais: e.target.value})}
+                                                />
+                                            </div>
+                                        )}
+
+                                        <div className="md:col-span-1">
+                                            <label className={labelClass}>{clienteAtual.tipo === 'EXT' ? 'Zip Code' : 'CEP'}</label>
+                                            <input required className={`${inputClass} font-bold text-blue-700`}
+                                                value={clienteAtual.cep || ''} 
+                                                onChange={e => setClienteAtual({...clienteAtual, cep: e.target.value})}
+                                                onBlur={handleBuscarCep}
+                                            />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className={labelClass}>Logradouro</label>
+                                            <input className={inputClass}
+                                                value={clienteAtual.logradouro || ''} onChange={e => setClienteAtual({...clienteAtual, logradouro: e.target.value})}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClass}>Número</label>
+                                            <input required placeholder="Nº" className={inputClass}
+                                                value={clienteAtual.numero || ''} onChange={e => setClienteAtual({...clienteAtual, numero: e.target.value})}
+                                            />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className={labelClass}>Bairro</label>
+                                            <input className={inputClass}
+                                                value={clienteAtual.bairro || ''} onChange={e => setClienteAtual({...clienteAtual, bairro: e.target.value})}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClass}>Cidade</label>
+                                            <input className={inputClass}
+                                                value={clienteAtual.cidade || ''} onChange={e => setClienteAtual({...clienteAtual, cidade: e.target.value})}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={labelClass}>{clienteAtual.tipo === 'EXT' ? 'Província/Estado' : 'UF'}</label>
+                                            <input className={inputClass}
+                                                value={clienteAtual.uf || ''} onChange={e => setClienteAtual({...clienteAtual, uf: e.target.value})} maxLength={clienteAtual.tipo === 'EXT' ? 50 : 2}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        )}
+                    </div>
+
+                    {/* Footer do Modal (Só aparece no formulário) */}
+                    {modalStep === 'FORMULARIO' && (
+                        <div className="flex justify-end gap-3 p-6 border-t bg-white">
                             <button type="button" onClick={() => setIsFormOpen(false)} className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition font-medium">Cancelar</button>
-                            <button type="submit" disabled={salvando} className="bg-green-600 text-white px-8 py-2 rounded-lg hover:bg-green-700 transition font-bold shadow-lg shadow-green-100 flex items-center gap-2">
-                                {salvando ? 'Salvando...' : <><Save size={18} /> Salvar</>}
+                            <button onClick={handleSalvar} disabled={salvando} className="bg-green-600 text-white px-8 py-2 rounded-lg hover:bg-green-700 transition font-bold shadow-lg shadow-green-100 flex items-center gap-2">
+                                {salvando ? <Loader2 className="animate-spin" size={18}/> : <><Save size={18} /> Salvar</>}
                             </button>
                         </div>
-                    </form>
+                    )}
                 </div>
             </div>
         )}
 
-        {/* LISTAGEM (MANTIDO IGUAL) */}
+        {/* LISTAGEM (MANTIDA IGUAL AO ORIGINAL) */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="relative w-full md:w-72">
@@ -460,14 +540,17 @@ export default function MeusClientes() {
                                         {cliente.nomeFantasia && <div className="text-xs text-slate-500">{cliente.nomeFantasia}</div>}
                                     </td>
                                     <td className="px-6 py-4 font-mono text-xs text-slate-600">
-                                        {cliente.documento}
+                                        {cliente.documento || '-'}
                                     </td>
                                     <td className="px-6 py-4">
-                                        {cliente.documento.replace(/\D/g, '').length > 11 ? (
-                                            <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-200 flex items-center gap-1 w-fit"><Building size={10}/> PJ</span>
-                                        ) : (
-                                            <span className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded border border-green-200 flex items-center gap-1 w-fit"><User size={10}/> PF</span>
-                                        )}
+                                        <span className={`px-2 py-1 rounded text-[10px] font-bold border w-fit flex items-center gap-1 ${
+                                            cliente.tipo === 'PJ' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                                            cliente.tipo === 'PF' ? 'bg-green-100 text-green-800 border-green-200' :
+                                            'bg-purple-100 text-purple-800 border-purple-200'
+                                        }`}>
+                                            {cliente.tipo === 'EXT' ? <Globe size={10}/> : cliente.tipo === 'PJ' ? <Building2 size={10}/> : <User size={10}/>}
+                                            {cliente.tipo}
+                                        </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
                                         {cliente.cidade ? `${cliente.cidade}/${cliente.uf}` : <span className="text-slate-300 italic">--</span>}
