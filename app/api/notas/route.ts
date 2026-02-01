@@ -6,6 +6,7 @@ import { getTributacaoPorCnae } from '@/app/utils/tributacao';
 import { processarRetornoNota } from '@/app/services/notaProcessor';
 import { getAuthenticatedUser, unauthorized, forbidden } from '@/app/utils/api-middleware';
 import { checkPlanLimits, incrementUsage } from '@/app/services/planService';
+import { validateRequest } from "@/app/utils/api-security"; // Importar validateRequest
 
 const prisma = new PrismaClient();
 
@@ -22,31 +23,14 @@ async function getEmpresaContexto(user: any, contextId: string | null) {
     return user.empresaId;
 }
 
-function limparPayloadParaLog(payload: any) {
-    const copia = JSON.parse(JSON.stringify(payload));
-    if (copia.prestador) {
-        copia.prestador.senhaCertificado = '*** PROTEGIDO ***';
-        copia.prestador.certificadoA1 = '*** ARQUIVO PFX OMITIDO ***';
-        copia.prestador.senha = '*** PROTEGIDO ***';
-    }
-    return copia;
-}
-
-async function resolveUser(request: Request) {
-    let user = await getAuthenticatedUser(request);
-    if (!user) return null;
-    const headerUserId = request.headers.get('x-user-id');
-    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-    if (isStaff && headerUserId && headerUserId !== user.id) {
-        const targetUser = await prisma.user.findUnique({ where: { id: headerUserId } });
-        if (targetUser) return { ...targetUser, isImpersonating: true }; 
-    }
-    return user;
-}
-
 // === POST: EMISSÃO DE NOTA ===
 export async function POST(request: Request) {
-  const user = await resolveUser(request);
+  // 1. Validação de Segurança
+  const { targetId, errorResponse } = await validateRequest(request);
+  if (errorResponse) return errorResponse;
+  
+  // Como o validateRequest retorna o targetId, precisamos pegar o user completo para checar roles/empresa
+  const user = await prisma.user.findUnique({ where: { id: targetId } });
   if (!user) return unauthorized();
 
   const planCheck = await checkPlanLimits(user.id, 'EMITIR');
@@ -69,19 +53,31 @@ export async function POST(request: Request) {
     if (!empresaIdAlvo) return forbidden();
     empresaIdLog = empresaIdAlvo;
 
+    // === CORREÇÃO AQUI: Busca Prestador em 'Empresa' e Tomador em 'Cliente' ===
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
-    const tomador = await prisma.empresa.findUnique({ where: { id: clienteId } });
-    if (!prestador || !tomador) throw new Error("Empresas (Prestador ou Tomador) não encontradas.");
+    const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } }); // <--- Mudou de empresa para cliente
+    
+    if (!prestador) throw new Error("Prestador (Sua Empresa) não encontrado.");
+    if (!tomador) throw new Error("Tomador (Cliente) não encontrado.");
 
+    // Atualiza ou Cria a Venda
     let venda;
+    const valorFloat = parseFloat(valor);
+    
     if (vendaId) {
         venda = await prisma.venda.update({
             where: { id: vendaId },
-            data: { valor: parseFloat(valor), descricao: descricao, status: "PROCESSANDO" }
+            data: { valor: valorFloat, descricao: descricao, status: "PROCESSANDO" }
         });
     } else {
         venda = await prisma.venda.create({
-            data: { empresaId: prestador.id, clienteId: tomador.id, valor: parseFloat(valor), descricao: descricao, status: "PROCESSANDO" }
+            data: { 
+                empresaId: prestador.id, 
+                clienteId: tomador.id, // Agora aponta para a tabela Cliente
+                valor: valorFloat, 
+                descricao: descricao, 
+                status: "PROCESSANDO" 
+            }
         });
     }
     vendaIdLog = venda.id;
@@ -91,21 +87,16 @@ export async function POST(request: Request) {
     const serieFinal = serieDPS || prestador.serieDPS || '900';
 
     if (numeroDPS) {
-        // Se veio manual (retry ou edição), usa o informado
         dpsFinal = parseInt(numeroDPS);
-        
-        // Se o número informado for MAIOR que o último salvo, atualiza o contador
-        // para evitar conflitos nas próximas notas automáticas.
         if (dpsFinal > (prestador.ultimoDPS || 0)) {
             await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
         }
     } else {
-        // Lógica automática (Padrão)
         dpsFinal = (prestador.ultimoDPS || 0) + 1;
         await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
     }
-    // ===============================
 
+    // === CNAE ===
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
         const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
@@ -116,6 +107,7 @@ export async function POST(request: Request) {
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
 
+    // Tenta obter dados fiscais
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
          itemLc = infoEstatica.itemLC;
@@ -128,13 +120,23 @@ export async function POST(request: Request) {
         if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
-    // Prepara dados para a Factory
+    // === ADAPTAÇÃO DO TOMADOR PARA O PADRÃO DA STRATEGY ===
+    // A Strategy antiga espera 'razaoSocial', mas o Cliente novo tem 'nome'.
+    // Fazemos um adaptador rápido aqui.
+    const tomadorAdaptado = {
+        ...tomador,
+        razaoSocial: tomador.nome, // Mapeia nome para razaoSocial
+        documento: tomador.documento || '', // Garante string
+        // Exterior: Se não tiver IBGE, manda zerado ou trata na Strategy
+        codigoIbge: tomador.codigoIbge || '9999999' 
+    };
+
     const dadosParaEstrategia = {
         prestador,
-        tomador,
+        tomador: tomadorAdaptado,
         venda,
         servico: {
-            valor: parseFloat(valor),
+            valor: valorFloat,
             descricao,
             cnae: cnaeFinal,
             itemLc,
@@ -165,19 +167,19 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
     }
 
-    // Incrementa uso se sucesso
     if(planCheck.historyId) await incrementUsage(planCheck.historyId);
 
+    // === CRIAÇÃO DA NOTA ===
     const nota = await prisma.notaFiscal.create({
         data: {
             vendaId: venda.id,
             empresaId: prestador.id,
-            clienteId: tomador.id,
+            clienteId: tomador.id, // Agora usa a relação correta
             numero: parseInt(resultado.notaGov!.numero) || 0,
-            valor: parseFloat(valor),
+            valor: valorFloat,
             descricao: descricao,
             prestadorCnpj: prestador.documento.replace(/\D/g, ''),
-            tomadorCnpj: tomador.documento.replace(/\D/g, ''),
+            tomadorCnpj: tomador.documento ? tomador.documento.replace(/\D/g, '') : 'EXTERIOR',
             status: 'AUTORIZADA',
             chaveAcesso: resultado.notaGov!.chave,
             protocolo: resultado.notaGov!.protocolo, 
@@ -188,7 +190,9 @@ export async function POST(request: Request) {
     });
 
     await createLog({ level: 'INFO', action: 'NOTA_AUTORIZADA', message: `Nota ${nota.numero} autorizada!`, empresaId: prestador.id, vendaId: venda.id });
-    await processarRetornoNota(nota.id, prestador.id, venda.id);
+    
+    // Processamento assíncrono (não espera)
+    processarRetornoNota(nota.id, prestador.id, venda.id).catch(console.error);
 
     return NextResponse.json({ success: true, nota }, { status: 201 });
 
@@ -199,10 +203,14 @@ export async function POST(request: Request) {
   }
 }
 
-// === GET: LISTAGEM ===
+// === GET: LISTAGEM DE NOTAS ===
 export async function GET(request: Request) {
-    const user = await resolveUser(request);
+    const { targetId, errorResponse } = await validateRequest(request);
+    if (errorResponse) return errorResponse;
+
+    const user = await prisma.user.findUnique({ where: { id: targetId } });
     if (!user) return unauthorized();
+
     const contextId = request.headers.get('x-empresa-id');
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
@@ -220,7 +228,7 @@ export async function GET(request: Request) {
           empresaId: empresaIdAlvo,
           ...(search && {
               OR: [
-                  { cliente: { razaoSocial: { contains: search } } },
+                  { cliente: { nome: { contains: search, mode: 'insensitive' } } }, // Alterado razaoSocial -> nome
                   { cliente: { documento: { contains: search } } },
                   ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
               ]
@@ -235,8 +243,8 @@ export async function GET(request: Request) {
           prisma.venda.findMany({
               where: whereClause, take: limit, skip: skip, orderBy: { createdAt: 'desc' },
               include: {
-                  cliente: { select: { razaoSocial: true, documento: true } },
-                  // CORREÇÃO: Removido 'codigoTribNacional: true' pois não existe no schema
+                  // Alterado razaoSocial -> nome
+                  cliente: { select: { nome: true, documento: true } },
                   notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, xmlBase64: true, pdfBase64: true } },
                   logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true } }
               }
@@ -246,7 +254,6 @@ export async function GET(request: Request) {
   
       const dadosFinais = vendas.map(v => {
           let codigoTribDisplay = '---';
-          // Cálculo dinâmico já que não salvamos no banco
           if (v.notas.length > 0 && v.notas[0].cnae) {
              const info = getTributacaoPorCnae(v.notas[0].cnae);
              if (info && info.codigoTributacaoNacional) codigoTribDisplay = info.codigoTributacaoNacional;
@@ -254,6 +261,11 @@ export async function GET(request: Request) {
 
           return {
             ...v,
+            // Mapeia para o front não quebrar
+            cliente: { 
+                ...v.cliente, 
+                razaoSocial: v.cliente.nome // Mantém compatibilidade com front antigo
+            },
             notas: v.notas.map(n => ({ ...n, codigoTribNacional: codigoTribDisplay })),
             motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
           };

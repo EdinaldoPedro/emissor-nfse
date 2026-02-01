@@ -14,7 +14,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     const vendas = await prisma.venda.findMany({
         where: { empresaId: id },
         include: { 
-            cliente: { select: { razaoSocial: true, documento: true } }, 
+            // CORREÇÃO: Mudado de 'razaoSocial' para 'nome' (novo Schema)
+            cliente: { select: { nome: true, documento: true } }, 
             notas: true,  
             logs: { orderBy: { createdAt: 'desc' } }  
         },
@@ -22,7 +23,17 @@ export async function GET(request: Request, { params }: { params: { id: string }
         take: 50
     });
 
-    return NextResponse.json({ empresa, vendas });
+    // Adaptação para manter compatibilidade com o Front-end antigo
+    // O front espera 'razaoSocial', então mapeamos 'nome' para 'razaoSocial' virtualmente
+    const vendasFormatadas = vendas.map(v => ({
+        ...v,
+        cliente: {
+            ...v.cliente,
+            razaoSocial: v.cliente.nome 
+        }
+    }));
+
+    return NextResponse.json({ empresa, vendas: vendasFormatadas });
 
   } catch (error) {
     console.error(error);
