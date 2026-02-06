@@ -28,16 +28,13 @@ enum StatusNota {
 
 // --- USUÁRIO ---
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  senha     String
-  nome      String
-  role      Role     @default(COMUM)
-  cpf       String?  @unique
-  telefone  String?
-
-  // Controle para Contadores
-  limiteEmpresas    Int       @default(5) // Default de 5 empresas para contador
+  id                String   @id @default(uuid())
+  email             String   @unique
+  senha             String
+  nome              String
+  role              Role     @default(COMUM)
+  cpf               String?  @unique
+  telefone          String?
   
   plano             String?    @default("GRATUITO")
   planoCiclo        String     @default("MENSAL")
@@ -45,7 +42,7 @@ model User {
   planoExpiresAt    DateTime?
   cargo             String?
   avatarUrl         String?
-  
+
   // === RECUPERAÇÃO DE SENHA ===
   resetToken        String?    @unique
   resetExpires      DateTime?
@@ -60,6 +57,7 @@ model User {
   empresaId String?  @unique
   empresa   Empresa? @relation("DonoEmpresa", fields: [empresaId], references: [id])
   
+  // Relacionamento antigo (User -> Empresa) mantido para permissões
   clientes  UserCliente[]
 
   createdAt DateTime @default(now())
@@ -67,13 +65,12 @@ model User {
 
   ticketsCriados    Ticket[] @relation("SolicitanteTicket")
   ticketsAtendidos  Ticket[] @relation("AtendenteTicket")
-  
   mensagensTicket   TicketMensagem[]
 
   empresasContabeis ContadorVinculo[] @relation("ContadorUser")
 
   // === VALIDAÇÃO DE TROCA DE E-MAIL ===
-  tempEmail         String?    
+  tempEmail         String?
   verificationCode  String?    
   verificationExpires DateTime? 
 
@@ -86,13 +83,13 @@ model User {
   // === CONTROLE DE CONSUMO ===
   creditosPlano       Int       @default(0) 
   creditosExtras      Int       @default(0) 
-  dataRenovacaoCiclo DateTime?             
+  dataRenovacaoCiclo DateTime?
 
   // Relacionamento com Pedidos
   pedidos             Pedido[]
 }
 
-// --- EMPRESAS (Quem emite a nota) ---
+// --- EMPRESAS (Quem emite a nota - PRESTADOR) ---
 model Empresa {
   id        String   @id @default(uuid())
   documento String   @unique
@@ -116,7 +113,7 @@ model Empresa {
   uf           String?
   codigoIbge   String?
 
-  aliquotaPadrao           Decimal? @default(0.00) @db.Decimal(5, 2) 
+  aliquotaPadrao            Decimal? @default(0.00) @db.Decimal(5, 2) 
   issRetidoPadrao         Boolean  @default(false)
   tipoTributacaoPadrao    String?  @default("1") // 1=Exigível
   regimeEspecialTributacao String? @default("0") // 0=Nenhum
@@ -129,8 +126,9 @@ model Empresa {
   vinculadoA    UserCliente[] 
   atividades    Cnae[]
   
-  // === NOVA RELAÇÃO: CARTEIRA DE CLIENTES ===
-  clientesCarteira Cliente[] 
+  // === MUDANÇA: CATÁLOGO GLOBAL ===
+  // Em vez de "possuir" clientes, a empresa possui "vínculos" com o Catálogo
+  minhaCarteira VinculoCarteira[] 
 
   // Certificado
   certificadoA1        String?
@@ -143,57 +141,83 @@ model Empresa {
   // Vendas (Apenas como EMISSOR)
   vendasRealizadas Venda[]      @relation("VendaPrestador")
   
-  // OBS: Removidos 'notasRecebidas' e 'vendasCompradas' pois agora quem compra é o Cliente
-
   logs              SystemLog[]
   
   updatedAt    DateTime @updatedAt
   lastApiCheck DateTime?
+
   contadoresLink    ContadorVinculo[] @relation("EmpresaContabil")
 }
 
-// --- NOVO MODEL: CLIENTE (Tomador do Serviço Unificado) ---
+// --- CLIENTE (Tomador do Serviço - CATÁLOGO GLOBAL) ---
 model Cliente {
   id            String   @id @default(uuid())
   
-  // Vínculo: De quem é esse cliente? (Da Empresa Emissora)
-  empresaId     String
-  empresa       Empresa  @relation(fields: [empresaId], references: [id])
-
+  // === MUDANÇA: INDEPENDÊNCIA ===
+  // Removemos empresaId. O Cliente agora é "do mundo", não de uma empresa só.
+  
   // Discriminador e Dados Principais
   tipo          String   @default("PJ") // "PJ", "PF", "EXT"
-  documento     String?  // CPF, CNPJ ou NIF (Pode ser nulo se Exterior não tiver NIF)
-  nome          String   // Razão Social ou Nome Completo
-  nomeFantasia  String?  // Opcional
   
-  // Contato
+  // Documento agora é ÚNICO GLOBALMENTE (ex: Se a Google já existe, usa o mesmo ID)
+  documento     String?  @unique 
+  
+  nome          String   // Razão Social ou Nome Completo (Dado Oficial)
+  nomeFantasia  String?  // Dado Oficial
+  
+  // Contato Público (Oficial)
   email         String?
   telefone      String?
 
   // Fiscal
   inscricaoMunicipal String?
-  inscricaoEstadual  String? 
-  
-  // Endereço Flexível (Suporta BR e Exterior)
-  cep           String?  // CEP (8 dígitos) ou ZipCode (Alfanumérico)
+  inscricaoEstadual  String?
+
+  // Endereço Oficial
+  cep           String?
   logradouro    String?
   numero        String?
   complemento   String?
   bairro        String?
   cidade        String?
-  uf            String?  // Sigla (SP) ou Província (Florida)
-  pais          String   @default("Brasil") // Novo campo para Exterior
-  codigoIbge    String?  // Obrigatório p/ BR
+  uf            String?
+  pais          String   @default("Brasil") 
+  codigoIbge    String?
 
-  // Relacionamentos
-  notas         NotaFiscal[] 
-  vendas        Venda[]      
+  // Relacionamentos Inversos
+  notas         NotaFiscal[] // Histórico global de notas recebidas
+  vendas        Venda[]      // Histórico global de compras
+  
+  // Quem tem esse cliente na agenda?
+  vinculos      VinculoCarteira[]
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
 
-  // Índice para evitar duplicidade dentro da mesma empresa
-  @@index([empresaId, documento])
+// --- NOVO: VÍNCULO (A "Agenda" de cada Empresa) ---
+model VinculoCarteira {
+  id            String   @id @default(uuid())
+  
+  // Quem cadastrou/vinculou?
+  empresaId     String
+  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  
+  // Quem é o cliente?
+  clienteId     String
+  cliente       Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  
+  // Dados PRIVADOS (Só essa empresa vê)
+  apelido       String?  // Ex: "Google Marketing"
+  tags          String?  // Ex: "Vip, Atrasado"
+  observacoes   String?
+  emailFinanceiro String? // E-mail específico para enviar nota DESSA empresa
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Garante que uma empresa não adicione o mesmo cliente 2x na agenda
+  @@unique([empresaId, clienteId])
 }
 
 // --- VENDAS ---
@@ -203,7 +227,6 @@ model Venda {
   empresaId       String
   empresa         Empresa  @relation("VendaPrestador", fields: [empresaId], references: [id])
   
-  // ATUALIZADO: Aponta para Cliente
   clienteId       String
   cliente         Cliente  @relation(fields: [clienteId], references: [id])
   
@@ -236,7 +259,7 @@ model Cnae {
   codigo       String 
   descricao    String 
   principal    Boolean @default(false)
-  codigoNbs         String?  
+  codigoNbs         String?
   temRetencaoInss   Boolean  @default(false)
   empresaId    String
   empresa      Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
@@ -267,7 +290,7 @@ model NotaFiscal {
   empresaId       String
   empresa         Empresa @relation("PrestadorNota", fields: [empresaId], references: [id])
 
-  // ATUALIZADO: Aponta para Cliente
+  // Continua apontando para o Cliente Global (Historicamente correto)
   clienteId       String
   cliente         Cliente @relation(fields: [clienteId], references: [id])
 
@@ -345,8 +368,7 @@ model PlanHistory {
   plan        Plan      @relation(fields: [planId], references: [id])
   
   dataInicio  DateTime  @default(now())
-  dataFim     DateTime? 
-  
+  dataFim     DateTime?
   status      String    @default("ATIVO") 
   
   notasEmitidas Int      @default(0) 
@@ -416,7 +438,7 @@ model ContadorVinculo {
   contador   User      @relation("ContadorUser", fields: [contadorId], references: [id])
   
   empresaId  String
-  empresa    Empresa  @relation("EmpresaContabil", fields: [empresaId], references: [id])
+  empresa    Empresa   @relation("EmpresaContabil", fields: [empresaId], references: [id])
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -462,7 +484,7 @@ model Pedido {
   valorTotal      Decimal  @db.Decimal(10, 2)
   
   status          String   @default("PENDENTE") 
-  formaPagamento  String?  
+  formaPagamento  String?
   gatewayId       String?  
   
   createdAt       DateTime @default(now())

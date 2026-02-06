@@ -1,48 +1,103 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
-// GET
+// GET: Lista Empresas (Emissores) ou Clientes (Tomadores Globais)
 export async function GET(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+  if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
   const search = searchParams.get('search') || '';
+  const type = searchParams.get('type') || 'PRESTADOR'; // 'PRESTADOR' | 'TOMADOR'
 
   const skip = (page - 1) * limit;
 
-  // CORREÇÃO: Adicionado 'as const' para o modo de busca
-  const whereClause = search ? {
-    OR: [
-      { razaoSocial: { contains: search, mode: 'insensitive' as const } }, 
-      { documento: { contains: search } }
-    ]
-  } : {};
-
   try {
-    const [empresas, total] = await prisma.$transaction([
-      prisma.empresa.findMany({
-        where: whereClause,
-        skip: skip,
-        take: limit,
-        include: { 
-            donoUser: { 
-                select: { nome: true, email: true }
-            } 
-        },
-        orderBy: { updatedAt: 'desc' }
-      }),
-      prisma.empresa.count({ where: whereClause })
-    ]);
+    let data = [];
+    let total = 0;
 
-    const dadosFormatados = empresas.map(emp => ({
-        ...emp,
-        donos: emp.donoUser ? [emp.donoUser] : [] 
-    }));
+    if (type === 'TOMADOR') {
+        // === MODO TOMADOR: Busca Global na Tabela CLIENTE ===
+        // Agora buscamos DIRETO na tabela Cliente, pois ela é global
+        const whereClause: any = search ? {
+            OR: [
+                { nome: { contains: search, mode: 'insensitive' } },
+                { documento: { contains: search } },
+                { email: { contains: search, mode: 'insensitive' } }
+            ]
+        } : {};
+
+        const [clientes, count] = await prisma.$transaction([
+            prisma.cliente.findMany({
+                where: whereClause,
+                skip,
+                take: limit,
+                include: { 
+                    // Mostra quantos vínculos este cliente tem (Quantas empresas o atendem)
+                    _count: { select: { vinculos: true } },
+                    // Opcional: Traz o primeiro vínculo para exibir "Ex: Vinculado a X"
+                    vinculos: {
+                        take: 1,
+                        include: { empresa: { select: { razaoSocial: true, documento: true } } }
+                    }
+                },
+                orderBy: { nome: 'asc' }
+            }),
+            prisma.cliente.count({ where: whereClause })
+        ]);
+
+        data = clientes.map(c => ({
+            ...c,
+            id: c.id,
+            razaoSocial: c.nome, // Padroniza nome para a tabela visual
+            documento: c.documento,
+            origem: 'TOMADOR',
+            // Mostra a primeira empresa vinculada como referência visual
+            vinculo: c.vinculos[0]?.empresa || null,
+            totalVinculos: c._count.vinculos
+        }));
+        total = count;
+
+    } else {
+        // === MODO PRESTADOR: Busca na tabela EMPRESA (Seus Assinantes) ===
+        const whereClause: any = search ? {
+            OR: [
+                { razaoSocial: { contains: search, mode: 'insensitive' } }, 
+                { documento: { contains: search } },
+                { donoUser: { nome: { contains: search, mode: 'insensitive' } } },
+                { donoUser: { email: { contains: search, mode: 'insensitive' } } }
+            ]
+        } : {};
+
+        const [empresas, count] = await prisma.$transaction([
+            prisma.empresa.findMany({
+                where: whereClause,
+                skip,
+                take: limit,
+                include: { 
+                    donoUser: { select: { nome: true, email: true } }
+                },
+                orderBy: { updatedAt: 'desc' }
+            }),
+            prisma.empresa.count({ where: whereClause })
+        ]);
+
+        data = empresas.map(emp => ({
+            ...emp,
+            origem: 'PRESTADOR',
+            donos: emp.donoUser ? [emp.donoUser] : [] 
+        }));
+        total = count;
+    }
 
     return NextResponse.json({
-      data: dadosFormatados,
+      data,
       meta: {
         total,
         page,
@@ -52,67 +107,92 @@ export async function GET(request: Request) {
     });
 
   } catch (error) {
-    return NextResponse.json({ error: 'Erro ao buscar empresas' }, { status: 500 });
+    console.error("Erro API Admin Empresas:", error);
+    return NextResponse.json({ error: 'Erro ao buscar dados.' }, { status: 500 });
   }
 }
 
-// PUT
+// PUT: Edita cadastro (Unificado)
 export async function PUT(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+
   try {
     const body = await request.json();
-    const { id, donos, donoUser, ...dadosParaAtualizar } = body; 
+    const { id, origem, ...dados } = body; 
 
-    const updated = await prisma.empresa.update({
-      where: { id: id },
-      data: dadosParaAtualizar
-    });
-    
-    return NextResponse.json(updated);
-  } catch (e) {
-    return NextResponse.json({ error: 'Erro ao atualizar empresa.' }, { status: 500 });
+    // Limpeza de campos relacionais/virtuais
+    const cleanData = { ...dados };
+    delete cleanData.vinculo;
+    delete cleanData.vinculos;
+    delete cleanData.totalVinculos;
+    delete cleanData.donos;
+    delete cleanData.donoUser;
+    delete cleanData._count;
+    delete cleanData.qtdNotas;
+
+    if (origem === 'TOMADOR') {
+        if (cleanData.razaoSocial) {
+            cleanData.nome = cleanData.razaoSocial;
+            delete cleanData.razaoSocial;
+        }
+        delete cleanData.nomeFantasia; 
+        
+        const updated = await prisma.cliente.update({
+            where: { id },
+            data: cleanData
+        });
+        return NextResponse.json(updated);
+    } else {
+        const updated = await prisma.empresa.update({
+            where: { id },
+            data: cleanData
+        });
+        return NextResponse.json(updated);
+    }
+  } catch (e: any) {
+    return NextResponse.json({ error: 'Erro ao atualizar: ' + e.message }, { status: 500 });
   }
 }
 
-// === DELETE (NOVO) ===
+// DELETE: Excluir (Unificado)
 export async function DELETE(request: Request) {
+    const user = await getAuthenticatedUser(request);
+    if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
+    const type = searchParams.get('type') || 'PRESTADOR'; 
 
     if (!id) return NextResponse.json({ error: 'ID necessário' }, { status: 400 });
 
     try {
-        // 1. Desvincular Usuários (Dono) para não apagar o usuário, apenas soltar a empresa
-        await prisma.user.updateMany({
-            where: { empresaId: id },
-            data: { empresaId: null }
-        });
-
-        // 2. Limpar Tabelas Dependentes (Cascade Manual para garantir)
-        // Remove vínculos de clientes e contadores
-        await prisma.userCliente.deleteMany({ where: { empresaId: id } });
-        await prisma.contadorVinculo.deleteMany({ where: { empresaId: id } });
-        
-        // Remove Logs
-        await prisma.systemLog.deleteMany({ where: { empresaId: id } });
-        
-        // Remove CNAEs
-        await prisma.cnae.deleteMany({ where: { empresaId: id } });
-
-        // Remove Notas e Vendas onde a empresa é PRESTADOR
-        await prisma.notaFiscal.deleteMany({ where: { empresaId: id } });
-        await prisma.venda.deleteMany({ where: { empresaId: id } });
-        
-        // 3. Finalmente deleta a empresa
-        await prisma.empresa.delete({ where: { id } });
-
-        return NextResponse.json({ success: true });
-
-    } catch (e: any) {
-        console.error("Erro ao deletar empresa:", e);
-        // Se falhar (ex: empresa é TOMADOR em notas de outros), avisa
-        if (e.code === 'P2003') {
-            return NextResponse.json({ error: 'Não é possível excluir: Esta empresa está vinculada como Tomador em notas de terceiros.' }, { status: 409 });
+        if (type === 'TOMADOR') {
+            // Apaga Cliente Global e seus Vínculos
+            // Atenção: Apagar cliente apaga notas vinculadas se o banco não tiver cascade.
+            await prisma.notaFiscal.deleteMany({ where: { clienteId: id } });
+            await prisma.venda.deleteMany({ where: { clienteId: id } });
+            
+            // Apaga vínculos da carteira primeiro (embora o cascade do banco deva cuidar disso)
+            await prisma.vinculoCarteira.deleteMany({ where: { clienteId: id } });
+            
+            await prisma.cliente.delete({ where: { id } });
+        } else {
+            // Apaga Prestador (Empresa Assinante)
+            await prisma.user.updateMany({ where: { empresaId: id }, data: { empresaId: null } });
+            await prisma.userCliente.deleteMany({ where: { empresaId: id } });
+            await prisma.contadorVinculo.deleteMany({ where: { empresaId: id } });
+            await prisma.systemLog.deleteMany({ where: { empresaId: id } });
+            await prisma.cnae.deleteMany({ where: { empresaId: id } });
+            await prisma.notaFiscal.deleteMany({ where: { empresaId: id } });
+            await prisma.venda.deleteMany({ where: { empresaId: id } });
+            await prisma.vinculoCarteira.deleteMany({ where: { empresaId: id } }); // Limpa carteira dele
+            
+            await prisma.empresa.delete({ where: { id } });
         }
-        return NextResponse.json({ error: 'Erro interno ao excluir.' }, { status: 500 });
+        return NextResponse.json({ success: true });
+    } catch (e: any) {
+        console.error(e);
+        return NextResponse.json({ error: 'Erro ao excluir.' }, { status: 500 });
     }
 }
