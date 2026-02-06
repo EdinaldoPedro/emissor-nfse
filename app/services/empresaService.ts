@@ -104,7 +104,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       throw new Error("Dados incompletos: Razão Social é obrigatória.");
   }
 
-  console.log(`💾 [DEBUG] Gravando no Banco -> IBGE FINAL: ${dadosFinais.codigoIbge}`);
+  console.log(`💾 [DEBUG] Preparando Gravação -> IBGE FINAL: ${dadosFinais.codigoIbge}`);
 
   // === TRATAMENTO DE CNAES ===
   const listaCnaesRaw = (dadosApi && dadosApi.cnaes) ? dadosApi.cnaes : (dadosManuais?.cnaes || []);
@@ -124,62 +124,101 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       cnaesUnicos = Array.from(mapUnicos.values());
   }
 
-  // 4. Executa a Gravação no Banco (Upsert)
-  const empresa = await prisma.empresa.upsert({
-    where: { documento: docLimpo },
-    update: {
-        razaoSocial: dadosFinais.razaoSocial!,
-        nomeFantasia: dadosFinais.nomeFantasia,
-        email: dadosFinais.email,
-        cep: dadosFinais.cep,
-        logradouro: dadosFinais.logradouro,
-        numero: dadosFinais.numero,
-        bairro: dadosFinais.bairro,
-        cidade: dadosFinais.cidade,
-        uf: dadosFinais.uf,
-        codigoIbge: dadosFinais.codigoIbge, 
-        inscricaoMunicipal: dadosFinais.inscricaoMunicipal,
-        lastApiCheck: new Date(),
-        ...(cnaesUnicos.length > 0 && {
-            atividades: { deleteMany: {}, create: cnaesUnicos }
-        })
-    },
-    create: {
-        documento: docLimpo,
-        razaoSocial: dadosFinais.razaoSocial!,
-        nomeFantasia: dadosFinais.nomeFantasia,
-        email: dadosFinais.email,
-        cep: dadosFinais.cep,
-        logradouro: dadosFinais.logradouro,
-        numero: dadosFinais.numero,
-        bairro: dadosFinais.bairro,
-        cidade: dadosFinais.cidade,
-        uf: dadosFinais.uf,
-        codigoIbge: dadosFinais.codigoIbge, 
-        inscricaoMunicipal: dadosFinais.inscricaoMunicipal,
-        lastApiCheck: new Date(),
-        atividades: { create: cnaesUnicos }
-    }
-  });
+  // ==================================================================================
+  // 4. TRANSAÇÃO SEGURA: UPSERT + TAKEOVER (CLIENTE ASSUME PROPRIEDADE) + VÍNCULOS
+  // ==================================================================================
+  const empresaProcessada = await prisma.$transaction(async (tx) => {
+      
+      // A. Verifica se a empresa já existe para aplicar regras de negócio
+      const empresaExistente = await tx.empresa.findUnique({
+          where: { documento: docLimpo },
+          include: { donoUser: true }
+      });
 
-  // 5. Link User
-  const vinculo = await prisma.userCliente.findUnique({
-      where: { userId_empresaId: { userId, empresaId: empresa.id } }
-  });
+      // Lógica de Segurança (Takeover)
+      if (empresaExistente) {
+          // 1. Se já tem dono e não é o usuário atual -> ERRO (Não pode roubar empresa de outro)
+          if (empresaExistente.donoUser && empresaExistente.donoUser.id !== userId) {
+              throw new Error("Esta empresa já pertence a outro usuário cadastrado no sistema.");
+          }
 
-  if (!vinculo) {
-      await prisma.userCliente.create({
-          data: {
+          // 2. Se NÃO tem dono (foi criada por contador), o cliente assume AGORA.
+          if (!empresaExistente.donoUser) {
+              console.log(`[TAKEOVER] Usuário ${userId} assumindo empresa órfã ${empresaExistente.id}`);
+              
+              // "Derruba" os contadores: Muda status de APROVADO para PENDENTE
+              // O contador perde acesso imediato e precisa solicitar novamente ao novo dono.
+              await tx.contadorVinculo.updateMany({
+                  where: { empresaId: empresaExistente.id, status: 'APROVADO' },
+                  data: { status: 'PENDENTE' }
+              });
+          }
+      }
+
+      // B. Executa a Gravação no Banco (Upsert) garantindo o DONO
+      const empresa = await tx.empresa.upsert({
+        where: { documento: docLimpo },
+        update: {
+            razaoSocial: dadosFinais.razaoSocial!,
+            nomeFantasia: dadosFinais.nomeFantasia,
+            email: dadosFinais.email,
+            cep: dadosFinais.cep,
+            logradouro: dadosFinais.logradouro,
+            numero: dadosFinais.numero,
+            bairro: dadosFinais.bairro,
+            cidade: dadosFinais.cidade,
+            uf: dadosFinais.uf,
+            codigoIbge: dadosFinais.codigoIbge, 
+            inscricaoMunicipal: dadosFinais.inscricaoMunicipal,
+            lastApiCheck: new Date(),
+            donoUser: { connect: { id: userId } }, // <--- VINCULA PROPRIEDADE
+            ...(cnaesUnicos.length > 0 && {
+                atividades: { deleteMany: {}, create: cnaesUnicos }
+            })
+        },
+        create: {
+            documento: docLimpo,
+            razaoSocial: dadosFinais.razaoSocial!,
+            nomeFantasia: dadosFinais.nomeFantasia,
+            email: dadosFinais.email,
+            cep: dadosFinais.cep,
+            logradouro: dadosFinais.logradouro,
+            numero: dadosFinais.numero,
+            bairro: dadosFinais.bairro,
+            cidade: dadosFinais.cidade,
+            uf: dadosFinais.uf,
+            codigoIbge: dadosFinais.codigoIbge, 
+            inscricaoMunicipal: dadosFinais.inscricaoMunicipal,
+            lastApiCheck: new Date(),
+            donoUser: { connect: { id: userId } }, // <--- VINCULA PROPRIEDADE
+            atividades: { create: cnaesUnicos }
+        }
+      });
+
+      // C. Garante o vínculo UserCliente (para acesso ao dashboard)
+      await tx.userCliente.upsert({
+          where: { userId_empresaId: { userId, empresaId: empresa.id } },
+          update: {},
+          create: {
               userId,
               empresaId: empresa.id,
               apelido: dadosFinais.nomeFantasia || dadosFinais.razaoSocial
           }
       });
-  }
 
+      // D. Atualiza o ID da empresa principal no perfil do User
+      await tx.user.update({
+          where: { id: userId },
+          data: { empresaId: empresa.id }
+      });
+
+      return empresa;
+  });
+
+  // 6. Sincronização Global de CNAEs (Fora da transação para não travar)
   if (cnaesUnicos.length > 0 && dadosFinais.codigoIbge) {
       await syncCnaesGlobalmente(cnaesUnicos, dadosFinais.codigoIbge);
   }
   
-  return empresa;
+  return empresaProcessada;
 }

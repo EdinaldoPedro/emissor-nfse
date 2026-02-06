@@ -123,7 +123,26 @@ export async function GET(request: Request) {
           where: { id: empresaAlvoId },
           include: { atividades: true }
       });
-      if (emp) dadosEmpresa = emp;
+      
+      if (emp) {
+          dadosEmpresa = emp;
+
+          // === AUTO-CORREÇÃO DE IBGE (SELF-HEALING) ===
+          // Se a empresa tem CEP mas o IBGE está vazio ou inválido, corrige agora!
+          if (emp.cep && (!emp.codigoIbge || emp.codigoIbge.length < 7)) {
+              console.log(`[AUTO-FIX] Empresa ${emp.razaoSocial} sem IBGE. Corrigindo...`);
+              const ibgeNovo = await buscarIbgePorCep(emp.cep);
+              
+              if (ibgeNovo) {
+                  await prisma.empresa.update({
+                      where: { id: emp.id },
+                      data: { codigoIbge: ibgeNovo }
+                  });
+                  dadosEmpresa.codigoIbge = ibgeNovo; // Atualiza o objeto atual para retornar correto
+                  console.log(`[AUTO-FIX] IBGE corrigido para: ${ibgeNovo}`);
+              }
+          }
+      }
   }
 
   let atividadesEnriquecidas = dadosEmpresa.atividades || [];
@@ -177,7 +196,7 @@ export async function GET(request: Request) {
   });
 }
 
-// PUT (AQUI ESTÁ A CORREÇÃO DE SEGURANÇA)
+// PUT
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextEmpresaId = request.headers.get('x-empresa-id');
@@ -208,9 +227,7 @@ export async function PUT(request: Request) {
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
       
-      // === CORREÇÃO: GARANTIA DE IBGE ===
-      // Se o front mandou CEP mas não mandou IBGE (comum na atualização via Receita),
-      // nós buscamos manualmente agora.
+      // === CORREÇÃO: GARANTIA DE IBGE NO PUT ===
       if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
           console.log(`[PERFIL] Detectada falta de IBGE. Buscando para CEP: ${body.cep}`);
           const ibgeResgatado = await buscarIbgePorCep(body.cep);
@@ -219,7 +236,6 @@ export async function PUT(request: Request) {
               console.log(`[PERFIL] IBGE recuperado e salvo: ${ibgeResgatado}`);
           }
       }
-      // ==================================
 
       const dadosEmpresa: any = {
           razaoSocial: body.razaoSocial,
@@ -232,7 +248,7 @@ export async function PUT(request: Request) {
           bairro: body.bairro,
           cidade: body.cidade,
           uf: body.uf,
-          codigoIbge: body.codigoIbge, // Agora garantido pela lógica acima
+          codigoIbge: body.codigoIbge, 
           email: body.emailComercial || body.email,
           cadastroCompleto: true,
           serieDPS: body.serieDPS, 
@@ -287,7 +303,6 @@ export async function PUT(request: Request) {
                   }))
               });
               
-              // Garante sincronia usando o IBGE que acabamos de salvar
               if (empresaSalva.codigoIbge) {
                   await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);
               }

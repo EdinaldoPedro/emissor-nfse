@@ -155,18 +155,52 @@ export default function GestaoClientes() {
   };
 
   const acessarSuporte = async (targetId: string) => {
-    // 1. SALVAR QUEM É O ADMIN ANTES DE TROCAR (IMPORTANTE!)
     const adminId = localStorage.getItem('userId');
-    if (adminId) localStorage.setItem('adminBackUpId', adminId);
-
-    const res = await fetch('/api/admin/impersonate', { method: 'POST', body: JSON.stringify({ targetUserId: targetId }) });
-    const data = await res.json();
+    const adminRole = localStorage.getItem('userRole');
+    const token = localStorage.getItem('token'); 
     
-    if(data.success) { 
-        localStorage.setItem('userId', data.fakeSession.id); 
-        localStorage.setItem('userRole', data.fakeSession.role); 
-        localStorage.setItem('isSupportMode', 'true'); 
-        router.push('/cliente/dashboard'); 
+    // VERIFICAÇÃO DE SEGURANÇA:
+    // Só salva o backup se NÃO estivermos já em modo suporte.
+    // Isso impede que salvemos o ID do cliente como se fosse o Admin.
+    const jaEstaEmSuporte = localStorage.getItem('isSupportMode');
+
+    if (adminId && !jaEstaEmSuporte) {
+        localStorage.setItem('adminBackUpId', adminId);
+        if (adminRole) localStorage.setItem('adminBackUpRole', adminRole);
+    }
+
+    try {
+        const res = await fetch('/api/admin/impersonate', { 
+            method: 'POST', 
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` 
+            },
+            body: JSON.stringify({ targetUserId: targetId }) 
+        });
+
+        if (res.status === 401) {
+            alert("Sessão expirada. Faça login novamente.");
+            router.push('/login');
+            return;
+        }
+
+        const data = await res.json();
+        
+        if(data.success) { 
+            localStorage.setItem('userId', data.fakeSession.id); 
+            localStorage.setItem('userRole', data.fakeSession.role); 
+            localStorage.setItem('isSupportMode', 'true'); 
+            
+            // Remove contexto de empresa antiga para forçar o reload dos dados do cliente
+            localStorage.removeItem('empresaContextId');
+
+            router.push('/cliente/dashboard'); 
+        } else {
+            alert(data.error || "Erro ao acessar conta.");
+        }
+    } catch (e) {
+        alert("Erro de conexão.");
     }
   };
 

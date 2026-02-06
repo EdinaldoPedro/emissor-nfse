@@ -1,95 +1,99 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
 const prisma = new PrismaClient();
 
+// GET: Buscar detalhes do usuário (Para o Admin ver e editar)
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  try {
-    const userId = params.id;
+    const admin = await getAuthenticatedUser(request);
+    if (!admin) return unauthorized();
+    if (!['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
 
-    // 1. Busca o Usuário para pegar o email (chave de busca nos logs)
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
+    try {
+        const userId = params.id;
 
-    // 2. Busca o Histórico de Planos Oficial
-    const historico = await prisma.planHistory.findMany({
-      where: { userId },
-      include: { plan: true },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    // 3. Busca Logs de Alteração Manual (Com busca insensível a maiúsculas/minúsculas)
-    const logs = await prisma.systemLog.findMany({
-      where: {
-        action: 'MANUAL_PLAN_CHANGE',
-        message: { contains: user.email, mode: 'insensitive' } // <--- Correção importante
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    // 4. Se não tiver histórico oficial (Usuário antigo/legado), monta um baseado no perfil atual
-    if (historico.length === 0) {
-        return NextResponse.json([{
-            id: 'legacy',
-            plano: user.plano || 'GRATUITO',
-            status: user.planoStatus === 'active' ? 'ATIVO' : 'INATIVO',
-            dataInicio: user.createdAt,
-            dataFim: user.planoExpiresAt,
-            origem: 'SISTEMA',
-            justificativa: 'Cadastro inicial / Legado (Sem histórico detalhado)',
-            adminNome: ''
-        }]);
-    }
-
-    // 5. Cruza os dados para montar a resposta detalhada
-    const historyWithDetails = await Promise.all(historico.map(async (item) => {
-        // Tenta encontrar um log criado no intervalo de 1 minuto do histórico
-        const logCorrespondente = logs.find(l => {
-            const timeDiff = Math.abs(new Date(l.createdAt).getTime() - new Date(item.createdAt).getTime());
-            return timeDiff < 60000; // Aumentei para 60s para garantir
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                empresa: true, // Dados da empresa própria (se tiver)
+                _count: {
+                    select: {
+                        empresasContabeis: true // Contagem de empresas vinculadas (se for contador)
+                    }
+                }
+            }
         });
 
-        let origem = 'SISTEMA';
-        let justificativa = 'Contratação/Renovação Automática';
-        let adminNome = '';
+        if (!user) return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
 
-        if (logCorrespondente) {
-            origem = 'MANUAL_ADMIN';
-            try {
-                const details = typeof logCorrespondente.details === 'string' 
-                    ? JSON.parse(logCorrespondente.details) 
-                    : logCorrespondente.details;
-                
-                justificativa = details.justification || logCorrespondente.message;
-                
-                // Busca nome do admin se tiver ID
-                if (details.adminId) {
-                    const admin = await prisma.user.findUnique({ where: { id: details.adminId } });
-                    adminNome = admin?.nome || 'Admin';
-                }
-            } catch (e) {
-                justificativa = logCorrespondente.message;
-            }
-        } else if (item.plan.slug === 'TRIAL') {
-            justificativa = 'Período de Teste Grátis (Cadastro)';
+        return NextResponse.json(user);
+    } catch (error) {
+        console.error("Erro GET User:", error);
+        return NextResponse.json({ error: 'Erro ao buscar usuário' }, { status: 500 });
+    }
+}
+
+// PATCH: Atualizar usuário (AQUI ENTRA O LIMITE DE EMPRESAS)
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+    const admin = await getAuthenticatedUser(request);
+    if (!admin) return unauthorized();
+    if (!['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
+
+    try {
+        const userId = params.id;
+        const body = await request.json();
+        
+        // Extraímos os campos permitidos para edição
+        const { nome, email, role, plano, limiteEmpresas } = body;
+
+        const dataToUpdate: any = {};
+        
+        if (nome) dataToUpdate.nome = nome;
+        if (email) dataToUpdate.email = email;
+        if (role) dataToUpdate.role = role;
+        if (plano) dataToUpdate.plano = plano;
+
+        // === NOVO: Atualiza o limite de empresas ===
+        if (limiteEmpresas !== undefined && limiteEmpresas !== null) {
+            dataToUpdate.limiteEmpresas = parseInt(limiteEmpresas);
         }
 
-        return {
-            id: item.id,
-            plano: item.plan.name,
-            status: item.status,
-            dataInicio: item.dataInicio,
-            dataFim: item.dataFim,
-            origem,
-            justificativa,
-            adminNome
-        };
-    }));
+        const updatedUser = await prisma.user.update({
+            where: { id: userId },
+            data: dataToUpdate
+        });
 
-    return NextResponse.json(historyWithDetails);
+        // Log de auditoria (Opcional, mas recomendado)
+        await prisma.systemLog.create({
+            data: {
+                level: 'INFO',
+                action: 'USER_UPDATE_ADMIN',
+                message: `Usuário ${updatedUser.email} atualizado por ${admin.email}`,
+                details: JSON.stringify(dataToUpdate)
+            }
+        });
 
-  } catch (error) {
-    console.error("Erro History:", error);
-    return NextResponse.json({ error: 'Erro ao buscar histórico' }, { status: 500 });
-  }
+        return NextResponse.json(updatedUser);
+
+    } catch (error) {
+        console.error("Erro PATCH User:", error);
+        return NextResponse.json({ error: 'Erro ao atualizar usuário' }, { status: 500 });
+    }
+}
+
+// DELETE: Remover usuário
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+    const admin = await getAuthenticatedUser(request);
+    if (!admin) return unauthorized();
+    if (!['MASTER', 'ADMIN'].includes(admin.role)) return forbidden();
+
+    try {
+        // Remove vínculos primeiro para evitar erro de FK (Cascade geralmente resolve, mas é bom garantir)
+        await prisma.user.delete({ where: { id: params.id } });
+        return NextResponse.json({ success: true });
+    } catch (error) {
+        console.error("Erro DELETE User:", error);
+        return NextResponse.json({ error: 'Erro ao excluir usuário' }, { status: 500 });
+    }
 }

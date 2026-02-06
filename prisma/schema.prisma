@@ -35,6 +35,9 @@ model User {
   role      Role     @default(COMUM)
   cpf       String?  @unique
   telefone  String?
+
+  // Controle para Contadores
+  limiteEmpresas    Int       @default(5) // Default de 5 empresas para contador
   
   plano             String?    @default("GRATUITO")
   planoCiclo        String     @default("MENSAL")

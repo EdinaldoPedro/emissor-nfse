@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield } from 'lucide-react';
+import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
 import { useAppConfig } from '@/app/contexts/AppConfigContext';
 
@@ -13,15 +13,36 @@ export default function Sidebar() {
   const [userRole, setUserRole] = useState('');
   const [isContador, setIsContador] = useState(false);
   const [notificacoes, setNotificacoes] = useState(0);
+  
+  // State for UI only
+  const [isSupportMode, setIsSupportMode] = useState(false);
 
   const { t } = useAppConfig();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // === 1. SAFETY FUNCTION: Recover Admin ID from Token ===
+  const getAdminIdFromToken = () => {
+      try {
+          const token = localStorage.getItem('token');
+          if (!token) return null;
+          // Decode JWT payload (middle part)
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          return payload.sub || payload.id; // The ID in the token is ALWAYS the real user (Admin)
+      } catch (e) {
+          return null;
+      }
+  };
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); // <--- 1. Pega Token
+    const token = localStorage.getItem('token');
     const role = localStorage.getItem('userRole');
     
+    // Update visual state directly from storage
+    const supportActive = localStorage.getItem("isSupportMode") === 'true';
+    setIsSupportMode(supportActive);
+
     if (role) {
         setUserRole(role);
         setIsContador(role === 'CONTADOR');
@@ -36,16 +57,27 @@ export default function Sidebar() {
                     headers: { 
                         'x-user-id': userId, 
                         'x-empresa-id': contextId || '',
-                        'Authorization': `Bearer ${token}` // <--- 2. Envia Token
+                        'Authorization': `Bearer ${token}`
                     }
                 });
-                if(res.ok) setUserData(await res.json());
+                
+                // === CRITICAL FIX: Ignore 401 in Support Mode ===
+                if (res.status === 401) {
+                    if (localStorage.getItem("isSupportMode") === 'true') {
+                        console.warn("Sidebar: 401 ignored in Support Mode.");
+                        return; // Do NOT logout
+                    }
+                }
 
-                if (!checkIsStaff(role)) {
+                if(res.ok) {
+                    setUserData(await res.json());
+                }
+
+                if (!checkIsStaff(role || '')) {
                     const resNotif = await fetch('/api/clientes/notificacoes', {
                         headers: { 
                             'x-user-id': userId,
-                            'Authorization': `Bearer ${token}` // <--- 3. Envia Token aqui também
+                            'Authorization': `Bearer ${token}`
                         }
                     });
                     if (resNotif.ok) {
@@ -53,19 +85,55 @@ export default function Sidebar() {
                         setNotificacoes(dataNotif.count || 0);
                     }
                 }
-            } catch (error) { console.error("Erro sidebar", error); }
+            } catch (error) { 
+                console.error("Sidebar error", error); 
+            }
         }
     };
 
     if (isOpen) fetchData(); 
-    // fetchData(); // Opcional: chamar ao montar se quiser dados antes de abrir
 
-  }, [isOpen]); 
+    // Listener to update button if localStorage changes in another tab/component
+    const handleStorage = () => setIsSupportMode(localStorage.getItem("isSupportMode") === 'true');
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
 
-  // ... (RESTO IGUAL) ...
-  const handleLogout = () => {
-    localStorage.clear();
-    router.push('/login');
+  }, [isOpen, pathname]); 
+
+  // === 2. BULLETPROOF RETURN LOGIC ===
+  const handleLogoutOrReturn = () => {
+    // Read current state directly from storage (more reliable than React state here)
+    const isSupportActive = localStorage.getItem('isSupportMode') === 'true';
+    let adminBackUpId = localStorage.getItem('adminBackUpId');
+    const adminBackUpRole = localStorage.getItem('adminBackUpRole');
+
+    // Fail-safe: If in support mode but lost backup ID, recover from Token
+    if (isSupportActive && !adminBackUpId) {
+        console.log("⚠️ Backup ID missing. Recovering from Token...");
+        adminBackUpId = getAdminIdFromToken();
+    }
+
+    if (isSupportActive && adminBackUpId) {
+        console.log("🔄 Returning to Admin session:", adminBackUpId);
+        
+        // 1. Restore Admin credentials
+        localStorage.setItem('userId', adminBackUpId);
+        localStorage.setItem('userRole', adminBackUpRole || 'MASTER'); // Safe fallback
+        
+        // 2. Clean up client session flags
+        localStorage.removeItem('isSupportMode');
+        localStorage.removeItem('adminBackUpId');
+        localStorage.removeItem('adminBackUpRole');
+        localStorage.removeItem('empresaContextId');
+
+        // 3. FORCE RELOAD to clear memory states
+        window.location.href = '/admin/usuarios';
+    } else {
+        // Real Logout
+        console.log("🚪 Logging out...");
+        localStorage.clear();
+        router.push('/login');
+    }
   };
 
   const abrirMenu = () => {
@@ -88,7 +156,9 @@ export default function Sidebar() {
   };
 
   const statusCert = getStatusCertificado();
-  const showAdminPanel = checkIsStaff(userRole) && userRole !== 'CONTADOR';
+  
+  // Admin link only shows if real Staff AND NOT impersonating
+  const showAdminPanel = checkIsStaff(userRole) && userRole !== 'CONTADOR' && !isSupportMode;
 
   return (
     <>
@@ -112,9 +182,12 @@ export default function Sidebar() {
 
       <div className={`fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col dark:bg-slate-900`}>
         
-        <div className="p-6 border-b flex justify-between items-center bg-blue-600 text-white shrink-0 border-gray-100 dark:border-slate-800">
-          <h2 className="font-bold text-lg">Menu</h2>
-          <button onClick={() => setIsOpen(false)} className="hover:bg-blue-700 p-1 rounded">
+        {/* HEADER - Changes color in Support Mode */}
+        <div className={`p-6 border-b flex justify-between items-center text-white shrink-0 border-gray-100 dark:border-slate-800 ${isSupportMode ? 'bg-orange-500' : 'bg-blue-600'}`}>
+          <h2 className="font-bold text-lg flex items-center gap-2">
+              {isSupportMode ? <><Shield size={20}/> Modo Suporte</> : 'Menu'}
+          </h2>
+          <button onClick={() => setIsOpen(false)} className={`p-1 rounded ${isSupportMode ? 'hover:bg-orange-600' : 'hover:bg-blue-700'}`}>
             <X size={24} />
           </button>
         </div>
@@ -206,8 +279,12 @@ export default function Sidebar() {
                 )}
             </Link>
             
-            <button onClick={handleLogout} className="flex items-center gap-2 text-red-500 hover:text-red-700 w-full p-2 text-sm font-medium transition">
-                <LogOut size={16} /> {t('menu', 'logout')}
+            <button 
+                onClick={handleLogoutOrReturn} 
+                className={`flex items-center gap-2 w-full p-2 text-sm font-medium transition ${isSupportMode ? 'text-orange-600 hover:text-orange-800 bg-orange-50 rounded font-bold' : 'text-red-500 hover:text-red-700'}`}
+            >
+                {isSupportMode ? <ArrowLeft size={16} /> : <LogOut size={16} />} 
+                {isSupportMode ? 'Voltar para Admin' : t('menu', 'logout')}
             </button>
         </div>
 
