@@ -71,7 +71,7 @@ export default function LandingPage() {
         {/* HERO SECTION (Mantido Igual) */}
         <div className="max-w-7xl mx-auto px-6 py-20 text-center">
             <span className="bg-blue-50 text-blue-700 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider mb-6 inline-block border border-blue-100">
-                Novo Motor Fiscal 2.0
+                Beta 1.0
             </span>
             <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 mb-6 leading-tight">
             Emita Notas Fiscais Nacionais <br /> <span className="text-blue-600">sem dor de cabeça</span>

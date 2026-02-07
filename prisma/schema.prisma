@@ -74,6 +74,8 @@ model User {
   verificationCode  String?    
   verificationExpires DateTime? 
 
+  limiteEmpresas    Int      @default(5)
+
   // Controle do Tutorial
   tutorialStep      Int       @default(0)
 
