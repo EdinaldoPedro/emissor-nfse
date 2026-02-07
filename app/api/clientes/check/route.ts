@@ -26,18 +26,22 @@ export async function POST(request: Request) {
 
     if (!empresaId) return NextResponse.json(null); // Sem empresa, sem cliente
 
-    const cliente = await prisma.cliente.findFirst({
+    // === CORREÇÃO: Busca na tabela de VÍNCULOS ===
+    // Verifica se este documento já está vinculado à carteira desta empresa
+    const vinculo = await prisma.vinculoCarteira.findFirst({
       where: { 
           empresaId: empresaId,
-          documento: docLimpo 
-      }
+          cliente: { documento: docLimpo }
+      },
+      include: { cliente: true }
     });
 
-    if (cliente) {
-        return NextResponse.json(cliente);
+    if (vinculo) {
+        // Retorna os dados do cliente encontrado
+        return NextResponse.json(vinculo.cliente);
     }
 
-    return NextResponse.json(null); // Retorna null (200 OK) se não achar
+    return NextResponse.json(null); // Retorna null se não estiver na carteira
   } catch (error) {
     return NextResponse.json(null, { status: 500 });
   }
