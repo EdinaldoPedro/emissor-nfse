@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, UserPlus, Users, Search, Briefcase, Loader2, User, Home, Check, AlertTriangle, Settings, FileKey } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Users, Briefcase, Loader2, Home, UserPlus } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
-import { validarCPF } from "@/app/utils/cpf";
+import Link from "next/link";
 
 interface CnaeDB {
   id: string;
@@ -20,15 +20,6 @@ interface ClienteDB {
   nome: string;
   documento: string;
   email?: string;
-  nomeFantasia?: string;
-  inscricaoMunicipal?: string;
-  cep?: string;
-  logradouro?: string;
-  numero?: string;
-  bairro?: string;
-  cidade?: string;
-  uf?: string;
-  codigoIbge?: string;
 }
 
 // === COMPONENTE DE CONTEÚDO ===
@@ -47,26 +38,18 @@ function EmitirNotaContent() {
   
   const [clientes, setClientes] = useState<ClienteDB[]>([]);
   const [meusCnaes, setMeusCnaes] = useState<CnaeDB[]>([]);
-  const [modoCliente, setModoCliente] = useState<'existente' | 'novo'>('existente');
   
   const [perfilEmpresa, setPerfilEmpresa] = useState<any>(null); 
   const [permiteINSS, setPermiteINSS] = useState(false);
 
-  const [buscandoDoc, setBuscandoDoc] = useState(false);
-  const [buscandoCep, setBuscandoCep] = useState(false);
-  const [clienteEncontrado, setClienteEncontrado] = useState(false);
-
-  const [novoCliente, setNovoCliente] = useState({ 
-    nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', 
-    documento: '', cep: '', logradouro: '', numero: '', 
-    bairro: '', cidade: '', uf: '', codigoIbge: ''
-  });
-
-  const isPJ = novoCliente.documento.replace(/\D/g, '').length > 11;
-
   const [nfData, setNfData] = useState({
-    clienteId: "", clienteNome: "", servicoDescricao: "", valor: "", 
-    codigoCnae: "", aliquota: "", issRetido: false 
+    clienteId: "", 
+    clienteNome: "", 
+    servicoDescricao: "", 
+    valor: "", 
+    codigoCnae: "", 
+    aliquota: "", 
+    issRetido: false 
   });
 
   const [retencoes, setRetencoes] = useState({
@@ -77,9 +60,8 @@ function EmitirNotaContent() {
       csll: { retido: false, aliquota: '1.00', valor: 0 }
   });
 
-  // === TRATAMENTO DE ERROS INTELIGENTE (NOVO) ===
+  // === TRATAMENTO DE ERROS INTELIGENTE ===
   const tratarErroEmissao = async (respostaErro: any) => {
-      // Extrai a mensagem técnica
       let msgTecnica = "";
       if (Array.isArray(respostaErro.details)) {
           msgTecnica = respostaErro.details.map((d: any) => d.mensagem || JSON.stringify(d)).join('. ');
@@ -89,14 +71,11 @@ function EmitirNotaContent() {
           msgTecnica = respostaErro.error || "Erro desconhecido.";
       }
 
-      console.log("Erro Detectado:", msgTecnica);
-
-      // 1. ERRO DE CERTIFICADO (O mais comum)
-      if (msgTecnica.includes("Certificado Digital não encontrado") || msgTecnica.includes("Senha do certificado") || msgTecnica.includes("pkcs12")) {
+      if (msgTecnica.includes("Certificado Digital não encontrado") || msgTecnica.includes("Senha do certificado")) {
           const irConfig = await dialog.showConfirm({
               type: 'danger',
               title: 'Certificado Digital Inválido',
-              description: 'Para emitir notas, você precisa configurar seu Certificado A1. O sistema não encontrou um arquivo válido ou a senha está incorreta.',
+              description: 'Para emitir notas, você precisa configurar seu Certificado A1.',
               confirmText: 'Configurar Agora',
               cancelText: 'Mais tarde'
           });
@@ -104,39 +83,16 @@ function EmitirNotaContent() {
           return;
       }
 
-      // 2. ERRO DE NUMERAÇÃO (DPS)
-      if (msgTecnica.includes("DPS já informado") || msgTecnica.includes("número da nota") || msgTecnica.includes("sequencial")) {
-          await dialog.showAlert({
-              type: 'warning',
-              title: 'Numeração Duplicada',
-              description: 'A Sefaz informou que este número de nota já foi usado. O sistema ajustará a numeração automaticamente para a próxima tentativa.'
-          });
-          // Aqui poderíamos forçar um update no ultimoDPS, mas o backend já tenta fazer isso.
+      if (msgTecnica.includes("DPS já informado") || msgTecnica.includes("número da nota")) {
+          await dialog.showAlert({ type: 'warning', title: 'Numeração Duplicada', description: 'O sistema ajustará a numeração automaticamente na próxima tentativa.' });
           router.push('/cliente/dashboard');
           return;
       }
 
-      // 3. ERRO DE CADASTRO (Endereço, CNAE)
-      if (msgTecnica.includes("Endereço") || msgTecnica.includes("IBGE") || msgTecnica.includes("CNAE")) {
-          await dialog.showAlert({
-              type: 'warning',
-              title: 'Dados Incompletos',
-              description: `A Sefaz rejeitou os dados cadastrais: ${msgTecnica}. Verifique o cadastro do cliente ou da sua empresa.`
-          });
-          router.push('/cliente/dashboard');
-          return;
-      }
-
-      // 4. ERRO GENÉRICO (Fallback)
-      await dialog.showAlert({
-          type: 'danger',
-          title: 'Falha na Emissão',
-          description: `O servidor retornou: ${msgTecnica}`
-      });
+      await dialog.showAlert({ type: 'danger', title: 'Falha na Emissão', description: `O servidor retornou: ${msgTecnica}` });
       router.push('/cliente/dashboard');
   };
 
-  // ... (Cálculos de retenção permanecem iguais)
   const calcularRetencao = (tipo: string, baseVal: string, aliqVal: string) => {
       const base = parseFloat(baseVal) || 0;
       const aliq = parseFloat(aliqVal) || 0;
@@ -243,7 +199,7 @@ function EmitirNotaContent() {
                     setNfData(prev => ({
                         ...prev,
                         clienteId: venda.clienteId,
-                        clienteNome: venda.cliente?.nome || "Cliente", // Alterado razaoSocial -> nome
+                        clienteNome: venda.cliente?.nome || "Cliente", 
                         valor: venda.valor,
                         servicoDescricao: venda.descricao,
                         codigoCnae: cnaeParaUsar || prev.codigoCnae,
@@ -256,103 +212,6 @@ function EmitirNotaContent() {
             .finally(() => setLoadingRetry(false));
     }
   }, [router, retryId]);
-
-  // Autocomplete Cliente
-  useEffect(() => {
-    const docLimpo = novoCliente.documento.replace(/\D/g, '');
-    if (docLimpo.length === 11 || docLimpo.length === 14) {
-        const local = clientes.find(c => c.documento && c.documento.replace(/\D/g, '') === docLimpo);
-        if (local) { preencherFormulario(local); }
-    }
-  }, [novoCliente.documento, clientes]); 
-
-  const preencherFormulario = (dados: any) => {
-      setNovoCliente(prev => ({
-          ...prev, 
-          nome: dados.nome || dados.razaoSocial, 
-          nomeFantasia: dados.nomeFantasia || '', 
-          inscricaoMunicipal: dados.inscricaoMunicipal || '', 
-          email: dados.email || '', 
-          cep: dados.cep || '', 
-          logradouro: dados.logradouro || '', 
-          numero: dados.numero || '', 
-          bairro: dados.bairro || '', 
-          cidade: dados.cidade || '', 
-          uf: dados.uf || '', 
-          codigoIbge: dados.codigoIbge || ''
-      }));
-      setClienteEncontrado(true);
-      setTimeout(() => setClienteEncontrado(false), 3000);
-  };
-
-  const buscarDocumentoNovo = async () => {
-    const docLimpo = novoCliente.documento.replace(/\D/g, '');
-    const local = clientes.find(c => c.documento.replace(/\D/g, '') === docLimpo);
-    if (local) { 
-        preencherFormulario(local); 
-        dialog.showAlert({ type: 'success', description: 'Cliente encontrado na sua base!' });
-        return; 
-    }
-    
-    const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
-
-    if(docLimpo.length === 14) {
-        setBuscandoDoc(true);
-        try {
-            const res = await fetch('/api/external/cnpj', { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
-                body: JSON.stringify({ cnpj: docLimpo }) 
-            });
-            const dados = await res.json();
-            if(res.ok) {
-                setNovoCliente(prev => ({ ...prev, ...dados, nome: dados.razaoSocial, nomeFantasia: dados.nomeFantasia, codigoIbge: dados.codigoIbge || '' }));
-                dialog.showAlert({ type: 'success', description: 'Dados encontrados na Receita!' });
-            } else { dialog.showAlert("CNPJ não encontrado na base externa."); }
-        } catch (e) { dialog.showAlert("Erro de conexão."); } finally { setBuscandoDoc(false); }
-        return;
-    }
-    
-    if(docLimpo.length === 11) {
-        if(validarCPF(novoCliente.documento)) {
-             setBuscandoDoc(true);
-             try {
-                const res = await fetch('/api/clientes/check', {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}` }, 
-                    body: JSON.stringify({ documento: docLimpo })
-                });
-                if (res.ok) {
-                    const dados = await res.json();
-                    if (dados) {
-                         preencherFormulario(dados);
-                         dialog.showAlert({ type: 'success', description: 'Cliente encontrado na base global!' });
-                    } else { dialog.showAlert({ type: 'info', title: 'CPF Válido', description: 'Preencha os dados manualmente.' }); }
-                } else { dialog.showAlert({ type: 'info', title: 'CPF Válido', description: 'Preencha os dados manualmente.' }); }
-             } catch(e) { dialog.showAlert({ type: 'info', title: 'CPF Válido', description: 'Preencha os dados manualmente.' }); } finally { setBuscandoDoc(false); }
-        } else { dialog.showAlert({ type: 'warning', description: 'CPF Inválido.' }); }
-        return;
-    }
-    dialog.showAlert("Documento inválido.");
-  }
-
-  const buscarCepNovo = async () => {
-      const cepLimpo = novoCliente.cep.replace(/\D/g, '');
-      if (cepLimpo.length !== 8) return;
-      const token = localStorage.getItem('token');
-      setBuscandoCep(true);
-      try {
-          const res = await fetch('/api/external/cep', { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ cep: cepLimpo }) 
-          });
-          const dados = await res.json();
-          if (res.ok) { setNovoCliente(prev => ({ ...prev, logradouro: dados.logradouro, bairro: dados.bairro, cidade: dados.localidade || dados.cidade, uf: dados.uf, codigoIbge: dados.codigoIbge })); } 
-          else { dialog.showAlert({ type: 'warning', description: 'CEP não encontrado.' }); }
-      } catch (e) { console.error(e); } finally { setBuscandoCep(false); }
-  }
 
   const formatarMoedaInput = (valor: string | number) => {
     const v = Number(valor) || 0;
@@ -367,28 +226,12 @@ function EmitirNotaContent() {
   };
 
   const handleNext = async () => {
-    if (step === 1 && modoCliente === 'novo') {
-        const userId = localStorage.getItem('userId');
-        const token = localStorage.getItem('token');
-        const docLimpo = novoCliente.documento.replace(/\D/g, '');
-        
-        if (docLimpo.length === 11 && !validarCPF(novoCliente.documento)) return dialog.showAlert({ type: 'danger', title: 'Erro', description: "CPF Inválido." });
-        if (!novoCliente.nome) return dialog.showAlert("Informe o Nome/Razão Social.");
-        
-        setLoading(true); 
-        try {
-            const res = await fetch('/api/clientes', { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}` }, 
-                body: JSON.stringify(novoCliente) 
-            });
-            if (res.ok) {
-                const criado = await res.json();
-                setNfData({ ...nfData, clienteId: criado.id, clienteNome: criado.nome });
-                setStep(step + 1);
-            } else { const erro = await res.json(); dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao cadastrar." }); }
-        } catch (e) { dialog.showAlert("Erro de conexão."); } finally { setLoading(false); }
-    } else { setStep(step + 1); }
+    if (step === 1) {
+        if (!nfData.clienteId) return dialog.showAlert("Selecione um cliente para continuar.");
+        setStep(step + 1);
+    } else { 
+        setStep(step + 1); 
+    }
   };
 
   const handleBack = () => setStep(step - 1);
@@ -437,7 +280,6 @@ function EmitirNotaContent() {
         await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida e autorizada.' });
         router.push('/cliente/dashboard');
       } else {
-        // === AQUI CHAMA O TRATADOR DE ERROS ESPECÍFICO ===
         await tratarErroEmissao(resposta);
       }
     } catch (error) { 
@@ -481,49 +323,32 @@ function EmitirNotaContent() {
         
         {step === 1 && (
           <div className="space-y-6">
-            <h3 className="text-xl font-semibold text-slate-700">Quem é o cliente?</h3>
-            <div className="flex bg-slate-100 p-1 rounded-lg w-fit">
-                <button onClick={() => setModoCliente('existente')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${modoCliente === 'existente' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}><Users size={16} /> Selecionar da Lista</button>
-                <button onClick={() => setModoCliente('novo')} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${modoCliente === 'novo' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}><UserPlus size={16} /> Cadastrar Novo</button>
+            <div className="flex justify-between items-center">
+                <h3 className="text-xl font-semibold text-slate-700">Quem é o cliente?</h3>
+                <Link href="/cliente" className="text-sm text-blue-600 font-bold hover:underline flex items-center gap-1">
+                    <UserPlus size={16}/> Cadastrar Novo Cliente
+                </Link>
             </div>
 
-            {modoCliente === 'existente' ? (
-                <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Selecione o Cliente</label>
-                    <select className="w-full p-3 border rounded-lg bg-slate-50 outline-blue-500 text-slate-700" value={nfData.clienteId} onChange={(e) => { const selected = clientes.find(c => c.id === e.target.value); setNfData({ ...nfData, clienteId: e.target.value, clienteNome: selected?.nome || "" }); }}>
-                        <option value="">Selecione...</option>
+            <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Selecione o Tomador (Cliente)</label>
+                {clientes.length === 0 ? (
+                    <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
+                        <p className="text-slate-500 mb-2">Nenhum cliente encontrado.</p>
+                        <Link href="/cliente" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold inline-block hover:bg-blue-700">
+                            Cadastrar Primeiro Cliente
+                        </Link>
+                    </div>
+                ) : (
+                    <select className="w-full p-3 border rounded-lg bg-slate-50 outline-blue-500 text-slate-700 font-medium" value={nfData.clienteId} onChange={(e) => { const selected = clientes.find(c => c.id === e.target.value); setNfData({ ...nfData, clienteId: e.target.value, clienteNome: selected?.nome || "" }); }}>
+                        <option value="">-- Selecione na lista --</option>
                         {clientes.map(cliente => (<option key={cliente.id} value={cliente.id}>{cliente.nome} ({cliente.documento})</option>))}
                     </select>
-                </div>
-            ) : (
-                <div className="bg-blue-50 p-6 rounded-lg border border-blue-100 space-y-4 animate-in fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="md:col-span-2">
-                            <div className="flex justify-between items-center mb-1">
-                                <label className="block text-xs font-bold text-slate-500 uppercase">CPF / CNPJ</label>
-                                {clienteEncontrado && <span className="text-xs text-green-600 font-bold flex items-center gap-1 animate-pulse"><Check size={12}/> Cliente carregado da base!</span>}
-                            </div>
-                            <div className="flex gap-2">
-                                <input className="w-full p-2 border rounded bg-white font-mono" placeholder="Apenas números" value={novoCliente.documento} onChange={e => setNovoCliente({...novoCliente, documento: e.target.value})} />
-                                <button onClick={buscarDocumentoNovo} disabled={buscandoDoc} className="bg-blue-600 text-white px-4 rounded hover:bg-blue-700 transition flex items-center gap-2 disabled:opacity-50">{buscandoDoc ? <Loader2 className="animate-spin" size={18}/> : <Search size={18} />}</button>
-                            </div>
-                        </div>
-                        <div className="md:col-span-2">
-                            <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">{isPJ ? 'Razão Social' : 'Nome Completo'}</label>
-                            <input className="w-full p-2 border rounded bg-white" value={novoCliente.nome} onChange={e => setNovoCliente({...novoCliente, nome: e.target.value})} />
-                        </div>
-                        {isPJ && (<div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Nome Fantasia</label><input className="w-full p-2 border rounded bg-white" value={novoCliente.nomeFantasia} onChange={e => setNovoCliente({...novoCliente, nomeFantasia: e.target.value})} /></div>)}
-                        <div><label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Email</label><input type="email" className="w-full p-2 border rounded bg-white" value={novoCliente.email} onChange={e => setNovoCliente({...novoCliente, email: e.target.value})} /></div>
-                        <div className="md:col-span-2 bg-white p-3 rounded border border-blue-200 grid grid-cols-3 gap-3">
-                            <div className="col-span-1 relative"><label className="block text-[10px] font-bold text-slate-400 mb-1">CEP</label><input placeholder="00000000" className="w-full p-2 border rounded text-sm font-bold text-blue-700" value={novoCliente.cep} onChange={e => setNovoCliente({...novoCliente, cep: e.target.value})} onBlur={buscarCepNovo} />{buscandoCep && <Loader2 className="absolute right-2 top-8 animate-spin text-blue-500" size={14}/>}</div>
-                            <div className="col-span-2"><label className="block text-[10px] font-bold text-slate-400 mb-1">Logradouro</label><input className="w-full p-2 border rounded bg-gray-100 text-sm" readOnly value={novoCliente.logradouro} /></div>
-                            <div><label className="block text-[10px] font-bold text-slate-400 mb-1">Número</label><input placeholder="Nº" className="w-full p-2 border rounded text-sm" value={novoCliente.numero} onChange={e => setNovoCliente({...novoCliente, numero: e.target.value})}/></div>
-                            <div><label className="block text-[10px] font-bold text-slate-400 mb-1">Bairro</label><input className="w-full p-2 border rounded bg-gray-100 text-sm" readOnly value={novoCliente.bairro} /></div>
-                            <div><label className="block text-[10px] font-bold text-slate-400 mb-1">Cidade/UF</label><input className="w-full p-2 border rounded bg-gray-100 text-sm" readOnly value={novoCliente.cidade ? `${novoCliente.cidade}/${novoCliente.uf}` : ''} /></div>
-                        </div>
-                    </div>
-                </div>
-            )}
+                )}
+                <p className="text-xs text-slate-400 mt-2">
+                    * Certifique-se que o cliente está com o endereço completo no cadastro.
+                </p>
+            </div>
           </div>
         )}
 
@@ -629,7 +454,7 @@ function EmitirNotaContent() {
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Revisão</h3>
             <div className="bg-slate-50 p-6 rounded-lg space-y-4 border border-slate-200">
-              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tomador:</span><span className="font-medium text-slate-900">{modoCliente === 'novo' ? novoCliente.nome : nfData.clienteNome}</span></div>
+              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tomador:</span><span className="font-medium text-slate-900">{nfData.clienteNome}</span></div>
               <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Atividade (CNAE):</span><span className="font-medium text-slate-900">{nfData.codigoCnae}</span></div>
               
               {perfilEmpresa?.regimeTributario !== 'MEI' && (
@@ -660,8 +485,8 @@ function EmitirNotaContent() {
           
           <div className="w-full flex justify-end">
             {step < 3 ? (
-                <button onClick={handleNext} disabled={loading || (step === 1 && ((modoCliente === 'existente' && !nfData.clienteId) || (modoCliente === 'novo' && !novoCliente.nome))) || isStep2Invalid} className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}>
-                    {loading ? <Loader2 className="animate-spin" size={18}/> : (step === 1 && modoCliente === 'novo' ? 'Cadastrar e Avançar' : 'Próximo')} <ArrowRight size={18} />
+                <button onClick={handleNext} disabled={loading || (step === 1 && !nfData.clienteId) || isStep2Invalid} className={`bg-blue-600 text-white px-6 py-3 rounded-lg flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`}>
+                    {loading ? <Loader2 className="animate-spin" size={18}/> : 'Próximo'} <ArrowRight size={18} />
                 </button>
             ) : (
                 loading ? (
