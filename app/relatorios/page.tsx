@@ -29,7 +29,7 @@ export default function RelatoriosPage() {
     const [notas, setNotas] = useState<any[]>([]);
     const [summary, setSummary] = useState<any>(null);
     const [loading, setLoading] = useState(true);
-    const [isBlocked, setIsBlocked] = useState(false); // <--- NOVO: Estado de Bloqueio
+    const [isBlocked, setIsBlocked] = useState(false);
     
     // Paginação
     const [page, setPage] = useState(1);
@@ -56,8 +56,14 @@ export default function RelatoriosPage() {
     const fetchData = async () => {
         setLoading(true);
         const userId = localStorage.getItem('userId');
+        const token = localStorage.getItem('token'); // <--- CORREÇÃO 1: Pegar token
         const contextId = localStorage.getItem('empresaContextId');
         
+        if (!token) {
+            router.push('/login');
+            return;
+        }
+
         try {
             const query = new URLSearchParams({
                 page: page.toString(),
@@ -70,16 +76,21 @@ export default function RelatoriosPage() {
 
             const res = await fetch(`/api/relatorios?${query.toString()}`, {
                 headers: { 
+                    'Authorization': `Bearer ${token}`, // <--- CORREÇÃO 1: Enviar token no header
                     'x-user-id': userId || '',
                     'x-empresa-id': contextId || ''
                 }
             });
             
-            // === LÓGICA DE BLOQUEIO ===
             if (res.status === 403) {
                 setIsBlocked(true);
                 setLoading(false);
-                return; // Para aqui e mostra a tela de cadeado
+                return; 
+            }
+
+            if (res.status === 401) {
+                router.push('/login');
+                return;
             }
 
             const data = await res.json();
@@ -100,13 +111,12 @@ export default function RelatoriosPage() {
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(val || 0));
     };
 
-    // === GERAR RELATÓRIO PDF (CLIENT-SIDE) ===
+    // === GERAR RELATÓRIO PDF ===
     const handleGeneratePDF = () => {
         if (!summary) return;
 
         const doc = new jsPDF();
         
-        // Cabeçalho
         doc.setFontSize(18);
         doc.setTextColor(40);
         doc.text("Relatório de Notas Fiscais", 14, 22);
@@ -116,7 +126,7 @@ export default function RelatoriosPage() {
         doc.text(`Período: ${new Date(startDate).toLocaleDateString()} a ${new Date(endDate).toLocaleDateString()}`, 14, 28);
         doc.text(`Gerado em: ${new Date().toLocaleString()}`, 14, 33);
 
-        // Resumo Financeiro
+        // Resumo
         doc.setFillColor(245, 247, 250);
         doc.roundedRect(14, 40, 180, 20, 2, 2, 'F');
         
@@ -128,28 +138,29 @@ export default function RelatoriosPage() {
 
         doc.setFontSize(12);
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(22, 163, 74); // Verde
+        doc.setTextColor(22, 163, 74);
         doc.text(formatCurrency(summary.totalValor), 20, 55);
         
         doc.setTextColor(40);
         doc.text(String(summary.qtdAutorizadas), 100, 55);
         
-        doc.setTextColor(220, 38, 38); // Vermelho
+        doc.setTextColor(220, 38, 38);
         doc.text(String(summary.qtdCanceladas), 140, 55);
 
-        // Tabela
+        // Tabela PDF
         const tableData = notas.map(n => [
             new Date(n.dataEmissao || n.createdAt).toLocaleDateString(),
             n.numero || 'Pending',
-            n.cliente?.razaoSocial || 'Consumidor',
-            n.descricao ? (n.descricao.length > 30 ? n.descricao.substring(0,30)+'...' : n.descricao) : '-',
+            n.cliente?.razaoSocial || n.cliente?.nome || 'Consumidor',
+            // CORREÇÃO 3: No PDF também mostramos o código se possível, ou a descrição curta
+            n.codigoTribNacional || (n.descricao ? n.descricao.substring(0,20)+'...' : '-'),
             formatCurrency(n.valor),
             n.status
         ]);
 
         autoTable(doc, {
             startY: 65,
-            head: [['Data', 'Número', 'Tomador', 'Serviço', 'Valor', 'Status']],
+            head: [['Data', 'Número', 'Tomador', 'Cód. Serviço', 'Valor', 'Status']],
             body: tableData,
             theme: 'grid',
             headStyles: { fillColor: [37, 99, 235] },
@@ -160,17 +171,22 @@ export default function RelatoriosPage() {
         doc.save(`relatorio_faturamento_${startDate}.pdf`);
     };
 
-    // === EXPORTAÇÃO EM LOTE (ZIP) ===
+    // === EXPORTAÇÃO EM LOTE ===
     const handleExport = async (formato: 'XML' | 'PDF' | 'AMBOS') => {
         if (selectedIds.length === 0) return dialog.showAlert("Selecione pelo menos uma nota na tabela.");
         
         setDownloading(true);
         const userId = localStorage.getItem('userId');
+        const token = localStorage.getItem('token'); // <--- CORREÇÃO 1
 
         try {
             const res = await fetch('/api/relatorios/export', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Authorization': `Bearer ${token}`, // <--- CORREÇÃO 1
+                    'x-user-id': userId || '' 
+                },
                 body: JSON.stringify({ ids: selectedIds, formato })
             });
 
@@ -204,7 +220,6 @@ export default function RelatoriosPage() {
         else setSelectedIds(prev => [...prev, id]);
     };
 
-    // === TELA DE BLOQUEIO (RENDERIZAÇÃO CONDICIONAL) ===
     if (isBlocked) {
         return (
             <div className="min-h-screen bg-slate-50">
@@ -279,7 +294,7 @@ export default function RelatoriosPage() {
                     </div>
                 </div>
 
-                {/* 2. FILTROS E AÇÕES */}
+                {/* 2. FILTROS */}
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between items-end gap-4">
                     <div className="flex flex-wrap items-end gap-3 w-full xl:w-auto">
                         <div>
@@ -316,7 +331,6 @@ export default function RelatoriosPage() {
                     </div>
 
                     <div className="flex gap-2 justify-end w-full xl:w-auto">
-                         {/* BOTÃO PDF RESUMIDO */}
                         <button onClick={handleGeneratePDF} disabled={loading} className="flex items-center gap-1 px-3 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition shadow-sm mr-2">
                             <Printer size={14}/> Relatório PDF
                         </button>
@@ -342,72 +356,78 @@ export default function RelatoriosPage() {
 
                 {/* 3. TABELA */}
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-bold">
-                                <tr>
-                                    <th className="p-4 w-10 text-center">
-                                        <button onClick={toggleSelectAll}>
-                                            {selectedIds.length > 0 && selectedIds.length === notas.length 
-                                                ? <CheckSquare className="text-blue-600" size={18}/> 
-                                                : <Square className="text-slate-400" size={18}/>}
-                                        </button>
-                                    </th>
-                                    <th className="p-4">Emissão</th>
-                                    <th className="p-4">Nota</th>
-                                    <th className="p-4">Tomador</th>
-                                    <th className="p-4">Item de Serviço</th>
-                                    <th className="p-4 text-right">Valor</th>
-                                    <th className="p-4 text-center">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {loading ? (
-                                    <tr><td colSpan={7} className="p-12 text-center text-slate-400"><Loader2 className="animate-spin mx-auto mb-2"/> Carregando...</td></tr>
-                                ) : notas.length === 0 ? (
-                                    <tr><td colSpan={7} className="p-12 text-center text-slate-400">Nenhuma nota encontrada.</td></tr>
-                                ) : (
-                                    notas.map(nota => (
-                                        <tr key={nota.id} className={`hover:bg-slate-50 transition ${selectedIds.includes(nota.id) ? 'bg-blue-50/50' : ''}`}>
-                                            <td className="p-4 text-center">
-                                                <button onClick={() => toggleSelectOne(nota.id)}>
-                                                    {selectedIds.includes(nota.id) 
-                                                        ? <CheckSquare className="text-blue-600" size={18}/> 
-                                                        : <Square className="text-slate-300 hover:text-slate-500" size={18}/>}
-                                                </button>
-                                            </td>
-                                            <td className="p-4 text-slate-600 font-mono text-xs">
-                                                {new Date(nota.dataEmissao || nota.createdAt).toLocaleDateString()}
-                                                <span className="block text-[10px] text-slate-400">
-                                                    {new Date(nota.dataEmissao || nota.createdAt).toLocaleTimeString().slice(0,5)}
-                                                </span>
-                                            </td>
-                                            <td className="p-4 font-bold text-slate-700">{nota.numero || '-'}</td>
-                                            <td className="p-4">
-                                                <div className="font-medium text-slate-800 line-clamp-1" title={nota.cliente.razaoSocial}>{nota.cliente.razaoSocial}</div>
-                                                <div className="text-[10px] text-slate-400 font-mono">{nota.tomadorCnpj}</div>
-                                            </td>
-                                            <td className="p-4 max-w-xs">
-                                                <p className="text-slate-600 text-xs line-clamp-2" title={nota.descricao}>
-                                                    {nota.descricao}
-                                                </p>
-                                            </td>
-                                            <td className="p-4 text-right font-bold text-slate-700">
-                                                {formatCurrency(nota.valor)}
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                {nota.status === 'AUTORIZADA' ? (
-                                                    <span className="px-2 py-1 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">AUTORIZADA</span>
-                                                ) : (
-                                                    <span className="px-2 py-1 rounded text-[10px] font-bold bg-gray-100 text-gray-500 border border-gray-200 line-through">CANCELADA</span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 border-b text-xs uppercase text-slate-500 font-bold">
+                            <tr>
+                                <th className="p-4 w-10 text-center">
+                                    <button onClick={toggleSelectAll}>
+                                        {selectedIds.length > 0 && selectedIds.length === notas.length 
+                                            ? <CheckSquare className="text-blue-600" size={18}/> 
+                                            : <Square className="text-slate-400" size={18}/>}
+                                    </button>
+                                </th>
+                                <th className="p-4">Emissão</th>
+                                <th className="p-4">Nota</th>
+                                <th className="p-4">Tomador</th>
+                                <th className="p-4">Cód. Serviço</th> {/* Mudei o título */}
+                                <th className="p-4 text-right">Valor</th>
+                                <th className="p-4 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {loading ? (
+                                <tr><td colSpan={7} className="p-12 text-center text-slate-400"><Loader2 className="animate-spin mx-auto mb-2"/> Carregando...</td></tr>
+                            ) : notas.length === 0 ? (
+                                <tr><td colSpan={7} className="p-12 text-center text-slate-400">Nenhuma nota encontrada.</td></tr>
+                            ) : (
+                                notas.map(nota => (
+                                    <tr key={nota.id} className={`hover:bg-slate-50 transition ${selectedIds.includes(nota.id) ? 'bg-blue-50/50' : ''}`}>
+                                        <td className="p-4 text-center">
+                                            <button onClick={() => toggleSelectOne(nota.id)}>
+                                                {selectedIds.includes(nota.id) 
+                                                    ? <CheckSquare className="text-blue-600" size={18}/> 
+                                                    : <Square className="text-slate-300 hover:text-slate-500" size={18}/>}
+                                            </button>
+                                        </td>
+                                        <td className="p-4 text-slate-600 font-mono text-xs">
+                                            {new Date(nota.dataEmissao || nota.createdAt).toLocaleDateString()}
+                                            <span className="block text-[10px] text-slate-400">
+                                                {new Date(nota.dataEmissao || nota.createdAt).toLocaleTimeString().slice(0,5)}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 font-bold text-slate-700">{nota.numero || '-'}</td>
+                                        <td className="p-4">
+                                            {/* === CORREÇÃO DO TOMADOR === */}
+                                            {/* Tenta Razão Social, se não tiver, usa Nome, se não, Consumidor */}
+                                            <div className="font-medium text-slate-800 line-clamp-1" title={nota.cliente.nomeFantasia}>
+                                                {nota.cliente.razaoSocial || nota.cliente.nome || 'Consumidor'}
+                                            </div>
+                                            <div className="text-[10px] text-slate-400 font-mono">{nota.tomadorCnpj}</div>
+                                        </td>
+                                        <td className="p-4">
+                                            {/* === CORREÇÃO DO ITEM (CÓDIGO) === */}
+                                            {/* Mostra o Código do Serviço (17.03) ou o CNAE */}
+                                            <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100" title={nota.descricao}>
+                                                {nota.codigoServico || nota.cnae || '-'}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 text-right font-bold text-slate-700">
+                                            {formatCurrency(nota.valor)}
+                                        </td>
+                                        <td className="p-4 text-center">
+                                            {nota.status === 'AUTORIZADA' ? (
+                                                <span className="px-2 py-1 rounded text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">AUTORIZADA</span>
+                                            ) : (
+                                                <span className="px-2 py-1 rounded text-[10px] font-bold bg-gray-100 text-gray-500 border border-gray-200 line-through">CANCELADA</span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
                     <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
                         <span className="text-xs text-slate-500">Mostrando {notas.length} registros</span>
                         <div className="flex gap-2">
