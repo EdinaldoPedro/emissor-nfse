@@ -1,7 +1,9 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Send, Shield, User, Lock, Clock, Book, ArrowLeft, Paperclip, Download, X, MessageCircle, Loader2, AlertTriangle, FileText, CheckCircle } from 'lucide-react';
+import { Send, Shield, User, Lock, Clock, Book, ArrowLeft, Paperclip, Download, X, MessageCircle, Loader2, AlertTriangle } from 'lucide-react';
+// 1. Importar o Dialog
+import { useDialog } from '@/app/contexts/DialogContext';
 
 const STATUS_MAP: Record<string, string> = {
     'ABERTO': 'Não Iniciado',
@@ -22,6 +24,7 @@ const STATUS_COLORS: Record<string, string> = {
 export default function ResolucaoAdmin() {
   const { id } = useParams();
   const router = useRouter();
+  const dialog = useDialog(); // 2. Inicializar o Dialog
   
   const [ticket, setTicket] = useState<any>(null);
   const [staffMembers, setStaffMembers] = useState<any[]>([]); 
@@ -36,17 +39,35 @@ export default function ResolucaoAdmin() {
 
   const carregarDados = useCallback(async () => {
       try {
-          const resTicket = await fetch(`/api/suporte/tickets/${id}`);
+          const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
+          const userId = localStorage.getItem('userId');
+
+          // Busca Ticket com Token
+          const resTicket = await fetch(`/api/suporte/tickets/${id}`, {
+              headers: { 
+                  'x-user-id': userId || '',
+                  'Authorization': `Bearer ${token}` // <--- ENVIA TOKEN
+              }
+          });
+
+          if (resTicket.status === 401) { router.push('/login'); return; }
           if (!resTicket.ok) throw new Error("Erro ao buscar ticket");
+          
           const dataTicket = await resTicket.json();
           if (dataTicket.error) throw new Error(dataTicket.error);
           setTicket(dataTicket);
 
+          // Busca Staff com Token (se necessário)
           if (staffMembers.length === 0) {
-              const resUsers = await fetch('/api/admin/users');
+              const resUsers = await fetch('/api/admin/users', {
+                  headers: { 'Authorization': `Bearer ${token}` } // <--- ENVIA TOKEN
+              });
+              
               if (resUsers.ok) {
                   const dataUsers = await resUsers.json();
-                  const staff = dataUsers.filter((u: any) => ['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
+                  // Verifica se dataUsers.data existe (paginação) ou se é array direto
+                  const lista = dataUsers.data || (Array.isArray(dataUsers) ? dataUsers : []);
+                  const staff = lista.filter((u: any) => ['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
                   setStaffMembers(staff);
               }
           }
@@ -56,7 +77,7 @@ export default function ResolucaoAdmin() {
       } finally {
           setLoading(false);
       }
-  }, [id, staffMembers.length, ticket]);
+  }, [id, staffMembers.length, ticket, router]);
 
   useEffect(() => { 
       carregarDados(); 
@@ -91,7 +112,7 @@ export default function ResolucaoAdmin() {
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if(file) {
-          if (file.size > 10 * 1024 * 1024) return alert("Máximo 10MB");
+          if (file.size > 10 * 1024 * 1024) return dialog.showAlert("O arquivo deve ter no máximo 10MB."); // <--- Dialog
           const reader = new FileReader();
           reader.onload = () => setAnexo({ base64: reader.result as string, nome: file.name });
           reader.readAsDataURL(file);
@@ -100,32 +121,69 @@ export default function ResolucaoAdmin() {
 
   const enviarMsg = async () => {
       if(!novaMsg.trim() && !anexo) return;
+      
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
       const tempMsg = novaMsg;
+      
       setNovaMsg(''); 
+      
       try {
-          await fetch('/api/suporte/tickets/mensagem', {
+          const res = await fetch('/api/suporte/tickets/mensagem', {
               method: 'POST',
-              headers: {'Content-Type':'application/json', 'x-user-id': userId || ''},
+              headers: {
+                  'Content-Type':'application/json', 
+                  'x-user-id': userId || '',
+                  'Authorization': `Bearer ${token}` // <--- ENVIA TOKEN
+              },
               body: JSON.stringify({ 
                   ticketId: id, mensagem: tempMsg, interno: activeTab === 'INTERNO',
                   anexoBase64: anexo?.base64, anexoNome: anexo?.nome
               })
           });
+
+          if (!res.ok) throw new Error();
+
           setAnexo(null);
           carregarDados();
-      } catch (e) { alert("Erro ao enviar."); setNovaMsg(tempMsg); }
+      } catch (e) { 
+          dialog.showAlert("Erro ao enviar mensagem."); // <--- Dialog
+          setNovaMsg(tempMsg); 
+      }
   };
 
   const atualizarTicket = async (campo: string, valor: string) => {
-      if (campo === 'status' && !confirm(`Alterar status para "${STATUS_MAP[valor] || valor}"?`)) return;
+      // === PROMPT PADRÃO (Dialog) ===
+      if (campo === 'status') {
+          const confirmed = await dialog.showConfirm({
+              title: 'Alterar Status?',
+              description: `Deseja alterar o status do chamado para "${STATUS_MAP[valor] || valor}"?`,
+              confirmText: 'Sim, Alterar',
+              type: 'info'
+          });
+          if (!confirmed) return;
+      }
+
+      const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
+
       try {
-          await fetch(`/api/suporte/tickets/${id}`, {
-              method: 'PUT', headers: {'Content-Type':'application/json'},
+          const res = await fetch(`/api/suporte/tickets/${id}`, {
+              method: 'PUT', 
+              headers: {
+                  'Content-Type':'application/json',
+                  'Authorization': `Bearer ${token}` // <--- ENVIA TOKEN
+              },
               body: JSON.stringify({ [campo]: valor })
           });
+          
+          if (!res.ok) throw new Error();
+          
           carregarDados();
-      } catch (e) { alert("Erro ao atualizar."); }
+          if (campo === 'status') dialog.showAlert({ type: 'success', description: "Status atualizado!" });
+
+      } catch (e) { 
+          dialog.showAlert("Erro ao atualizar o ticket."); 
+      }
   };
 
   if (loading) return <div className="flex h-screen items-center justify-center bg-slate-50 text-blue-600 gap-2"><Loader2 className="animate-spin" size={32}/></div>;
