@@ -3,9 +3,12 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Save, Upload, X, Loader2, AlertTriangle, FileText } from 'lucide-react';
 import Link from 'next/link';
+// 1. Importar o Dialog
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function NovoTicketPage() {
   const router = useRouter();
+  const dialog = useDialog(); // 2. Inicializar
   
   const [loading, setLoading] = useState(false);
   const [catalogo, setCatalogo] = useState<any[]>([]);
@@ -22,12 +25,12 @@ export default function NovoTicketPage() {
   // Carrega opções de assunto
   useEffect(() => {
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); // <--- 1. Token
+      const token = localStorage.getItem('token'); 
 
       fetch('/api/admin/suporte/catalogo', {
           headers: { 
               'x-user-id': userId || '',
-              'Authorization': `Bearer ${token}` // <--- 2. Token
+              'Authorization': `Bearer ${token}` 
           }
       })
       .then(r => r.json())
@@ -54,40 +57,66 @@ export default function NovoTicketPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
-      if(!form.assuntoId) return alert("Selecione um assunto.");
+      if(!form.assuntoId) return dialog.showAlert("Selecione um assunto.");
       
-      setLoading(true);
-      
-      const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); // <--- 1. Token
+      // Função interna para permitir "forçar" o envio se houver duplicidade
+      const enviarChamado = async (force = false) => {
+          setLoading(true);
+          const userId = localStorage.getItem('userId');
+          const token = localStorage.getItem('token'); 
 
-      try {
-          const res = await fetch('/api/suporte/tickets', {
-              method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json', 
-                  'x-user-id': userId || '',
-                  'Authorization': `Bearer ${token}` // <--- 2. Envio Seguro
-              },
-              body: JSON.stringify(form)
-          });
+          try {
+              const res = await fetch('/api/suporte/tickets', {
+                  method: 'POST',
+                  headers: { 
+                      'Content-Type': 'application/json', 
+                      'x-user-id': userId || '',
+                      'Authorization': `Bearer ${token}` 
+                  },
+                  // Adiciona checkDuplicity
+                  body: JSON.stringify({ ...form, checkDuplicity: !force })
+              });
 
-          if(res.ok) {
-              alert("Chamado aberto com sucesso!");
-              router.push('/cliente/suporte');
-          } else {
-              const err = await res.json();
-              alert("Erro: " + (err.error || err.message || "Falha ao abrir chamado"));
+              const data = await res.json();
+
+              if(res.ok) {
+                  // Sucesso: Prompt bonito
+                  await dialog.showAlert({ 
+                      type: 'success', 
+                      title: 'Sucesso', 
+                      description: `Chamado #${data.protocolo} aberto com sucesso!` 
+                  });
+                  router.push('/cliente/suporte');
+              } 
+              else if (res.status === 409) {
+                  // Conflito: Pergunta se quer abrir mesmo assim
+                  const confirmar = await dialog.showConfirm({
+                      type: 'warning',
+                      title: 'Chamado Similar',
+                      description: `${data.message}\n\nDeseja abrir este novo chamado mesmo assim?`,
+                      confirmText: 'Sim, Confirmar',
+                      cancelText: 'Cancelar'
+                  });
+
+                  if (confirmar) {
+                      enviarChamado(true); // Tenta de novo forçando
+                  }
+              } 
+              else {
+                  dialog.showAlert({ type: 'danger', description: "Erro: " + (data.error || "Falha ao abrir chamado") });
+              }
+          } catch (error) {
+              dialog.showAlert("Erro de conexão.");
+          } finally {
+              setLoading(false);
           }
-      } catch (error) {
-          alert("Erro de conexão.");
-      } finally {
-          setLoading(false);
-      }
+      };
+
+      // Dispara a primeira tentativa
+      enviarChamado(false);
   };
 
   const assuntoSelecionado = catalogo.find(c => c.id === form.assuntoId);
-  const isOutros = !assuntoSelecionado; // Se não achou no catalogo ou ID inválido, assume manual se quiser, ou ajusta lógica
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 flex justify-center">
@@ -166,7 +195,7 @@ export default function NovoTicketPage() {
                       <AlertTriangle className="text-blue-500 shrink-0 mt-0.5" size={18}/>
                       <div className="text-sm text-blue-800">
                           <p className="font-bold">Dica:</p>
-                          <p>{assuntoSelecionado.descricao || 'Verifique nossa base de conhecimento antes de abrir o chamado.'}</p>
+                          <p>{assuntoSelecionado.instrucoes || 'Verifique nossa base de conhecimento antes de abrir o chamado.'}</p>
                       </div>
                   </div>
               )}

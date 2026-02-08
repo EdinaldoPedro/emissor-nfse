@@ -27,11 +27,10 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
-  // === CORREÇÃO: Menu Flutuante (Posicionamento Fixo) ===
-  // Armazena a posição exata onde o menu deve abrir
+  // === MENU FLUTUANTE ===
   const [activeMenu, setActiveMenu] = useState<{ id: string; top: number; left: number; alignBottom: boolean } | null>(null);
 
-  // === LÓGICA DE CANCELAMENTO ===
+  // === CANCELAMENTO ===
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelData, setCancelData] = useState({ vendaId: '', tipo: '', detalhe: '' });
   const [cancelando, setCancelando] = useState(false);
@@ -40,7 +39,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       "Erro na emissão", "Serviço não prestado", "Erro de assinatura", "Duplicidade da nota", "Outros"
   ];
 
-  // Fecha o menu se o usuário rolar a tela (para o menu não ficar solto voando)
+  // Fecha menu ao rolar
   useEffect(() => {
       const handleScroll = () => setActiveMenu(null);
       window.addEventListener('scroll', handleScroll, true);
@@ -51,16 +50,23 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       };
   }, []);
 
-  // --- FUNÇÕES DE DOWNLOAD ---
+  // --- DOWNLOAD PDF (CORRIGIDO AUTH) ---
   const handleDownloadPdf = async (notaId: string, numeroNota: number, isCancelada: boolean) => {
       try {
           setDownloadingPdfId(notaId); 
           const userId = localStorage.getItem('userId');
+          const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
+
           const res = await fetch('/api/notas/pdf', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+              headers: { 
+                  'Content-Type': 'application/json', 
+                  'Authorization': `Bearer ${token}`, // <--- ENVIA TOKEN
+                  'x-user-id': userId || '' 
+              },
               body: JSON.stringify({ notaId })
           });
+
           if (!res.ok) {
               const err = await res.json();
               throw new Error(err.error || "Erro ao buscar documento.");
@@ -97,13 +103,16 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const fetchVendas = useCallback(() => {
     setLoading(true);
     const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId'); 
     const limit = compact ? 5 : 10;
     const typeFilter = onlyValid ? 'valid' : 'all';
 
+    if (!token) return; // Segurança extra
+
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
         headers: { 
-            'Authorization': 'Bearer ' + localStorage.getItem('token'),
+            'Authorization': `Bearer ${token}`,
             'x-empresa-id': contextId || '',
             'x-user-id': userId || ''
         }
@@ -116,14 +125,20 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
   useEffect(() => { fetchVendas(); }, [fetchVendas]);
 
-  // --- FUNÇÕES DE AÇÃO ---
+  // --- PEDIR AJUDA (CORRIGIDO AUTH) ---
   const handlePedirAjuda = async (vendaId: string, motivoErro: string) => {
       const criarTicket = async (force = false) => {
           const userId = localStorage.getItem('userId');
+          const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
+
           try {
               const res = await fetch('/api/suporte/tickets', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+                  headers: { 
+                      'Content-Type': 'application/json', 
+                      'Authorization': `Bearer ${token}`, // <--- ENVIA TOKEN
+                      'x-user-id': userId || '' 
+                  },
                   body: JSON.stringify({ 
                       assuntoId: 'AUTO_ERROR_REPORT', 
                       tituloManual: `Falha na Emissão - Venda #${vendaId.split('-')[0]}`,
@@ -151,37 +166,23 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       }
   };
 
-  // === LÓGICA CORRIGIDA DO MENU ===
+  // --- MENU FLUTUANTE ---
   const toggleMenu = (e: React.MouseEvent<HTMLButtonElement>, id: string) => {
       e.stopPropagation();
-      
-      // Se clicar no mesmo botão, fecha
-      if (activeMenu?.id === id) {
-          setActiveMenu(null);
-          return;
-      }
-
-      // Calcula posição baseada no botão clicado
+      if (activeMenu?.id === id) { setActiveMenu(null); return; }
       const rect = e.currentTarget.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
-      
-      // Se tiver pouco espaço embaixo (menos de 200px), abre pra cima
       const alignBottom = spaceBelow > 220; 
-
-      setActiveMenu({
-          id,
-          top: alignBottom ? rect.bottom + 5 : rect.top - 5,
-          left: rect.right, // Alinha à direita do botão
-          alignBottom
-      });
+      setActiveMenu({ id, top: alignBottom ? rect.bottom + 5 : rect.top - 5, left: rect.right, alignBottom });
   };
 
   const abrirModalCancelamento = (vendaId: string) => {
       setCancelData({ vendaId, tipo: '', detalhe: '' });
       setCancelModalOpen(true);
-      setActiveMenu(null); // Fecha o menu
+      setActiveMenu(null);
   };
 
+  // --- CANCELAR NOTA (CORRIGIDO AUTH) ---
   const confirmarCancelamento = async () => {
       const justificativaCompleta = `${cancelData.tipo}: ${cancelData.detalhe}`;
       if (!cancelData.tipo) return dialog.showAlert("Selecione um motivo.");
@@ -191,10 +192,16 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
       setCancelando(true);
       const userId = localStorage.getItem('userId');
+      const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
+
       try {
           const res = await fetch('/api/notas/gerenciar', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' },
+              headers: { 
+                  'Content-Type': 'application/json', 
+                  'Authorization': `Bearer ${token}`, // <--- ENVIA TOKEN
+                  'x-user-id': userId || '' 
+              },
               body: JSON.stringify({ acao: 'CANCELAR', vendaId: cancelData.vendaId, motivo: justificativaCompleta })
           });
           const data = await res.json();
@@ -209,7 +216,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
   const handleCorrigir = (vendaId: string) => router.push(`/emitir?retry=${vendaId}`);
 
-  // Prepara dados do menu ativo
+  // Dados do item ativo
   const activeVendaData = activeMenu ? vendas.find(v => v.id === activeMenu.id) : null;
   const activeNotaData = activeVendaData?.notas?.[0];
   const activeIsCancelada = activeVendaData?.status === 'CANCELADA' || activeNotaData?.status === 'CANCELADA';
@@ -217,19 +224,16 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden relative">
       
-      {/* === MENU FLUTUANTE (RENDERIZADO FORA DA TABELA) === */}
+      {/* MENU FLUTUANTE (FIXO) */}
       {activeMenu && activeVendaData && (
           <>
-            {/* Overlay invisível para fechar ao clicar fora */}
             <div className="fixed inset-0 z-[9990]" onClick={() => setActiveMenu(null)}></div>
-            
             <div 
                 className="fixed bg-white border border-slate-100 rounded-lg shadow-2xl z-[9999] overflow-hidden w-48 animate-in fade-in zoom-in-95 duration-200"
                 style={{
-                    // Posicionamento calculado dinamicamente
                     top: activeMenu.alignBottom ? activeMenu.top : 'auto',
                     bottom: activeMenu.alignBottom ? 'auto' : (window.innerHeight - activeMenu.top),
-                    left: activeMenu.left - 192 // 192px é a largura do menu (w-48) para alinhar à direita
+                    left: activeMenu.left - 192 
                 }}
             >
                 <div className="py-1">
@@ -287,7 +291,7 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
         </div>
       )}
 
-      {/* HEADER DA TABELA */}
+      {/* HEADER E TABELA */}
       <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white">
         <h3 className="font-bold text-slate-700 flex items-center gap-2">
             <FileText size={20} className="text-blue-600"/> 
@@ -306,7 +310,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
         )}
       </div>
 
-      {/* CONTEÚDO TABELA */}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm text-slate-600">
             <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-500">
@@ -375,7 +378,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                             </button>
                                         </div>
                                     ) : isAutorizada && (
-                                        // AQUI ESTÁ O BOTÃO QUE ACIONA O MENU FLUTUANTE
                                         <button 
                                             onClick={(e) => toggleMenu(e, venda.id)} 
                                             className={`p-2 rounded-full transition ${activeMenu?.id === venda.id ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-200 text-slate-400'}`}
