@@ -2,8 +2,10 @@
 import { useEffect, useState } from 'react';
 import { Search, Edit, Save, X, Plus, Trash2, MapPin, ChevronLeft, ChevronRight, Briefcase } from 'lucide-react';
 import SearchableSelect from '@/components/SearchableSelect';
+import { useDialog } from '@/app/contexts/DialogContext';
 
 export default function TributacaoMunicipalPage() {
+  const dialog = useDialog();
   const [lista, setLista] = useState<any[]>([]);
   
   // Paginação e Busca
@@ -12,7 +14,7 @@ export default function TributacaoMunicipalPage() {
   const [totalItems, setTotalItems] = useState(0);
   const [termoBusca, setTermoBusca] = useState('');
   
-  const limit = 10; // Itens por página
+  const limit = 10; 
 
   // Dados Auxiliares
   const [listaCnaes, setListaCnaes] = useState<any[]>([]);
@@ -21,7 +23,6 @@ export default function TributacaoMunicipalPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   
-  // Estado do formulário
   const [form, setForm] = useState({
     id: '',
     cnae: '',
@@ -30,12 +31,10 @@ export default function TributacaoMunicipalPage() {
     descricaoServicoMunicipal: ''
   });
 
-  // Efeito Inteligente: Busca quando muda a página OU quando digita (com delay de 0.5s)
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       carregarRegras(page, termoBusca);
     }, 500);
-
     return () => clearTimeout(delayDebounce);
   }, [page, termoBusca]);
 
@@ -44,18 +43,29 @@ export default function TributacaoMunicipalPage() {
   }, []);
 
   const carregarRegras = (pagina: number, busca: string = '') => {
-    fetch(`/api/admin/tributacao-municipal?page=${pagina}&limit=${limit}&search=${busca}`)
+    const token = localStorage.getItem('token'); // <--- CORREÇÃO: Pegar Token
+    
+    fetch(`/api/admin/tributacao-municipal?page=${pagina}&limit=${limit}&search=${busca}`, {
+        headers: { 
+            'Authorization': `Bearer ${token}` // <--- CORREÇÃO: Enviar Token
+        }
+    })
       .then(r => r.json())
       .then(res => {
         setLista(res.data || []);
         setTotalPages(res.meta?.totalPages || 1);
         setTotalItems(res.meta?.total || 0);
-      });
+      })
+      .catch(err => console.error("Erro ao carregar regras:", err));
   };
 
-const carregarAuxiliares = async () => {
+  const carregarAuxiliares = async () => {
+    const token = localStorage.getItem('token'); // <--- CORREÇÃO: Pegar Token
+
     // 1. Carrega CNAEs
-    fetch('/api/admin/cnaes?limit=1000') 
+    fetch('/api/admin/cnaes?limit=1000', {
+        headers: { 'Authorization': `Bearer ${token}` } // <--- Envia Token
+    }) 
         .then(r => r.json())
         .then(res => {
             const lista = Array.isArray(res) ? res : (res.data || []);
@@ -63,8 +73,10 @@ const carregarAuxiliares = async () => {
         })
         .catch(() => setListaCnaes([]));
 
-    // 2. Carrega Cidades (Empresas)
-    fetch('/api/admin/empresas?limit=1000')
+    // 2. Carrega Cidades
+    fetch('/api/admin/empresas?limit=1000', {
+        headers: { 'Authorization': `Bearer ${token}` } // <--- Envia Token
+    })
         .then(r => r.json())
         .then((res: any) => {
             const listaEmpresas = res.data || (Array.isArray(res) ? res : []);
@@ -84,11 +96,9 @@ const carregarAuxiliares = async () => {
 
   const handleSave = async () => {
     if (!form.cnae || !form.codigoIbge || !form.codigoTributacaoMunicipal) {
-        alert("Preencha os campos obrigatórios.");
-        return;
+        return dialog.showAlert("Preencha os campos obrigatórios.");
     }
 
-    // === CORREÇÃO DE SEGURANÇA: Recupera o token ===
     const token = localStorage.getItem('token');
     
     const metodo = editing ? 'PUT' : 'POST';
@@ -96,7 +106,7 @@ const carregarAuxiliares = async () => {
         method: metodo,
         headers: { 
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` // <--- Envia o crachá de Admin
+            'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify(form)
     });
@@ -105,25 +115,32 @@ const carregarAuxiliares = async () => {
     if (res.ok) {
         setModalOpen(false);
         carregarRegras(page, termoBusca);
-        alert("Salvo com sucesso!");
+        dialog.showAlert({ type: 'success', description: "Regra salva com sucesso!" });
     } else {
-        alert(data.error || "Erro ao salvar.");
+        dialog.showAlert({ type: 'danger', description: data.error || "Erro ao salvar." });
     }
   };
 
   const handleDelete = async (id: string) => {
-      if(!confirm("Excluir regra?")) return;
+      const confirmed = await dialog.showConfirm({
+          title: 'Excluir Regra?',
+          description: 'Esta ação removerá a configuração tributária para este município.',
+          type: 'danger',
+          confirmText: 'Sim, Excluir'
+      });
       
-      // === CORREÇÃO DE SEGURANÇA: Recupera o token ===
+      if(!confirmed) return;
+      
       const token = localStorage.getItem('token');
 
       await fetch(`/api/admin/tributacao-municipal?id=${id}`, { 
           method: 'DELETE',
           headers: {
-              'Authorization': `Bearer ${token}` // <--- Envia o crachá de Admin
+              'Authorization': `Bearer ${token}` 
           }
       });
       carregarRegras(page, termoBusca);
+      dialog.showAlert({ type: 'success', description: "Regra removida." });
   };
 
   const getNomeCidade = (ibge: string) => {
@@ -166,7 +183,7 @@ const carregarAuxiliares = async () => {
             </div>
 
             <button onClick={() => { setEditing(null); setForm({ id:'', cnae:'', codigoIbge:'', codigoTributacaoMunicipal:'', descricaoServicoMunicipal:'' }); setModalOpen(true); }} 
-                className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-blue-700">
+                className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
                 <Plus size={18}/> Nova Regra
             </button>
         </div>
@@ -174,16 +191,16 @@ const carregarAuxiliares = async () => {
 
       {/* MODAL */}
       {modalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg overflow-visible">
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-lg">{editing ? 'Editar' : 'Nova Regra'}</h3>
+                    <h3 className="font-bold text-lg">{editing ? 'Editar Regra' : 'Nova Regra Municipal'}</h3>
                     <button onClick={() => setModalOpen(false)}><X size={20}/></button>
                 </div>
                 
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">CNAE</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">CNAE</label>
                         <div className="relative">
                             <Briefcase className="absolute left-3 top-3 text-gray-400 z-10" size={16}/>
                             <div className="pl-8">
@@ -199,7 +216,7 @@ const carregarAuxiliares = async () => {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Cidade</label>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cidade</label>
                         <div className="relative">
                             <MapPin className="absolute left-3 top-3 text-gray-400 z-10" size={16}/>
                             <div className="pl-8">
@@ -216,17 +233,17 @@ const carregarAuxiliares = async () => {
 
                     <div className="border-t pt-4">
                         <label className="block text-xs font-bold text-blue-700 uppercase mb-1">Cód. Municipal (CTM)</label>
-                        <input className="w-full p-2 border rounded bg-blue-50" value={form.codigoTributacaoMunicipal} onChange={e => setForm({...form, codigoTributacaoMunicipal: e.target.value})} placeholder="Ex: 010700188" />
+                        <input className="w-full p-2 border rounded bg-blue-50 focus:ring-2 focus:ring-blue-500 outline-none" value={form.codigoTributacaoMunicipal} onChange={e => setForm({...form, codigoTributacaoMunicipal: e.target.value})} placeholder="Ex: 010700188" />
                     </div>
                     
                     <div>
-                        <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Descrição (Opcional)</label>
-                        <textarea className="w-full p-2 border rounded" value={form.descricaoServicoMunicipal || ''} onChange={e => setForm({...form, descricaoServicoMunicipal: e.target.value})} rows={2} />
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Descrição (Opcional)</label>
+                        <textarea className="w-full p-2 border rounded resize-none focus:ring-2 focus:ring-blue-500 outline-none" value={form.descricaoServicoMunicipal || ''} onChange={e => setForm({...form, descricaoServicoMunicipal: e.target.value})} rows={2} />
                     </div>
                 </div>
 
                 <div className="mt-6 flex justify-end gap-2 pt-4 border-t">
-                    <button onClick={handleSave} className="bg-blue-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-blue-700"><Save size={18}/> Salvar</button>
+                    <button onClick={handleSave} className="bg-blue-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-blue-700 font-bold shadow-md"><Save size={18}/> Salvar</button>
                 </div>
             </div>
         </div>
@@ -237,19 +254,19 @@ const carregarAuxiliares = async () => {
         <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 border-b">
                 <tr>
-                    <th className="p-4">CNAE</th>
-                    <th className="p-4">Cidade (IBGE)</th>
-                    <th className="p-4">Cód. Municipal</th>
-                    <th className="p-4 text-right">Ações</th>
+                    <th className="p-4 font-bold text-slate-500 uppercase text-xs">CNAE</th>
+                    <th className="p-4 font-bold text-slate-500 uppercase text-xs">Cidade (IBGE)</th>
+                    <th className="p-4 font-bold text-slate-500 uppercase text-xs">Cód. Municipal</th>
+                    <th className="p-4 text-right font-bold text-slate-500 uppercase text-xs">Ações</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
                 {lista.length === 0 ? (
                     <tr><td colSpan={4} className="p-8 text-center text-gray-400">Nenhum registro encontrado.</td></tr>
                 ) : (
                     lista.map(item => (
-                        <tr key={item.id} className="border-b hover:bg-slate-50">
-                            <td className="p-4 font-mono font-bold">{item.cnae}</td>
+                        <tr key={item.id} className="hover:bg-slate-50 transition">
+                            <td className="p-4 font-mono font-bold text-slate-700">{item.cnae}</td>
                             
                             <td className="p-4">
                                 <div className="flex flex-col">
@@ -263,10 +280,10 @@ const carregarAuxiliares = async () => {
                                 </div>
                             </td>
 
-                            <td className="p-4"><span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-bold">{item.codigoTributacaoMunicipal}</span></td>
+                            <td className="p-4"><span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-bold border border-orange-200">{item.codigoTributacaoMunicipal}</span></td>
                             <td className="p-4 text-right flex justify-end gap-2">
-                                <button onClick={() => { setEditing(item); setForm(item); setModalOpen(true); }} className="text-blue-500 p-1"><Edit size={18}/></button>
-                                <button onClick={() => handleDelete(item.id)} className="text-red-500 p-1"><Trash2 size={18}/></button>
+                                <button onClick={() => { setEditing(item); setForm(item); setModalOpen(true); }} className="text-blue-500 hover:bg-blue-50 p-2 rounded transition" title="Editar"><Edit size={18}/></button>
+                                <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:bg-red-50 p-2 rounded transition" title="Excluir"><Trash2 size={18}/></button>
                             </td>
                         </tr>
                     ))
@@ -275,11 +292,11 @@ const carregarAuxiliares = async () => {
         </table>
 
         {/* Paginação */}
-        <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
-            <span className="text-sm text-gray-500">Página {page} de {totalPages}</span>
+        <div className="p-4 border-t bg-slate-50 flex justify-between items-center">
+            <span className="text-xs text-slate-500">Página {page} de {totalPages}</span>
             <div className="flex gap-2">
-                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 border rounded hover:bg-white disabled:opacity-50"><ChevronLeft size={16} /></button>
-                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-2 border rounded hover:bg-white disabled:opacity-50"><ChevronRight size={16} /></button>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-2 bg-white border rounded hover:bg-slate-100 disabled:opacity-50 text-slate-600"><ChevronLeft size={16} /></button>
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-2 bg-white border rounded hover:bg-slate-100 disabled:opacity-50 text-slate-600"><ChevronRight size={16} /></button>
             </div>
         </div>
       </div>
