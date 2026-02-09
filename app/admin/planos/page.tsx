@@ -11,10 +11,17 @@ export default function AdminPlanos() {
   const [editing, setEditing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // === CARREGAMENTO BLINDADO ===
+  // === CARREGAMENTO BLINDADO COM TOKEN ===
   const carregar = () => {
     setLoading(true);
-    fetch('/api/plans?visao=admin', { cache: 'no-store' })
+    const token = localStorage.getItem('token'); // <--- 1. Recupera Token
+
+    fetch('/api/plans?visao=admin', { 
+        cache: 'no-store',
+        headers: {
+            'Authorization': `Bearer ${token}` // <--- 2. Envia Token
+        }
+    })
         .then(async (r) => {
             const data = await r.json();
             
@@ -22,9 +29,8 @@ export default function AdminPlanos() {
                 setPlans(data);
             } else {
                 console.error("API retornou erro ou formato inválido:", data);
-                // Se der erro, mantemos lista vazia para não travar a tela
                 setPlans([]); 
-                if(!r.ok) dialog.showAlert({ type: 'danger', description: data.error || "Erro ao carregar dados." });
+                if(!r.ok && r.status !== 404) dialog.showAlert({ type: 'danger', description: data.error || "Erro ao carregar dados." });
             }
         })
         .catch(err => {
@@ -55,11 +61,15 @@ export default function AdminPlanos() {
 
   const handleSave = async () => {
     const method = editing.id ? 'PUT' : 'POST';
+    const token = localStorage.getItem('token'); // <--- Recupera Token
     
     try {
         const res = await fetch('/api/plans', {
             method: method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` // <--- Envia Token
+            },
             body: JSON.stringify(editing)
         });
 
@@ -86,8 +96,15 @@ export default function AdminPlanos() {
 
       if(!confirmed) return;
       
+      const token = localStorage.getItem('token'); // <--- Recupera Token
+
       try {
-          const res = await fetch(`/api/plans?id=${id}`, { method: 'DELETE' });
+          const res = await fetch(`/api/plans?id=${id}`, { 
+              method: 'DELETE',
+              headers: {
+                  'Authorization': `Bearer ${token}` // <--- Envia Token
+              }
+          });
           const data = await res.json();
 
           if (res.ok) {
