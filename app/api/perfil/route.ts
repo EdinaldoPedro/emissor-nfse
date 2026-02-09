@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { syncCnaesGlobalmente } from '@/app/services/syncService'; 
 import forge from 'node-forge';
 import { validateRequest } from '@/app/utils/api-security';
+import { encrypt } from '@/app/utils/crypto';
 
 const prisma = new PrismaClient();
 
@@ -266,13 +267,18 @@ export async function PUT(request: Request) {
               const p12Der = forge.util.decode64(body.certificadoArquivo);
               const p12Asn1 = forge.asn1.fromDer(p12Der);
               const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, body.certificadoSenha);
+              
               let dataVencimento = null;
               const bags = p12.getBags({ bagType: forge.pki.oids.certBag });
               // @ts-ignore
               const certBag = bags[forge.pki.oids.certBag]?.[0];
               if(certBag && certBag.cert) dataVencimento = certBag.cert.validity.notAfter;
-              dadosEmpresa.certificadoA1 = body.certificadoArquivo;
-              dadosEmpresa.senhaCertificado = body.certificadoSenha;
+              
+              // === CRIPTOGRAFIA APLICADA AQUI ===
+              dadosEmpresa.certificadoA1 = encrypt(body.certificadoArquivo);
+              dadosEmpresa.senhaCertificado = encrypt(body.certificadoSenha);
+              // ==================================
+              
               dadosEmpresa.certificadoVencimento = dataVencimento;
           } catch (e) {
               return NextResponse.json({ error: 'Senha incorreta ou arquivo inválido.' }, { status: 400 });

@@ -5,6 +5,7 @@ import forge from 'node-forge';
 import zlib from 'zlib';
 import crypto from 'crypto'; 
 import { IResultadoEmissao } from '../interfaces/IEmissorStrategy';
+import { decrypt } from '@/app/utils/crypto'
 
 const URL_HOMOLOGACAO = "https://sefin.producaorestrita.nfse.gov.br/SefinNacional/nfse"; 
 const URL_PRODUCAO = "https://sefin.nfse.gov.br/SefinNacional/nfse";
@@ -103,12 +104,16 @@ export abstract class BaseStrategy {
     }
 
     protected extrairCredenciais(pfxBase64: string | null, senha: string | null) {
-        if (!pfxBase64) throw new Error("Certificado digital não encontrado.");
+        // === DESCRIPTOGRAFIA (Ler do Banco -> Usar) ===
+        const pfxReal = decrypt(pfxBase64);
+        const senhaReal = decrypt(senha);
+
+        if (!pfxReal) throw new Error("Certificado digital não encontrado.");
         
         try {
-            const pfxBuffer = Buffer.from(pfxBase64, 'base64');
+            const pfxBuffer = Buffer.from(pfxReal, 'base64');
             const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
-            const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, senha || '');
+            const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, senhaReal || '');
             
             const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
             // @ts-ignore

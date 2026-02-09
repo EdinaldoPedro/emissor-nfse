@@ -1,12 +1,19 @@
 import { chromium } from 'playwright';
 import { extractCertAndKeyFromPfx } from '@/app/utils/certHelper';
+import { decrypt } from '@/app/utils/crypto';
 
 export class NfsePortalDownloader {
 
     async downloadPdfOficial(chaveAcesso: string, pfxBase64: string, senhaCertificado: string): Promise<Buffer> {
         console.log(`[BOT] Iniciando download oficial para chave: ${chaveAcesso}`);
 
-        const credenciais = extractCertAndKeyFromPfx(pfxBase64, senhaCertificado);
+        // === DESCRIPTOGRAFIA AQUI ===
+        const pfxReal = decrypt(pfxBase64);
+        const senhaReal = decrypt(senhaCertificado);
+
+        if(!pfxReal || !senhaReal) throw new Error("Credenciais inválidas ou corrompidas.");
+
+        const credenciais = extractCertAndKeyFromPfx(pfxReal, senhaReal);
 
         const URL_LOGIN = "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional";
         const URL_DOWNLOAD = `https://www.nfse.gov.br/EmissorNacional/Notas/Download/DANFSe/${chaveAcesso}`;
