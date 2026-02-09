@@ -1,13 +1,18 @@
 import { SignJWT, jwtVerify } from 'jose';
 
-// Em produção, use uma variável de ambiente forte: process.env.JWT_SECRET
-const secret = new TextEncoder().encode(process.env.JWT_SECRET || '9c2f4a6d8e0b1f3a7d5c9e2b6a4f8d0c1e7a5b3f9d2c6e8a4b0');
+// Garante que o segredo venha do ambiente em produção
+const secretKey = process.env.JWT_SECRET;
+if (!secretKey && process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET não definido no ambiente.');
+}
+
+const secret = new TextEncoder().encode(secretKey || 'dev_secret_fallback_do_not_use_in_prod');
 
 export async function signJWT(payload: { sub: string; role: string }) {
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('8h') // Token expira em 8 horas
+    .setExpirationTime('8h')
     .sign(secret);
 }
 
