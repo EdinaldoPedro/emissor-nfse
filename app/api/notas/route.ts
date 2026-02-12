@@ -4,44 +4,45 @@ import { createLog } from '@/app/services/logger';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory'; 
 import { getTributacaoPorCnae } from '@/app/utils/tributacao'; 
 import { processarRetornoNota } from '@/app/services/notaProcessor';
-import { getAuthenticatedUser, unauthorized, forbidden } from '@/app/utils/api-middleware';
+import { unauthorized, forbidden } from '@/app/utils/api-middleware';
 import { checkPlanLimits, incrementUsage } from '@/app/services/planService';
-import { validateRequest } from "@/app/utils/api-security"; // Importar validateRequest
+import { validateRequest } from "@/app/utils/api-security"; 
 
 const prisma = new PrismaClient();
 
-// === FUNÇÕES AUXILIARES ===
+// === FUNÇÃO AUXILIAR DE CONTEXTO ===
 async function getEmpresaContexto(user: any, contextId: string | null) {
+    // 1. Staff tem acesso livre se enviar o ID
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+    
     if (contextId && contextId !== 'null' && contextId !== 'undefined') {
+        if (isStaff) return contextId;
+
+        // 2. Contador precisa de vínculo aprovado
         const vinculo = await prisma.contadorVinculo.findUnique({
             where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
         });
+        
         if (vinculo && vinculo.status === 'APROVADO') return contextId;
-        if (isStaff) return contextId; 
+        
+        // Se pediu contexto mas não tem permissão -> Retorna null (Negado)
+        return null; 
     }
+    
+    // 3. Padrão: Empresa do próprio usuário
     return user.empresaId;
 }
 
 // === POST: EMISSÃO DE NOTA ===
 export async function POST(request: Request) {
-  // 1. Validação de Segurança
+  // 1. Segurança Básica
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   
-  // Como o validateRequest retorna o targetId, precisamos pegar o user completo para checar roles/empresa
   const user = await prisma.user.findUnique({ where: { id: targetId } });
   if (!user) return unauthorized();
 
-  const planCheck = await checkPlanLimits(user.id, 'EMITIR');
-  if (!planCheck.allowed) {
-      return NextResponse.json({ 
-          error: planCheck.reason,
-          code: planCheck.status 
-      }, { status: 403 });
-  }
-
-  const contextId = request.headers.get('x-empresa-id'); 
+  const contextId = request.headers.get('x-empresa-id');
   let vendaIdLog = null;
   let empresaIdLog = null;
 
@@ -49,18 +50,45 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes, numeroDPS, serieDPS } = body;
 
+    // 2. Define Empresa Emissora (Prestador)
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
     empresaIdLog = empresaIdAlvo;
 
-    // === CORREÇÃO AQUI: Busca Prestador em 'Empresa' e Tomador em 'Cliente' ===
+    // 3. === CHECAGEM DE PLANO INTELIGENTE (CORREÇÃO EMPRESA ÓRFÃ) ===
+    let planHistoryId: string | null = null;
+
+    // Buscamos o "Dono" da empresa para descontar do plano dele, não do contador
+    const donoEmpresa = await prisma.user.findFirst({
+        where: { 
+            empresaId: empresaIdAlvo,
+            role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } // Ignora staff/contador
+        },
+        orderBy: { createdAt: 'asc' } // Assume que o primeiro usuário é o dono
+    });
+
+    if (donoEmpresa) {
+        // Cenário Normal: Desconta do dono
+        const planCheck = await checkPlanLimits(donoEmpresa.id, 'EMITIR');
+        if (!planCheck.allowed) {
+            return NextResponse.json({ error: planCheck.reason, code: planCheck.status }, { status: 403 });
+        }
+        planHistoryId = planCheck.historyId || null;
+    } else {
+        // Cenário "Empresa Órfã" (Sem usuário dono vinculado)
+        // Se for Staff ou Contador Vinculado, permitimos a emissão sem descontar quota (Bypass)
+        // Isso evita que o sistema trave.
+        console.warn(`[WARN] Emissão para Empresa Órfã (ID: ${empresaIdAlvo}) solicitada por ${user.email}`);
+    }
+
+    // 4. Busca Dados
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
-    const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } }); // <--- Mudou de empresa para cliente
+    const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } }); 
     
     if (!prestador) throw new Error("Prestador (Sua Empresa) não encontrado.");
     if (!tomador) throw new Error("Tomador (Cliente) não encontrado.");
 
-    // Atualiza ou Cria a Venda
+    // Atualiza ou Cria Venda
     let venda;
     const valorFloat = parseFloat(valor);
     
@@ -73,7 +101,7 @@ export async function POST(request: Request) {
         venda = await prisma.venda.create({
             data: { 
                 empresaId: prestador.id, 
-                clienteId: tomador.id, // Agora aponta para a tabela Cliente
+                clienteId: tomador.id, 
                 valor: valorFloat, 
                 descricao: descricao, 
                 status: "PROCESSANDO" 
@@ -82,7 +110,7 @@ export async function POST(request: Request) {
     }
     vendaIdLog = venda.id;
 
-    // === LÓGICA DE NUMERAÇÃO DPS ===
+    // Lógica DPS
     let dpsFinal = 0;
     const serieFinal = serieDPS || prestador.serieDPS || '900';
 
@@ -96,7 +124,7 @@ export async function POST(request: Request) {
         await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
     }
 
-    // === CNAE ===
+    // CNAE e Tributação
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
         const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
@@ -107,7 +135,6 @@ export async function POST(request: Request) {
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
 
-    // Tenta obter dados fiscais
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
          itemLc = infoEstatica.itemLC;
@@ -120,14 +147,11 @@ export async function POST(request: Request) {
         if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
-    // === ADAPTAÇÃO DO TOMADOR PARA O PADRÃO DA STRATEGY ===
-    // A Strategy antiga espera 'razaoSocial', mas o Cliente novo tem 'nome'.
-    // Fazemos um adaptador rápido aqui.
+    // Adapter Tomador
     const tomadorAdaptado = {
         ...tomador,
-        razaoSocial: tomador.nome, // Mapeia nome para razaoSocial
-        documento: tomador.documento || '', // Garante string
-        // Exterior: Se não tiver IBGE, manda zerado ou trata na Strategy
+        razaoSocial: tomador.nome, 
+        documento: tomador.documento || '',
         codigoIbge: tomador.codigoIbge || '9999999' 
     };
 
@@ -167,14 +191,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
     }
 
-    if(planCheck.historyId) await incrementUsage(planCheck.historyId);
+    // === DEBITA PLANO SE TIVER ID ===
+    if(planHistoryId) await incrementUsage(planHistoryId);
 
-    // === CRIAÇÃO DA NOTA ===
     const nota = await prisma.notaFiscal.create({
         data: {
             vendaId: venda.id,
             empresaId: prestador.id,
-            clienteId: tomador.id, // Agora usa a relação correta
+            clienteId: tomador.id, 
             numero: parseInt(resultado.notaGov!.numero) || 0,
             valor: valorFloat,
             descricao: descricao,
@@ -191,7 +215,6 @@ export async function POST(request: Request) {
 
     await createLog({ level: 'INFO', action: 'NOTA_AUTORIZADA', message: `Nota ${nota.numero} autorizada!`, empresaId: prestador.id, vendaId: venda.id });
     
-    // Processamento assíncrono (não espera)
     processarRetornoNota(nota.id, prestador.id, venda.id).catch(console.error);
 
     return NextResponse.json({ success: true, nota }, { status: 201 });
@@ -228,22 +251,21 @@ export async function GET(request: Request) {
           empresaId: empresaIdAlvo,
           ...(search && {
               OR: [
-                  { cliente: { nome: { contains: search, mode: 'insensitive' } } }, // Alterado razaoSocial -> nome
+                  { cliente: { nome: { contains: search, mode: 'insensitive' } } }, 
                   { cliente: { documento: { contains: search } } },
-                  ...( !isNaN(Number(search)) ? [{ notas: { some: { numero: { equals: Number(search) } } } }] : [] )
+                  ...( !isNaN(Number(search)) ? [{ numero: { equals: Number(search) } }] : [] )
               ]
           })
       };
 
       if (typeFilter === 'valid') {
-          whereClause.status = { in: ['CONCLUIDA', 'CANCELADA'] };
+          whereClause.status = { in: ['CONCLUIDA', 'CANCELADA', 'AUTORIZADA'] };
       }
   
       const [vendas, total] = await prisma.$transaction([
           prisma.venda.findMany({
               where: whereClause, take: limit, skip: skip, orderBy: { createdAt: 'desc' },
               include: {
-                  // Alterado razaoSocial -> nome
                   cliente: { select: { nome: true, documento: true } },
                   notas: { select: { id: true, numero: true, status: true, vendaId: true, valor: true, cnae: true, xmlBase64: true, pdfBase64: true } },
                   logs: { where: { level: 'ERRO' }, orderBy: { createdAt: 'desc' }, take: 1, select: { message: true } }
@@ -261,10 +283,9 @@ export async function GET(request: Request) {
 
           return {
             ...v,
-            // Mapeia para o front não quebrar
             cliente: { 
                 ...v.cliente, 
-                razaoSocial: v.cliente.nome // Mantém compatibilidade com front antigo
+                razaoSocial: v.cliente?.nome || 'Consumidor'
             },
             notas: v.notas.map(n => ({ ...n, codigoTribNacional: codigoTribDisplay })),
             motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
