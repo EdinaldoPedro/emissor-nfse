@@ -245,6 +245,7 @@ function EmitirNotaContent() {
 
     const userId = localStorage.getItem('userId');
     const token = localStorage.getItem('token');
+    const contextId = localStorage.getItem('empresaContextId'); // <--- 1. RECUPERAR CONTEXTO
     
     try {
       const payloadRetencoes = {
@@ -260,7 +261,12 @@ function EmitirNotaContent() {
 
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}` },
+        headers: { 
+            'Content-Type': 'application/json', 
+            'x-user-id': userId || '', 
+            'Authorization': `Bearer ${token}`,
+            'x-empresa-id': contextId || '' // <--- 2. ENVIAR CONTEXTO
+        },
         body: JSON.stringify({
           clienteId: nfData.clienteId,
           valor: nfData.valor,
