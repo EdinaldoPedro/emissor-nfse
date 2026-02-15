@@ -36,7 +36,9 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
   if (docLimpo.length === 11 && !validarCPF(docLimpo)) throw new Error("CPF Inválido.");
 
   // === 1. CONSULTA API ===
-  let dadosApi = null;
+  // CORREÇÃO AQUI: Adicionado tipagem explícita ': any'
+  let dadosApi: any = null;
+  
   if (docLimpo.length === 14) {
       console.log(`🌍 [SERVICE] Buscando dados na BrasilAPI...`);
       const res = await fetchSafe(`https://brasilapi.com.br/api/cnpj/v1/${docLimpo}`);
@@ -74,7 +76,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
   
   const ibgeP = safeString(fontePrincipal.codigoIbge);
   const ibgeS = safeString(fonteSecundaria.codigoIbge);
-  let ibgeFinal = (ibgeP && ibgeP.length === 7) ? ibgeP : ((ibgeS && ibgeS.length ===7) ? ibgeS : null);
+  let ibgeFinal = (ibgeP && ibgeP.length === 7) ? ibgeP : ((ibgeS && ibgeS.length === 7) ? ibgeS : null);
 
   const dadosFinais = {
       razaoSocial: safeString(fontePrincipal.razaoSocial || fontePrincipal.nome) || safeString(fonteSecundaria.razaoSocial || fonteSecundaria.nome) || `Empresa ${docLimpo}`,
@@ -125,7 +127,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
 
       // >> CONTADOR <<
       if (userRole === 'CONTADOR') {
-          // Verifica se já existe vínculo
+          // Verifica vinculo anterior
           if (empresaExistente) {
              const vinculo = await tx.contadorVinculo.findUnique({
                   where: { contadorId_empresaId: { contadorId: userId, empresaId: empresaExistente.id } }
@@ -133,8 +135,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
               if (vinculo) throw new Error("Empresa já vinculada ou solicitação pendente.");
           }
 
-          // === CORREÇÃO DE SEGURANÇA ===
-          // Se tem dono = PENDENTE. Se não tem dono = APROVADO.
+          // Define Status: Se tem dono = PENDENTE, Senão = APROVADO
           const statusVinculo = (empresaExistente && empresaExistente.donoUser) ? 'PENDENTE' : 'APROVADO';
 
           const empresa = await tx.empresa.upsert({
@@ -152,7 +153,6 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
               data: { contadorId: userId, empresaId: empresa.id, status: statusVinculo }
           });
 
-          // Retorna com flag de status para o controller saber qual mensagem exibir
           return { ...empresa, _statusVinculo: statusVinculo };
       } 
       
