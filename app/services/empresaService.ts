@@ -4,218 +4,197 @@ import { validarCPF } from '@/app/utils/cpf';
 
 const prisma = new PrismaClient();
 
-// Helper para garantir string limpa e logar valores estranhos
 function safeString(val: any): string | null {
     if (val === null || val === undefined) return null;
     const str = String(val).trim();
     return str === "" ? null : str;
 }
 
-export async function upsertEmpresaAndLinkUser(documento: string, userId: string, dadosManuais?: any) {
+// === HELPER NOVO: Fetch Seguro (Evita erro 403) ===
+async function fetchSafe(url: string) {
+    try {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), 10000);
+        const res = await fetch(url, {
+            signal: controller.signal,
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (compatible; EmissorNFSe/1.0; +https://brasilapi.com.br)' 
+            }
+        });
+        clearTimeout(id);
+        return res;
+    } catch (e) { return null; }
+}
+
+// Adicionado userRole para controlar a posse da empresa
+export async function upsertEmpresaAndLinkUser(documento: string, userId: string, dadosManuais?: any, userRole: string = 'COMUM') {
   const docLimpo = documento.replace(/\D/g, '');
   
-  // === LOG INICIAL ===
-  console.log(`\n🔍 [DEBUG] Iniciando Upsert para: ${docLimpo}`);
-  console.log(`📥 [DEBUG] Dados Manuais Recebidos (IBGE):`, dadosManuais?.codigoIbge);
+  console.log(`\n🔍 [SERVICE] Upsert: ${docLimpo} | Role: ${userRole}`);
 
-  // 1. Validação de Formato
-  if (docLimpo.length !== 14 && docLimpo.length !== 11) {
-      throw new Error("Documento inválido (Deve ter 11 ou 14 dígitos).");
-  }
+  if (docLimpo.length !== 14 && docLimpo.length !== 11) throw new Error("Documento inválido.");
+  if (docLimpo.length === 11 && !validarCPF(docLimpo)) throw new Error("CPF Inválido.");
 
-  // 2. Validação CPF
-  if (docLimpo.length === 11 && !validarCPF(docLimpo)) {
-      throw new Error("CPF Inválido.");
-  }
-
-  // 3. Consulta API Externa (Apenas CNPJ)
+  // === 1. CONSULTA DIRETA (Substitui a chamada localhost que falhava) ===
   let dadosApi = null;
   if (docLimpo.length === 14) {
-      try {
-        const baseUrl = process.env.URL_API_LOCAL || 'http://localhost:3000';
-        console.log(`🌍 [DEBUG] Consultando API Interna: ${baseUrl}/api/external/cnpj`);
-        
-        const res = await fetch(`${baseUrl}/api/external/cnpj`, {
-            method: 'POST', 
-            body: JSON.stringify({ cnpj: docLimpo }),
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (res.ok) {
-            dadosApi = await res.json();
-            console.log(`✅ [DEBUG] API retornou dados. IBGE da API:`, dadosApi?.codigoIbge);
-        } else {
-            console.log(`⚠️ [DEBUG] API falhou com status: ${res.status}`);
-        }
-      } catch (e) {
-        console.log("❌ [DEBUG] Erro de conexão com API externa (Timeout/Rede).");
+      console.log(`🌍 [SERVICE] Buscando dados na BrasilAPI...`);
+      const res = await fetchSafe(`https://brasilapi.com.br/api/cnpj/v1/${docLimpo}`);
+      
+      if (res && res.ok) {
+          const raw = await res.json();
+          
+          // Validação RIGOROSA de IBGE (7 dígitos)
+          let ibgeValido = null;
+          if (raw.codigo_municipio) {
+              const cod = String(raw.codigo_municipio).replace(/\D/g, '');
+              if (cod.length === 7) ibgeValido = cod;
+          }
+
+          dadosApi = {
+              razaoSocial: raw.razao_social,
+              nomeFantasia: raw.nome_fantasia || raw.razao_social,
+              email: raw.email,
+              cep: raw.cep,
+              logradouro: raw.logradouro,
+              numero: raw.numero,
+              bairro: raw.bairro,
+              cidade: raw.municipio,
+              uf: raw.uf,
+              codigoIbge: ibgeValido, 
+              cnaes: []
+          };
+
+          if (raw.cnae_fiscal) dadosApi.cnaes.push({ codigo: String(raw.cnae_fiscal), descricao: raw.cnae_fiscal_descricao, principal: true });
+          if (raw.cnaes_secundarios) {
+              raw.cnaes_secundarios.forEach((c: any) => dadosApi.cnaes.push({ codigo: String(c.codigo), descricao: c.descricao, principal: false }));
+          }
+          console.log(`✅ [SERVICE] BrasilAPI OK. IBGE: ${dadosApi.codigoIbge || 'Nulo (Buscará via CEP)'}`);
       }
   }
 
-  // === LÓGICA DE DECISÃO (MERGE) ===
+  // === MERGE DE DADOS ===
   const fontePrincipal = dadosApi || dadosManuais || {};
   const fonteSecundaria = dadosManuais || {};
-
-  const ibgePrincipal = safeString(fontePrincipal.codigoIbge);
-  const ibgeSecundario = safeString(fonteSecundaria.codigoIbge);
   
-  // Decide qual IBGE usar
-  let ibgeFinal = ibgePrincipal || ibgeSecundario;
-  console.log(`🤔 [DEBUG] Decisão IBGE: Principal(${ibgePrincipal}) || Secundário(${ibgeSecundario}) = ${ibgeFinal}`);
+  // IBGE Manual tem prioridade se for válido (7 dígitos)
+  const ibgeP = safeString(fontePrincipal.codigoIbge);
+  const ibgeS = safeString(fonteSecundaria.codigoIbge);
+  let ibgeFinal = (ibgeP && ibgeP.length === 7) ? ibgeP : ((ibgeS && ibgeS.length === 7) ? ibgeS : null);
 
   const dadosFinais = {
-      razaoSocial: safeString(fontePrincipal.razaoSocial || fontePrincipal.nome) || safeString(fonteSecundaria.razaoSocial || fonteSecundaria.nome),
+      razaoSocial: safeString(fontePrincipal.razaoSocial || fontePrincipal.nome) || safeString(fonteSecundaria.razaoSocial || fonteSecundaria.nome) || `Empresa ${docLimpo}`,
       nomeFantasia: safeString(fontePrincipal.nomeFantasia) || safeString(fonteSecundaria.nomeFantasia) || safeString(fontePrincipal.razaoSocial),
       email: safeString(fontePrincipal.email) || safeString(fonteSecundaria.email),
-      
       cep: safeString(fontePrincipal.cep) || safeString(fonteSecundaria.cep),
       logradouro: safeString(fontePrincipal.logradouro) || safeString(fonteSecundaria.logradouro),
       numero: safeString(fontePrincipal.numero) || safeString(fonteSecundaria.numero),
       bairro: safeString(fontePrincipal.bairro) || safeString(fonteSecundaria.bairro),
       cidade: safeString(fontePrincipal.cidade) || safeString(fonteSecundaria.cidade),
       uf: safeString(fontePrincipal.uf) || safeString(fonteSecundaria.uf),
-      
       codigoIbge: ibgeFinal,
-      inscricaoMunicipal: safeString(fontePrincipal.inscricaoMunicipal) || safeString(fonteSecundaria.inscricaoMunicipal)
+      inscricaoMunicipal: safeString(fontePrincipal.inscricaoMunicipal) || safeString(fonteSecundaria.inscricaoMunicipal),
+      cadastroCompleto: !!(dadosApi || dadosManuais?.razaoSocial)
   };
 
-  // === FALLBACK DE EMERGÊNCIA (Última tentativa) ===
+  // === FALLBACK VIA CEP (Se não temos IBGE válido) ===
   if (!dadosFinais.codigoIbge && dadosFinais.cep && dadosFinais.cep.length >= 8) {
-      console.log("🚨 [DEBUG] IBGE ainda nulo! Tentando ViaCEP de emergência...");
-      try {
-          const cepOnly = dadosFinais.cep.replace(/\D/g, '');
-          const resCep = await fetch(`https://viacep.com.br/ws/${cepOnly}/json/`);
+      console.log(`[SERVICE] Buscando IBGE no ViaCEP para: ${dadosFinais.cep}`);
+      const cepOnly = dadosFinais.cep.replace(/\D/g, '');
+      const resCep = await fetchSafe(`https://viacep.com.br/ws/${cepOnly}/json/`);
+      if (resCep && resCep.ok) {
           const dataCep = await resCep.json();
           if (!dataCep.erro && dataCep.ibge) {
               dadosFinais.codigoIbge = dataCep.ibge;
-              console.log(`✅ [DEBUG] ViaCEP salvou o dia! IBGE: ${dataCep.ibge}`);
-              
               if (!dadosFinais.uf) dadosFinais.uf = dataCep.uf;
               if (!dadosFinais.cidade) dadosFinais.cidade = dataCep.localidade;
-          } else {
-              console.log("❌ [DEBUG] ViaCEP também falhou ou CEP inválido.");
+              console.log(`✅ [SERVICE] IBGE recuperado: ${dadosFinais.codigoIbge}`);
           }
-      } catch(err) {
-          console.error("❌ [DEBUG] Falha de rede no ViaCEP de emergência.");
       }
   }
 
-  if (!dadosFinais.razaoSocial) {
-      throw new Error("Dados incompletos: Razão Social é obrigatória.");
-  }
-
-  console.log(`💾 [DEBUG] Preparando Gravação -> IBGE FINAL: ${dadosFinais.codigoIbge}`);
-
-  // === TRATAMENTO DE CNAES ===
+  // CNAEs
   const listaCnaesRaw = (dadosApi && dadosApi.cnaes) ? dadosApi.cnaes : (dadosManuais?.cnaes || []);
   let cnaesUnicos: any[] = [];
   if (Array.isArray(listaCnaesRaw)) {
       const mapUnicos = new Map();
       listaCnaesRaw.forEach((c: any) => {
-          const codigoLimpo = String(c.codigo).replace(/\D/g, '');
-          if (!mapUnicos.has(codigoLimpo)) {
-              mapUnicos.set(codigoLimpo, {
-                  codigo: codigoLimpo,
-                  descricao: c.descricao,
-                  principal: c.principal
-              });
-          }
+          const cod = String(c.codigo).replace(/\D/g, '');
+          mapUnicos.set(cod, { codigo: cod, descricao: c.descricao, principal: c.principal });
       });
       cnaesUnicos = Array.from(mapUnicos.values());
   }
 
-  // ==================================================================================
-  // 4. TRANSAÇÃO SEGURA: UPSERT + TAKEOVER (CLIENTE ASSUME PROPRIEDADE) + VÍNCULOS
-  // ==================================================================================
+  // === TRANSAÇÃO (LÓGICA HÍBRIDA) ===
   const empresaProcessada = await prisma.$transaction(async (tx) => {
-      
-      // A. Verifica se a empresa já existe para aplicar regras de negócio
       const empresaExistente = await tx.empresa.findUnique({
           where: { documento: docLimpo },
           include: { donoUser: true }
       });
 
-      // Lógica de Segurança (Takeover)
-      if (empresaExistente) {
-          // 1. Se já tem dono e não é o usuário atual -> ERRO (Não pode roubar empresa de outro)
-          if (empresaExistente.donoUser && empresaExistente.donoUser.id !== userId) {
-              throw new Error("Esta empresa já pertence a outro usuário cadastrado no sistema.");
-          }
-
-          // 2. Se NÃO tem dono (foi criada por contador), o cliente assume AGORA.
-          if (!empresaExistente.donoUser) {
-              console.log(`[TAKEOVER] Usuário ${userId} assumindo empresa órfã ${empresaExistente.id}`);
-              
-              // "Derruba" os contadores: Muda status de APROVADO para PENDENTE
-              // O contador perde acesso imediato e precisa solicitar novamente ao novo dono.
-              await tx.contadorVinculo.updateMany({
-                  where: { empresaId: empresaExistente.id, status: 'APROVADO' },
-                  data: { status: 'PENDENTE' }
+      // >> LÓGICA DE CONTADOR (Vínculo sem Posse) <<
+      if (userRole === 'CONTADOR') {
+          if (empresaExistente && empresaExistente.donoUser) {
+              const vinculo = await tx.contadorVinculo.findUnique({
+                  where: { contadorId_empresaId: { contadorId: userId, empresaId: empresaExistente.id } }
               });
+              if (vinculo) throw new Error("Empresa já vinculada.");
           }
+
+          // Cria ou atualiza SEM definir o donoUser
+          const empresa = await tx.empresa.upsert({
+              where: { documento: docLimpo },
+              update: { ...dadosFinais, lastApiCheck: new Date() },
+              create: { documento: docLimpo, ...dadosFinais, lastApiCheck: new Date() }
+          });
+
+          if (cnaesUnicos.length > 0 && (!empresaExistente || !empresaExistente.cadastroCompleto)) {
+              await tx.cnae.deleteMany({ where: { empresaId: empresa.id } });
+              await tx.cnae.createMany({ data: cnaesUnicos.map(c => ({ ...c, empresaId: empresa.id })) });
+          }
+
+          await tx.contadorVinculo.upsert({
+              where: { contadorId_empresaId: { contadorId: userId, empresaId: empresa.id } },
+              create: { contadorId: userId, empresaId: empresa.id, status: 'APROVADO' },
+              update: { status: 'APROVADO' }
+          });
+
+          return empresa;
+      } 
+      
+      // >> LÓGICA DE CLIENTE (Assume Posse) <<
+      else {
+          if (empresaExistente && empresaExistente.donoUser && empresaExistente.donoUser.id !== userId) {
+              throw new Error("Esta empresa já pertence a outro usuário.");
+          }
+          
+          if (empresaExistente && !empresaExistente.donoUser) {
+              // Derruba contadores se o dono real chegou
+              await tx.contadorVinculo.updateMany({ where: { empresaId: empresaExistente.id, status: 'APROVADO' }, data: { status: 'PENDENTE' } });
+          }
+
+          const empresa = await tx.empresa.upsert({
+              where: { documento: docLimpo },
+              update: { ...dadosFinais, lastApiCheck: new Date(), donoUser: { connect: { id: userId } } },
+              create: { documento: docLimpo, ...dadosFinais, lastApiCheck: new Date(), donoUser: { connect: { id: userId } } }
+          });
+
+          if (cnaesUnicos.length > 0) {
+              await tx.cnae.deleteMany({ where: { empresaId: empresa.id } });
+              await tx.cnae.createMany({ data: cnaesUnicos.map(c => ({ ...c, empresaId: empresa.id })) });
+          }
+
+          await tx.userCliente.upsert({
+              where: { userId_empresaId: { userId, empresaId: empresa.id } },
+              create: { userId, empresaId: empresa.id, apelido: dadosFinais.nomeFantasia },
+              update: {}
+          });
+          await tx.user.update({ where: { id: userId }, data: { empresaId: empresa.id } });
+
+          return empresa;
       }
-
-      // B. Executa a Gravação no Banco (Upsert) garantindo o DONO
-      const empresa = await tx.empresa.upsert({
-        where: { documento: docLimpo },
-        update: {
-            razaoSocial: dadosFinais.razaoSocial!,
-            nomeFantasia: dadosFinais.nomeFantasia,
-            email: dadosFinais.email,
-            cep: dadosFinais.cep,
-            logradouro: dadosFinais.logradouro,
-            numero: dadosFinais.numero,
-            bairro: dadosFinais.bairro,
-            cidade: dadosFinais.cidade,
-            uf: dadosFinais.uf,
-            codigoIbge: dadosFinais.codigoIbge, 
-            inscricaoMunicipal: dadosFinais.inscricaoMunicipal,
-            lastApiCheck: new Date(),
-            donoUser: { connect: { id: userId } }, // <--- VINCULA PROPRIEDADE
-            ...(cnaesUnicos.length > 0 && {
-                atividades: { deleteMany: {}, create: cnaesUnicos }
-            })
-        },
-        create: {
-            documento: docLimpo,
-            razaoSocial: dadosFinais.razaoSocial!,
-            nomeFantasia: dadosFinais.nomeFantasia,
-            email: dadosFinais.email,
-            cep: dadosFinais.cep,
-            logradouro: dadosFinais.logradouro,
-            numero: dadosFinais.numero,
-            bairro: dadosFinais.bairro,
-            cidade: dadosFinais.cidade,
-            uf: dadosFinais.uf,
-            codigoIbge: dadosFinais.codigoIbge, 
-            inscricaoMunicipal: dadosFinais.inscricaoMunicipal,
-            lastApiCheck: new Date(),
-            donoUser: { connect: { id: userId } }, // <--- VINCULA PROPRIEDADE
-            atividades: { create: cnaesUnicos }
-        }
-      });
-
-      // C. Garante o vínculo UserCliente (para acesso ao dashboard)
-      await tx.userCliente.upsert({
-          where: { userId_empresaId: { userId, empresaId: empresa.id } },
-          update: {},
-          create: {
-              userId,
-              empresaId: empresa.id,
-              apelido: dadosFinais.nomeFantasia || dadosFinais.razaoSocial
-          }
-      });
-
-      // D. Atualiza o ID da empresa principal no perfil do User
-      await tx.user.update({
-          where: { id: userId },
-          data: { empresaId: empresa.id }
-      });
-
-      return empresa;
   });
 
-  // 6. Sincronização Global de CNAEs (Fora da transação para não travar)
   if (cnaesUnicos.length > 0 && dadosFinais.codigoIbge) {
       await syncCnaesGlobalmente(cnaesUnicos, dadosFinais.codigoIbge);
   }
