@@ -3,9 +3,12 @@
 import { useEffect, useState } from 'react';
 import { Building2, Plus, Search, LogOut, Loader2, CheckCircle, Clock, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useDialog } from '@/app/contexts/DialogContext'; // <--- 1. Importa o estilo do sistema
 
 export default function ContadorDashboard() {
   const router = useRouter();
+  const { showAlert } = useDialog(); // <--- 2. Inicializa o hook visual
+  
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [filteredEmpresas, setFilteredEmpresas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +57,15 @@ export default function ContadorDashboard() {
 
   const handleAdicionarCliente = async () => {
       const cnpjLimpo = novoCnpj.replace(/\D/g, '');
-      if(cnpjLimpo.length !== 14) return alert("CNPJ deve ter 14 números.");
+      
+      if(cnpjLimpo.length !== 14) {
+          // SUBSTIUI O ALERT NATIVO PELO MODAL BONITO
+          return showAlert({ 
+              type: 'warning', 
+              title: 'CNPJ Inválido', 
+              description: "O CNPJ deve conter exatamente 14 números." 
+          });
+      }
       
       setProcessando(true);
       setStatusMsg('Consultando Receita Federal...');
@@ -78,23 +89,46 @@ export default function ContadorDashboard() {
           if(res.ok) {
               setNovoCnpj('');
               setStatusMsg('');
-              alert(data.message);
+              
+              // SUCESSO VISUAL (MODAL VERDE)
+              await showAlert({
+                  type: 'success',
+                  title: 'Sucesso!',
+                  description: data.message || 'Empresa vinculada com sucesso!'
+              });
+              
               setLoading(true);
               carregar();
           } else {
               setStatusMsg('');
-              alert(data.error || "Erro ao processar");
+              // ERRO VISUAL (MODAL VERMELHO)
+              showAlert({
+                  type: 'danger',
+                  title: 'Falha ao Vincular',
+                  description: data.error || "Ocorreu um erro ao processar sua solicitação."
+              });
           }
       } catch(e) { 
           setStatusMsg('');
-          alert("Erro de conexão."); 
+          showAlert({
+              type: 'danger',
+              title: 'Erro de Conexão',
+              description: "Não foi possível conectar ao servidor. Verifique sua internet."
+          });
       } finally { 
           setProcessando(false); 
       }
   };
 
   const acessarEmpresa = (empresaId: string, status: string) => {
-      if(status !== 'APROVADO') return;
+      if(status !== 'APROVADO') {
+          showAlert({
+              type: 'info',
+              title: 'Acesso Restrito',
+              description: "Você só pode acessar o painel quando o vínculo for aprovado."
+          });
+          return;
+      }
       
       // 1. Define o contexto da empresa que o contador vai gerenciar
       localStorage.setItem('empresaContextId', empresaId);
@@ -102,8 +136,7 @@ export default function ContadorDashboard() {
       // 2. Avisa os componentes que o contexto mudou
       window.dispatchEvent(new Event('storage'));
       
-      // 3. CORREÇÃO: Redireciona para o Dashboard do CLIENTE (onde emite nota)
-      // Antes estava indo para '/dashboard' (Admin) que dava erro/tela branca
+      // 3. Redireciona
       router.push('/cliente/dashboard');
   };
 
