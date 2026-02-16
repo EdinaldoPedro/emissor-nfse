@@ -164,7 +164,8 @@ function EmitirNotaContent() {
                          const principal = data.atividades.find((c: CnaeDB) => c.principal);
                          updates.codigoCnae = principal ? principal.codigo : data.atividades[0].codigo;
                      }
-                     updates.aliquota = data.regimeTributario === 'MEI' ? '0' : (data.aliquotaPadrao || '0');
+                     // Se não for MEI, a alíquota pode vir do padrão, mas agora só aparece se retido
+                     updates.aliquota = data.regimeTributario === 'MEI' ? '0' : (data.aliquotaPadrao || '');
                      updates.issRetido = data.issRetidoPadrao || false;
                      return { ...prev, ...updates };
                  });
@@ -239,13 +240,22 @@ function EmitirNotaContent() {
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     
+    // Validação da Alíquota de Retenção
+    if (nfData.issRetido && perfilEmpresa?.regimeTributario !== 'MEI') {
+        const aliq = parseFloat(nfData.aliquota);
+        if (!aliq || aliq < 2 || aliq > 5) {
+            dialog.showAlert("A alíquota de ISS deve ser entre 2% e 5% quando retido.");
+            return;
+        }
+    }
+
     setLoading(true);
     setProgressPercent(10);
     setProgressStatus("Preparando envio...");
 
     const userId = localStorage.getItem('userId');
     const token = localStorage.getItem('token');
-    const contextId = localStorage.getItem('empresaContextId'); // <--- 1. RECUPERAR CONTEXTO
+    const contextId = localStorage.getItem('empresaContextId'); 
     
     try {
       const payloadRetencoes = {
@@ -265,7 +275,7 @@ function EmitirNotaContent() {
             'Content-Type': 'application/json', 
             'x-user-id': userId || '', 
             'Authorization': `Bearer ${token}`,
-            'x-empresa-id': contextId || '' // <--- 2. ENVIAR CONTEXTO
+            'x-empresa-id': contextId || '' 
         },
         body: JSON.stringify({
           clienteId: nfData.clienteId,
@@ -373,17 +383,14 @@ function EmitirNotaContent() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label>
                   <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
                 </div>
-
-                {perfilEmpresa?.regimeTributario !== 'MEI' && (
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Alíquota ISS (%)</label>
-                        <input type="number" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700" value={nfData.aliquota} onChange={e => setNfData({...nfData, aliquota: e.target.value})} placeholder="Ex: 5.00" />
-                    </div>
-                )}
+                
+                {/* AQUI: Campo de Alíquota foi removido da grade principal para ser 
+                   exibido apenas se ISS Retido for marcado.
+                */}
             </div>
             
             {perfilEmpresa?.regimeTributario !== 'MEI' && (
@@ -392,11 +399,32 @@ function EmitirNotaContent() {
                         <Calculator size={16}/> Retenções e Impostos
                     </h4>
 
+                    {/* === ÁREA DE ISS (MODIFICADA) === */}
                     <div className="mb-4 bg-slate-50 p-3 rounded border">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
-                            <span className="text-sm text-slate-700 font-medium">ISS Retido pelo Tomador?</span>
-                        </label>
+                        <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
+                                <span className="text-sm text-slate-700 font-medium">ISS Retido pelo Tomador?</span>
+                            </label>
+                        </div>
+                        
+                        {/* INPUT CONDICIONAL DA ALÍQUOTA */}
+                        {nfData.issRetido && (
+                             <div className="mt-3 animate-in fade-in slide-in-from-top-2 border-t border-slate-200 pt-3">
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Alíquota ISS (%)</label>
+                                <input 
+                                    type="number" 
+                                    min="2.00" 
+                                    max="5.00" 
+                                    step="0.01"
+                                    className="w-full p-2 border rounded text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                                    value={nfData.aliquota} 
+                                    onChange={e => setNfData({...nfData, aliquota: e.target.value})} 
+                                    placeholder="Ex: 5.00" 
+                                />
+                                <p className="text-[10px] text-slate-400 mt-1">Valores permitidos para retenção: 2.00% a 5.00%</p>
+                            </div>
+                        )}
                     </div>
 
                     {permiteINSS && (
@@ -460,12 +488,32 @@ function EmitirNotaContent() {
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Revisão</h3>
             <div className="bg-slate-50 p-6 rounded-lg space-y-4 border border-slate-200">
-              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tomador:</span><span className="font-medium text-slate-900">{nfData.clienteNome}</span></div>
-              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Atividade (CNAE):</span><span className="font-medium text-slate-900">{nfData.codigoCnae}</span></div>
+              <div className="flex justify-between border-b pb-2">
+                  <span className="text-slate-500">Tomador:</span>
+                  <span className="font-medium text-slate-900">{nfData.clienteNome}</span>
+              </div>
+              
+              <div className="flex justify-between border-b pb-2">
+                  <span className="text-slate-500">Atividade (CNAE):</span>
+                  <span className="font-medium text-slate-900">{nfData.codigoCnae}</span>
+              </div>
+
+              {/* === NOVO: DESCRIÇÃO DO SERVIÇO === */}
+              <div className="border-b pb-2">
+                  <span className="text-slate-500 block mb-1 text-sm">Descrição do Serviço:</span>
+                  <div className="font-medium text-slate-700 text-sm whitespace-pre-wrap bg-white p-3 rounded border border-slate-200 shadow-sm">
+                      {nfData.servicoDescricao || "Sem descrição informada."}
+                  </div>
+              </div>
               
               {perfilEmpresa?.regimeTributario !== 'MEI' && (
                   <>
-                    <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Alíquota ISS:</span><span className="font-medium text-slate-900">{nfData.aliquota}% {nfData.issRetido ? '(Retido)' : ''}</span></div>
+                    <div className="flex justify-between border-b pb-2">
+                        <span className="text-slate-500">Alíquota ISS:</span>
+                        <span className="font-medium text-slate-900">
+                            {nfData.issRetido ? `${nfData.aliquota}% (Retido)` : 'Não Retido'}
+                        </span>
+                    </div>
                     {Object.entries(retencoes).map(([key, data]) => data.retido && (
                         <div key={key} className="flex justify-between border-b pb-2 text-red-600 text-sm">
                             <span className="uppercase">Retenção {key}:</span><span>- R$ {data.valor.toFixed(2)}</span>
@@ -474,7 +522,10 @@ function EmitirNotaContent() {
                   </>
               )}
 
-              <div className="flex justify-between pt-2"><span className="text-slate-500">Valor Bruto:</span><span className="font-bold text-slate-900">R$ {valorNumerico.toFixed(2)}</span></div>
+              <div className="flex justify-between pt-2">
+                  <span className="text-slate-500">Valor Bruto:</span>
+                  <span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span>
+              </div>
             </div>
             <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será processada no ambiente nacional.</p>
           </div>
