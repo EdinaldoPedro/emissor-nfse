@@ -1,19 +1,53 @@
 import { chromium } from 'playwright';
-import { extractCertAndKeyFromPfx } from '@/app/utils/certHelper';
 import { decrypt } from '@/app/utils/crypto';
+import forge from 'node-forge';
 
 export class NfsePortalDownloader {
+
+    /**
+     * Extrai credenciais usando a lógica Node-Forge (Compatível com seu certificado)
+     */
+    private extrairCredenciaisLocal(pfxBase64: string, senha: string) {
+        try {
+            const pfxBuffer = Buffer.from(pfxBase64, 'base64');
+            const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
+            const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, senha);
+            
+            const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
+            // @ts-ignore
+            const cert = certBags[forge.pki.oids.certBag]?.[0]?.cert;
+            
+            const keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
+            // @ts-ignore
+            let key = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag]?.[0]?.key;
+            if (!key) {
+                const keyBags2 = p12.getBags({ bagType: forge.pki.oids.keyBag });
+                // @ts-ignore
+                key = keyBags2[forge.pki.oids.keyBag]?.[0]?.key;
+            }
+
+            if (!cert || !key) throw new Error("Chaves não encontradas no PFX.");
+
+            return {
+                cert: forge.pki.certificateToPem(cert),
+                key: forge.pki.privateKeyToPem(key)
+            };
+        } catch (e: any) {
+            throw new Error(`Erro ao extrair credenciais (PDF): ${e.message}`);
+        }
+    }
 
     async downloadPdfOficial(chaveAcesso: string, pfxBase64: string, senhaCertificado: string): Promise<Buffer> {
         console.log(`[BOT] Iniciando download oficial para chave: ${chaveAcesso}`);
 
-        // === DESCRIPTOGRAFIA AQUI ===
-        const pfxReal = decrypt(pfxBase64);
-        const senhaReal = decrypt(senhaCertificado);
+        // 1. Descriptografia
+        const pfxReal = decrypt(pfxBase64) || pfxBase64; 
+        const senhaReal = decrypt(senhaCertificado) || senhaCertificado;
 
         if(!pfxReal || !senhaReal) throw new Error("Credenciais inválidas ou corrompidas.");
 
-        const credenciais = extractCertAndKeyFromPfx(pfxReal, senhaReal);
+        // 2. Extração
+        const credenciais = this.extrairCredenciaisLocal(pfxReal, senhaReal);
 
         const URL_LOGIN = "https://www.nfse.gov.br/EmissorNacional/Login?ReturnUrl=%2fEmissorNacional";
         const URL_DOWNLOAD = `https://www.nfse.gov.br/EmissorNacional/Notas/Download/DANFSe/${chaveAcesso}`;
@@ -29,8 +63,9 @@ export class NfsePortalDownloader {
                 ignoreHTTPSErrors: true,
                 clientCertificates: [{
                     origin: "https://www.nfse.gov.br",
-                    cert: credenciais.cert,
-                    key: credenciais.key
+                    // CORREÇÃO: Converter string PEM para Buffer
+                    cert: Buffer.from(credenciais.cert),
+                    key: Buffer.from(credenciais.key)
                 }]
             });
 
@@ -40,7 +75,6 @@ export class NfsePortalDownloader {
             console.log("[BOT] 1. Acessando página de Login...");
             await page.goto(URL_LOGIN, { timeout: 60000 });
             
-            // OTIMIZAÇÃO: Reduzido de 2000ms para 500ms (Apenas estabilização mínima)
             await page.waitForTimeout(500); 
 
             console.log("[BOT] Clicando na opção 'Certificado Digital'...");
@@ -53,9 +87,6 @@ export class NfsePortalDownloader {
             }
 
             console.log("[BOT] Aguardando autenticação...");
-            // OTIMIZAÇÃO CRÍTICA: Removido o wait de 5s fixo.
-            // A função waitForURL abaixo já vai esperar o tempo necessário (seja 1s ou 10s).
-            // Adicionado apenas 1s de margem de segurança para cookies.
             await page.waitForTimeout(1000); 
 
             try {
@@ -83,8 +114,7 @@ export class NfsePortalDownloader {
             const download = await downloadPromise;
             
             console.log("[BOT] ⏳ Processando stream...");
-            // OTIMIZAÇÃO: Removido o wait de 2000ms. O stream já está disponível.
-
+            
             const fileStream = await download.createReadStream();
             const chunks = [];
             for await (const chunk of fileStream) {

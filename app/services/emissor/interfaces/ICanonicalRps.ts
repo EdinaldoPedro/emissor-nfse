@@ -1,5 +1,4 @@
 export interface ICanonicalRps {
-    // ... (prestador e tomador mantidos)
     prestador: {
         id: string;
         documento: string;
@@ -32,12 +31,16 @@ export interface ICanonicalRps {
     };
     servico: {
         valor: number;
-        valorLiquido: number; // NOVO: Valor após descontos
+        valorLiquido: number;
         descricao: string;
         cnae: string;
         
         itemListaServico?: string;
         codigoTributacaoNacional?: string;
+
+        // === CAMPOS NOVOS (Correção do erro de Build) ===
+        codigoNbs?: string;                // Necessário para o Resolver de Recife
+        codigoTributacaoMunicipal?: string; // Necessário para o Resolver de Recife
         
         // ISS
         aliquotaAplicada?: number;
@@ -45,7 +48,7 @@ export interface ICanonicalRps {
         issRetido: boolean;
         tipoTributacao: string;
 
-        // RETENÇÕES FEDERAIS (NOVO)
+        // RETENÇÕES FEDERAIS
         retencoes: {
             pis: { valor: number; aliquota?: number; retido: boolean };
             cofins: { valor: number; aliquota?: number; retido: boolean };

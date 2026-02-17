@@ -6,6 +6,8 @@ import crypto from 'crypto';
 import zlib from 'zlib';
 import { NacionalAdapter } from '../adapters/NacionalAdapter';
 import { ICanonicalRps } from '../interfaces/ICanonicalRps';
+import { MeiHandler } from '../handlers/MeiHandler';
+import { SimplesNacionalHandler } from '../handlers/SimplesNacionalHandler';
 
 export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     
@@ -17,42 +19,41 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     }
 
     async executar(dados: IDadosEmissao): Promise<IResultadoEmissao> {
+        // === 0. SANITIZAÇÃO DE DADOS (CORREÇÃO DO ERRO) ===
+        // O padrão nacional rejeita número vazio. Se vier vazio, forçamos S/N.
+        if (!dados.tomador.numero || dados.tomador.numero.trim() === '') {
+            dados.tomador.numero = 'S/N';
+        }
+        // O bairro também é obrigatório. Se vazio, usamos 'Centro' ou 'Bairro'
+        if (!dados.tomador.bairro || dados.tomador.bairro.trim() === '') {
+            dados.tomador.bairro = 'Bairro';
+        }
+        // Garante que CEP tenha apenas números
+        if (dados.tomador.cep) {
+            dados.tomador.cep = dados.tomador.cep.replace(/\D/g, '');
+        }
+
         const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente } = dados;
 
         try {
             // 1. Validações Prévias
             this.validarCertificado(prestador);
             this.validarTomador(tomador);
-            if (!servico.codigoTribNacional) throw new Error("CNAE/Tributação Nacional não definido.");
 
-            // 2. Inteligência Fiscal
-            const isMei = prestador.regimeTributario === 'MEI';
-            // Garante acesso a propriedade opcional 'aliquota'
-            const aliquotaFinal = isMei ? 0 : (servico.valor > 0 ? ((servico as any).aliquota || Number(prestador.aliquotaPadrao) || 0) : 0);
-            const valorIss = (servico.valor * aliquotaFinal) / 100;
+            // 2. SELEÇÃO DO HANDLER
+            const regime = String(prestador.regimeTributario).toUpperCase();
+            let handler;
 
-            // === 3. TRATAMENTO DE RETENÇÕES ===
-            const r = (servico as any).retencoes || {}; 
-            const retencoes = {
-                pis: { valor: Number(r.pis?.valor) || 0, retido: !!r.pis?.retido },
-                cofins: { valor: Number(r.cofins?.valor) || 0, retido: !!r.cofins?.retido },
-                inss: { valor: Number(r.inss?.valor) || 0, retido: !!r.inss?.retido },
-                ir: { valor: Number(r.ir?.valor) || 0, retido: !!r.ir?.retido },
-                csll: { valor: Number(r.csll?.valor) || 0, retido: !!r.csll?.retido }
-            };
+            if (regime === 'MEI') {
+                handler = new MeiHandler();
+            } else {
+                handler = new SimplesNacionalHandler();
+            }
 
-            // Cálculo do Líquido
-            let totalRetido = 0;
-            if ((servico as any).issRetido) totalRetido += valorIss;
-            if (retencoes.pis.retido) totalRetido += retencoes.pis.valor;
-            if (retencoes.cofins.retido) totalRetido += retencoes.cofins.valor;
-            if (retencoes.inss.retido) totalRetido += retencoes.inss.valor;
-            if (retencoes.ir.retido) totalRetido += retencoes.ir.valor;
-            if (retencoes.csll.retido) totalRetido += retencoes.csll.valor;
+            // 3. Obtenção dos Dados Tributários
+            const dadosTributarios = await handler.getDadosTributarios(servico, prestador);
 
-            const valorLiquido = servico.valor - totalRetido;
-
-            // 4. Montagem do Objeto Canônico (Domínio)
+            // 4. Montagem do Objeto Canônico
             const rps: ICanonicalRps = {
                 prestador: {
                     id: prestador.id,
@@ -65,7 +66,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     },
                     configuracoes: {
                         aliquotaPadrao: Number(prestador.aliquotaPadrao),
-                        issRetido: (servico as any).issRetido !== undefined ? (servico as any).issRetido : prestador.issRetidoPadrao,
+                        issRetido: dadosTributarios.issRetido,
                         tipoTributacao: prestador.tipoTributacaoPadrao,
                         regimeEspecial: prestador.regimeEspecialTributacao
                     }
@@ -78,32 +79,13 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     endereco: {
                         cep: tomador.cep,
                         logradouro: tomador.logradouro,
-                        numero: tomador.numero,
-                        bairro: tomador.bairro || 'Centro',
+                        numero: tomador.numero, // Agora garantido que não é vazio
+                        bairro: tomador.bairro,
                         codigoIbge: tomador.codigoIbge,
                         uf: tomador.uf
                     }
                 },
-                servico: {
-                    valor: servico.valor,
-                    valorLiquido: valorLiquido,
-                    descricao: servico.descricao,
-                    cnae: servico.cnae,
-                    codigoTributacaoNacional: servico.codigoTribNacional,
-                    itemListaServico: servico.itemLc,
-                    
-                    // Repassa propriedades para o Adapter
-                    codigoNbs: (servico as any).codigoNbs,
-                    codigoTributacaoMunicipal: (servico as any).codigoTributacaoMunicipal,
-
-                    aliquotaAplicada: aliquotaFinal,
-                    valorIss: valorIss,
-                    issRetido: (servico as any).issRetido || false,
-                    tipoTributacao: prestador.tipoTributacaoPadrao || '1',
-                    
-                    retencoes: retencoes
-                } as any, 
-                
+                servico: dadosTributarios as ICanonicalRps['servico'],
                 meta: {
                     ambiente: ambiente,
                     serie: serieDPS,
@@ -122,6 +104,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             return this.transmitirXML(xmlAssinado, prestador);
 
         } catch (error: any) {
+            console.error("Erro na Strategy:", error);
             return { 
                 sucesso: false, 
                 motivo: `Erro Motor Fiscal: ${error.message}`, 
@@ -130,6 +113,8 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
         }
     }
 
+    // ... (Mantenha os métodos consultar, cancelar e assinarPedidoEvento iguais ao arquivo anterior)
+    
     async consultar(chave: string, empresa: any): Promise<IResultadoConsulta> {
         try {
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
@@ -187,7 +172,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     numeroNota: numeroReal || '0',
                     protocolo: protocoloRecuperado, 
                     xmlDistribuicao: Buffer.from(xmlRetorno).toString('base64'),
-                    pdfBase64: undefined, // CORREÇÃO: undefined ao invés de null
+                    pdfBase64: undefined,
                     motivo: 'Consulta realizada com sucesso.'
                 };
             }
