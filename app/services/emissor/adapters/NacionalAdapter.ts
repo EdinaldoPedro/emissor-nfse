@@ -6,7 +6,6 @@ export class NacionalAdapter {
         return str ? str.replace(/\D/g, '') : '';
     }
     
-    // === NOVO MÉTODO DE SEGURANÇA ===
     private escapeXml(unsafe: string | undefined): string {
         if (!unsafe) return '';
         return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -24,10 +23,10 @@ export class NacionalAdapter {
     private mapRegime(regime: string): string {
         switch(regime) {
             case 'MEI': return '2'; 
-            case 'SIMPLES': return '1'; 
+            case 'SIMPLES': return '3'; // 3 = Optante ME/EPP
             case 'LUCRO_PRESUMIDO': 
-            case 'LUCRO_REAL': return '3';
-            default: return '3';
+            case 'LUCRO_REAL': return '1'; // 1 = Não Optante
+            default: return '1';
         }
     }
 
@@ -66,9 +65,15 @@ export class NacionalAdapter {
             ? `<CPF>${docTomador}</CPF>` 
             : `<CNPJ>${docTomador}</CNPJ>`;
 
+        let regTribXml = `<opSimpNac>${opSimpNac}</opSimpNac>`;
+        if (opSimpNac === '3') {
+            regTribXml += `<regApTribSN>1</regApTribSN>`;
+        }
+        regTribXml += `<regEspTrib>${p.configuracoes?.regimeEspecial || '0'}</regEspTrib>`;
+
         let tribXml = `<tribMun>`;
-        tribXml += `<tribISSQN>${s.tipoTributacao}</tribISSQN>`;
-        tribXml += `<tpRetISSQN>${s.issRetido ? 2 : 1}</tpRetISSQN>`;
+        tribXml += `<tribISSQN>${s.tipoTributacao || '1'}</tribISSQN>`;
+        tribXml += `<tpRetISSQN>${s.issRetido ? '2' : '1'}</tpRetISSQN>`;
         
         if (s.aliquotaAplicada && s.aliquotaAplicada > 0) {
             tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
@@ -78,7 +83,17 @@ export class NacionalAdapter {
         }
         tribXml += `</tribMun>`;
         
-        tribXml += `<totTrib><indTotTrib>0</indTotTrib></totTrib>`;
+        // ==========================================
+        // CORREÇÃO APLICADA AQUI: Tratamento do totTrib
+        // ==========================================
+        if (opSimpNac === '3') {
+            // Para Simples Nacional: Envia o percentual de tributos
+            const aliquotaSN = (s.aliquotaAplicada && s.aliquotaAplicada > 0) ? s.aliquotaAplicada.toFixed(2) : '6.00';
+            tribXml += `<totTrib><pTotTribSN>${aliquotaSN}</pTotTribSN></totTrib>`;
+        } else {
+            // Para MEI (2) e Lucro Presumido/Real (1): O Schema exige o indTotTrib
+            tribXml += `<totTrib><indTotTrib>0</indTotTrib></totTrib>`;
+        }
 
         let valoresFederais = '';
         if (r.pis?.retido && (r.pis.valor || 0) > 0) valoresFederais += `<vPIS>${Number(r.pis.valor).toFixed(2)}</vPIS>`;
@@ -89,18 +104,17 @@ export class NacionalAdapter {
 
         const vLiqFinal = (s.valorLiquido !== undefined && s.valorLiquido !== null) ? s.valorLiquido : s.valor;
 
-        // APLICAÇÃO DO ESCAPE NAS STRINGS DE TEXTO LIVRE
         const razaoSocialTomador = this.escapeXml(t.razaoSocial);
         const enderecoLogradouro = this.escapeXml(t.endereco.logradouro);
         const enderecoBairro = this.escapeXml(t.endereco.bairro);
         const descricaoServico = this.escapeXml(s.descricao);
 
         let xml = `<?xml version="1.0" encoding="UTF-8"?>` + 
-        `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">` + 
+        `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01">` + 
             `<infDPS Id="${idDps}">` + 
                 `<tpAmb>${tpAmb}</tpAmb>` + 
                 `<dhEmi>${dhEmi}</dhEmi>` + 
-                `<verAplic>1.00</verAplic>` + 
+                `<verAplic>1.10</verAplic>` + 
                 `<serie>${m.serie}</serie>` + 
                 `<nDPS>${m.numero}</nDPS>` + 
                 `<dCompet>${dCompet}</dCompet>` + 
@@ -108,15 +122,18 @@ export class NacionalAdapter {
                 `<cLocEmi>${this.clean(p.endereco.codigoIbge)}</cLocEmi>` + 
                 `<prest>` + 
                     `<CNPJ>${this.clean(p.documento)}</CNPJ>` + 
-                    `<regTrib>` +
-                        `<opSimpNac>${opSimpNac}</opSimpNac>` +
-                        `<regEspTrib>${p.configuracoes.regimeEspecial || '0'}</regEspTrib>` +
-                    `</regTrib>` + 
+                    (p.inscricaoMunicipal ? `<IM>${this.clean(p.inscricaoMunicipal)}</IM>` : '') + 
+                    `<regTrib>${regTribXml}</regTrib>` + 
                 `</prest>` + 
                 `<toma>` + 
                     tagDocTomador + 
                     `<xNome>${razaoSocialTomador}</xNome>` + 
-                    `<end><endNac><cMun>${this.clean(t.endereco.codigoIbge)}</cMun><CEP>${this.clean(t.endereco.cep)}</CEP></endNac><xLgr>${enderecoLogradouro}</xLgr><nro>${t.endereco.numero}</nro><xBairro>${enderecoBairro}</xBairro></end>` + 
+                    `<end>` +
+                        `<endNac><cMun>${this.clean(t.endereco.codigoIbge)}</cMun><CEP>${this.clean(t.endereco.cep)}</CEP></endNac>` +
+                        `<xLgr>${enderecoLogradouro}</xLgr>` +
+                        `<nro>${t.endereco.numero}</nro>` +
+                        `<xBairro>${enderecoBairro}</xBairro>` +
+                    `</end>` + 
                     (t.email ? `<email>${t.email}</email>` : '') + 
                     (t.telefone ? `<fone>${this.clean(t.telefone)}</fone>` : '') + 
                 `</toma>` + 
@@ -124,9 +141,8 @@ export class NacionalAdapter {
                     `<locPrest><cLocPrestacao>${this.clean(p.endereco.codigoIbge)}</cLocPrestacao></locPrest>` + 
                     `<cServ>` + 
                         `<cTribNac>${this.clean(s.codigoTributacaoNacional)}</cTribNac>` +
-                        `<xDescServ>${descricaoServico}</xDescServ>` +
-                        (s.codigoNbs ? `<cNBS>${this.clean(s.codigoNbs)}</cNBS>` : '') +
-                        (s.codigoTributacaoMunicipal ? `<cTribMun>${this.clean(s.codigoTributacaoMunicipal)}</cTribMun>` : '') +
+                        (s.codigoTributacaoMunicipal ? `<cTribMun>${this.clean(s.codigoTributacaoMunicipal)}</cTribMun>` : '') + 
+                        `<xDescServ>${descricaoServico}</xDescServ>` + 
                     `</cServ>` + 
                 `</serv>` + 
                 `<valores>` +
@@ -134,7 +150,8 @@ export class NacionalAdapter {
                     `<trib>${tribXml}</trib>` +
                     valoresFederais;
 
-        if (p.regimeTributario !== 'MEI') {
+        const temRetencao = s.issRetido || valoresFederais !== '';
+        if (temRetencao || (p.regimeTributario !== 'MEI' && p.regimeTributario !== 'SIMPLES')) {
             xml += `<vLiq>${Number(vLiqFinal).toFixed(2)}</vLiq>`;
         }
 

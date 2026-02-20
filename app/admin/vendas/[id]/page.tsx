@@ -54,7 +54,6 @@ const formatLogDetails = (rawDetails: any) => {
         if (!rawDetails) return null;
         let data = rawDetails;
 
-        // 1. Tenta parsear JSON
         if (typeof data === 'string') {
             try { 
                 let parsed = JSON.parse(data);
@@ -63,19 +62,16 @@ const formatLogDetails = (rawDetails: any) => {
                 }
                 data = parsed;
             } catch { 
-                // Se falhar o parse, verifica se é XML
                 if (data.trim().startsWith('<')) return formatXml(data);
                 return data; 
             }
         }
 
-        // 2. EXTRAÇÃO INTELIGENTE DE XML
         if (data?.xmlGerado) return formatXml(data.xmlGerado);
         if (data?.xmlOriginal) return formatXml(data.xmlOriginal);
         if (data?.xml) return formatXml(data.xml);
         if (data?.dpsXmlGZipB64) return `[Arquivo GZIP - Tamanho: ${data.dpsXmlGZipB64.length} bytes]`;
 
-        // 3. JSON Comum
         return JSON.stringify(data, null, 2);
 
     } catch (e) { return String(rawDetails); }
@@ -151,13 +147,12 @@ export default function DetalheVendaCompleto() {
   const [isEditing, setIsEditing] = useState(false);
   const [activeTab, setActiveTab] = useState<'dados' | 'xml' | 'logs'>('dados');
   
-  // === ESTADO DO FORMULÁRIO (Incluindo DPS) ===
   const [formData, setFormData] = useState({ 
     descricao: '', 
     valor: '', 
     cnae: '',
-    numeroDPS: '', // Novo
-    serieDPS: ''   // Novo
+    numeroDPS: '', 
+    serieDPS: ''   
   });
 
   const fetchVenda = (silent = false) => {
@@ -166,14 +161,11 @@ export default function DetalheVendaCompleto() {
         .then(r => r.json())
         .then(data => {
             setVenda(data);
-            
-            // Só atualiza o form se não estiver editando, para não sobrescrever o que o usuário digita
             if (!isEditing && !silent) {
                 let cnaeSalvo = data.notas?.[0]?.cnae || '';
                 let dpsSalvo = '';
                 let serieSalva = '';
                 
-                // Tenta recuperar dados (CNAE e DPS) dos logs de tentativas anteriores
                 try {
                     const logComPayload = data.logs.find((l: any) => l.details && (l.details.includes('payloadOriginal') || l.details.includes('codigoCnae')));
                     if (logComPayload) {
@@ -181,7 +173,6 @@ export default function DetalheVendaCompleto() {
                         if (raw.payloadOriginal) raw = raw.payloadOriginal;
                         
                         cnaeSalvo = cnaeSalvo || raw?.servico?.cnae || raw?.servico?.codigoCnae || '';
-                        // Pega o número que foi tentado
                         dpsSalvo = raw?.numeroDPS || '';
                         serieSalva = raw?.serieDPS || '';
                     }
@@ -202,7 +193,6 @@ export default function DetalheVendaCompleto() {
 
   useEffect(() => { fetchVenda(); }, [id]);
   
-  // Polling para atualizar status se estiver processando
   useEffect(() => {
       let interval: NodeJS.Timeout;
       if (venda && venda.status === 'PROCESSANDO') { interval = setInterval(() => fetchVenda(true), 3000); }
@@ -221,14 +211,12 @@ export default function DetalheVendaCompleto() {
       const payloadEnvio = { ...formData, valor: parseValor(formData.valor) };
       
       try {
-          // Atualiza dados básicos da venda
           await fetch(`/api/admin/vendas/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadEnvio) });
           
           if (reenviar) {
               const resRetry = await fetch('/api/notas/retry', { 
                   method: 'POST', 
                   headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '' }, 
-                  // Envia também numeroDPS e serieDPS para a API de retry usar
                   body: JSON.stringify({ vendaId: id, dadosAtualizados: payloadEnvio }) 
               });
               
@@ -285,23 +273,32 @@ export default function DetalheVendaCompleto() {
                       venda.status === 'ERRO_EMISSAO' ? 'bg-red-100 text-red-700 border-red-200' : 
                       venda.status === 'PROCESSANDO' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-700';
 
-  // --- LÓGICA DE EXTRAÇÃO DO PAYLOAD PARA EXIBIÇÃO (JSON PRETTY) ---
+  // === LÓGICA DE EXTRAÇÃO CORRIGIDA ===
   let prettyPayload = "// Payload indisponível";
+  let xmlExibicao = null; // Variável para o XML na tela
   let xmlEnvioParaDownload = null;
 
   try { 
+      // Busca o log de EMISSAO_INICIADA (ou os outros caso seja um log antigo)
       const logComPayload = venda.logs.find((l: any) => 
-          (l.action === 'NOTA_AUTORIZADA' || l.action === 'FALHA_EMISSAO' || l.action === 'DPS_GERADA') 
+          (l.action === 'EMISSAO_INICIADA' || l.action === 'NOTA_AUTORIZADA' || l.action === 'FALHA_EMISSAO' || l.action === 'DPS_GERADA') 
           && l.details
       );
 
       if (logComPayload) {
           let raw = typeof logComPayload.details === 'string' ? JSON.parse(logComPayload.details) : logComPayload.details;
+          
+          // Extrai o XML
+          if (raw.xmlGerado) {
+              xmlEnvioParaDownload = raw.xmlGerado;
+              xmlExibicao = formatXml(raw.xmlGerado);
+          }
+
+          // Extrai o Payload Original
           if (raw.payloadOriginal) {
                raw = raw.payloadOriginal;
           }
           prettyPayload = JSON.stringify(raw, null, 2); 
-          if (raw?.xmlGerado) xmlEnvioParaDownload = raw.xmlGerado;
       } else if (venda.payloadJson) {
           const raw = JSON.parse(venda.payloadJson);
           prettyPayload = JSON.stringify(raw, null, 2);
@@ -352,7 +349,6 @@ export default function DetalheVendaCompleto() {
                     <section className={`bg-white rounded-xl shadow-sm border p-6 transition-all ${isEditing ? 'border-blue-300 ring-4 ring-blue-50' : 'border-slate-200'}`}>
                         <h3 className="text-sm font-bold text-slate-500 uppercase mb-4 flex items-center gap-2 border-b pb-2"><Building size={16}/> Dados do Serviço</h3>
                         <div className="space-y-4">
-                            {/* === NOVOS CAMPOS DE CONTROLE DPS (SÓ APARECEM NA EDIÇÃO) === */}
                             {isEditing && (
                                 <div className="grid grid-cols-2 gap-6 bg-yellow-50 p-4 rounded-lg border border-yellow-200">
                                     <div className="col-span-2 text-xs font-bold text-yellow-800 uppercase mb-1 flex items-center gap-1">
@@ -400,34 +396,50 @@ export default function DetalheVendaCompleto() {
               )}
 
               {activeTab === 'xml' && (
-                  <div className="space-y-6">
-                      <div className="bg-slate-900 rounded-xl shadow-lg overflow-hidden border border-slate-700">
-                          <div className="bg-slate-800 px-4 py-2 border-b border-slate-700 flex justify-between items-center">
-                              <span className="text-xs text-blue-400 font-bold uppercase flex items-center gap-2"><FileJson size={14}/> Payload de Envio (JSON)</span>
-                              <div className="flex gap-2">
-                                  {xmlEnvioParaDownload && (
-                                    <button onClick={() => downloadFile(xmlEnvioParaDownload, `dps-${venda.id}.xml`)} className="text-xs text-green-400 hover:text-white flex items-center gap-1">
-                                        <Download size={12}/> BAIXAR XML
-                                    </button>
-                                  )}
-                                  <button onClick={() => navigator.clipboard.writeText(prettyPayload)} className="text-xs text-slate-400 hover:text-white flex items-center gap-1"><Copy size={12}/> Copiar</button>
-                              </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in duration-300">
+                      
+                      {/* COLUNA ESQUERDA: XML (COM O NOVO xmlExibicao APLICADO) */}
+                      <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                              <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                  <Code size={14} className="text-orange-500"/> Estrutura XML
+                              </span>
+                              {xmlEnvioParaDownload && (
+                                  <button 
+                                      onClick={() => downloadFile(xmlEnvioParaDownload, `nota-${venda.id}.xml`)}
+                                      className="text-[10px] font-bold text-blue-600 hover:underline uppercase"
+                                  >
+                                      Baixar XML
+                                  </button>
+                              )}
                           </div>
-                          <pre className="p-4 text-xs font-mono text-green-400 overflow-auto max-h-[400px] custom-scrollbar whitespace-pre-wrap">{prettyPayload}</pre>
+                          <div className="bg-slate-900 rounded-xl shadow-inner border border-slate-700 p-4 overflow-auto text-xs font-mono text-orange-200 h-[600px] custom-scrollbar">
+                              <pre className="whitespace-pre-wrap leading-relaxed">
+                                  {xmlExibicao || formatXml(venda.xmlNota) || formatXml(venda.xmlErro) || '// XML ainda não gerado para esta tentativa'}
+                              </pre>
+                          </div>
                       </div>
-                      {(venda.notas?.[0]?.xmlBase64 || venda.xmlErro) ? (
-                          <div className="bg-slate-900 rounded-xl shadow-lg overflow-hidden border border-slate-700">
-                              <div className="bg-slate-800 px-4 py-2 border-b border-slate-700 flex justify-between items-center">
-                                  <span className="text-xs text-orange-400 font-bold uppercase flex items-center gap-2"><Code size={14}/> XML de Retorno (Sefaz)</span>
-                                  {venda.notas?.[0]?.xmlBase64 && (
-                                    <button onClick={() => downloadFile(atob(venda.notas[0].xmlBase64), `nota-${venda.notas[0].numero}.xml`)} className="text-xs text-orange-400 hover:text-white flex items-center gap-1">
-                                        <Download size={12}/> BAIXAR
-                                    </button>
-                                  )}
-                              </div>
-                              <pre className="p-4 text-xs font-mono text-orange-200 overflow-auto max-h-[400px] custom-scrollbar whitespace-pre-wrap">{venda.notas?.[0]?.xmlBase64 ? atob(venda.notas[0].xmlBase64) : venda.xmlErro}</pre>
+
+                      {/* COLUNA DIREITA: PAYLOAD (COM WRAP APLICADO) */}
+                      <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                              <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                  <FileJson size={14} className="text-blue-500"/> Payload JSON
+                              </span>
+                              <button 
+                                  onClick={() => navigator.clipboard.writeText(prettyPayload)}
+                                  className="text-[10px] font-bold text-slate-400 hover:text-slate-600 uppercase"
+                              >
+                                  Copiar JSON
+                              </button>
                           </div>
-                      ) : <div className="p-8 text-center border-2 border-dashed border-slate-300 rounded-xl text-slate-400 bg-slate-50">Nenhum XML de retorno disponível ainda.</div>}
+                          <div className="bg-[#0f172a] rounded-xl shadow-inner border border-slate-800 p-4 overflow-auto text-xs font-mono text-emerald-400 h-[600px] custom-scrollbar">
+                              <pre className="whitespace-pre-wrap leading-relaxed">
+                                  {prettyPayload}
+                              </pre>
+                          </div>
+                      </div>
+
                   </div>
               )}
 

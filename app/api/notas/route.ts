@@ -10,32 +10,20 @@ import { validateRequest } from "@/app/utils/api-security";
 
 const prisma = new PrismaClient();
 
-// === FUNÇÃO AUXILIAR DE CONTEXTO ===
 async function getEmpresaContexto(user: any, contextId: string | null) {
-    // 1. Staff tem acesso livre se enviar o ID
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-    
     if (contextId && contextId !== 'null' && contextId !== 'undefined') {
         if (isStaff) return contextId;
-
-        // 2. Contador precisa de vínculo aprovado
         const vinculo = await prisma.contadorVinculo.findUnique({
             where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
         });
-        
         if (vinculo && vinculo.status === 'APROVADO') return contextId;
-        
-        // Se pediu contexto mas não tem permissão -> Retorna null (Negado)
         return null; 
     }
-    
-    // 3. Padrão: Empresa do próprio usuário
     return user.empresaId;
 }
 
-// === POST: EMISSÃO DE NOTA ===
 export async function POST(request: Request) {
-  // 1. Segurança Básica
   const { targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   
@@ -50,48 +38,47 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes, numeroDPS, serieDPS } = body;
 
-    // 2. Define Empresa Emissora (Prestador)
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
     empresaIdLog = empresaIdAlvo;
 
-    // 3. === CHECAGEM DE PLANO INTELIGENTE (CORREÇÃO EMPRESA ÓRFÃ) ===
-    let planHistoryId: string | null = null;
+    // --- PRÉ-VALIDAÇÕES (Cenários 4 e 5) ANTES DE CRIAR A VENDA ---
+    const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
+    if (!prestador || !prestador.documento) {
+        return NextResponse.json({ 
+            error: "Cadastro incompleto.", 
+            userAction: "Você ainda não concluiu o cadastro da sua Empresa. Acesse as Configurações para preencher seus dados básicos." 
+        }, { status: 400 });
+    }
 
-    // Buscamos o "Dono" da empresa para descontar do plano dele, não do contador
+    if (!prestador.certificadoA1) {
+        return NextResponse.json({ 
+            error: "Certificado não encontrado.", 
+            userAction: "Para emitir notas, você precisa de um Certificado Digital (e-CNPJ). Acesse as Configurações da Empresa e faça o upload do seu certificado A1." 
+        }, { status: 400 });
+    }
+
+    const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } }); 
+    if (!tomador) throw new Error("Tomador (Cliente) não encontrado.");
+
+    let planHistoryId: string | null = null;
     const donoEmpresa = await prisma.user.findFirst({
-        where: { 
-            empresaId: empresaIdAlvo,
-            role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } // Ignora staff/contador
-        },
-        orderBy: { createdAt: 'asc' } // Assume que o primeiro usuário é o dono
+        where: { empresaId: empresaIdAlvo, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
+        orderBy: { createdAt: 'asc' }
     });
 
     if (donoEmpresa) {
-        // Cenário Normal: Desconta do dono
         const planCheck = await checkPlanLimits(donoEmpresa.id, 'EMITIR');
         if (!planCheck.allowed) {
             return NextResponse.json({ error: planCheck.reason, code: planCheck.status }, { status: 403 });
         }
         planHistoryId = planCheck.historyId || null;
-    } else {
-        // Cenário "Empresa Órfã" (Sem usuário dono vinculado)
-        // Se for Staff ou Contador Vinculado, permitimos a emissão sem descontar quota (Bypass)
-        // Isso evita que o sistema trave.
-        console.warn(`[WARN] Emissão para Empresa Órfã (ID: ${empresaIdAlvo}) solicitada por ${user.email}`);
     }
 
-    // 4. Busca Dados
-    const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
-    const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } }); 
-    
-    if (!prestador) throw new Error("Prestador (Sua Empresa) não encontrado.");
-    if (!tomador) throw new Error("Tomador (Cliente) não encontrado.");
-
-    // Atualiza ou Cria Venda
-    let venda;
     const valorFloat = parseFloat(valor);
+    let venda;
     
+    // SÓ CRIA A VENDA SE PASSOU NAS PRÉ-VALIDAÇÕES
     if (vendaId) {
         venda = await prisma.venda.update({
             where: { id: vendaId },
@@ -99,32 +86,26 @@ export async function POST(request: Request) {
         });
     } else {
         venda = await prisma.venda.create({
-            data: { 
-                empresaId: prestador.id, 
-                clienteId: tomador.id, 
-                valor: valorFloat, 
-                descricao: descricao, 
-                status: "PROCESSANDO" 
-            }
+            data: { empresaId: prestador.id, clienteId: tomador.id, valor: valorFloat, descricao: descricao, status: "PROCESSANDO" }
         });
     }
     vendaIdLog = venda.id;
 
-    // Lógica DPS
     let dpsFinal = 0;
     const serieFinal = serieDPS || prestador.serieDPS || '900';
 
     if (numeroDPS) {
         dpsFinal = parseInt(numeroDPS);
-        if (dpsFinal > (prestador.ultimoDPS || 0)) {
+        if (dpsFinal > (prestador.ultimoDPS || 0) && prestador.ambiente === 'PRODUCAO') {
             await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
         }
     } else {
         dpsFinal = (prestador.ultimoDPS || 0) + 1;
-        await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
+        if (prestador.ambiente === 'PRODUCAO') {
+            await prisma.empresa.update({ where: { id: prestador.id }, data: { ultimoDPS: dpsFinal } });
+        }
     }
 
-    // CNAE e Tributação
     let cnaeFinal = codigoCnae ? String(codigoCnae).replace(/\D/g, '') : '';
     if (!cnaeFinal) {
         const cnaeBanco = await prisma.cnae.findFirst({ where: { empresaId: prestador.id, principal: true } });
@@ -134,44 +115,27 @@ export async function POST(request: Request) {
 
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
-
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
          itemLc = infoEstatica.itemLC;
          codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
     }
-
     const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
     if (regraGlobal) {
         if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
         if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
     }
 
-    // Adapter Tomador
-    const tomadorAdaptado = {
-        ...tomador,
-        razaoSocial: tomador.nome, 
-        documento: tomador.documento || '',
-        codigoIbge: tomador.codigoIbge || '9999999' 
-    };
+    const tomadorAdaptado = { ...tomador, razaoSocial: tomador.nome, documento: tomador.documento || '', codigoIbge: tomador.codigoIbge || '9999999' };
 
     const dadosParaEstrategia = {
-        prestador,
-        tomador: tomadorAdaptado,
-        venda,
+        prestador, tomador: tomadorAdaptado, venda,
         servico: {
-            valor: valorFloat,
-            descricao,
-            cnae: cnaeFinal,
-            itemLc,
-            codigoTribNacional,
-            aliquota: aliquota ? parseFloat(aliquota) : 0, 
-            issRetido: !!issRetido,
-            retencoes: retencoes
+            valor: valorFloat, descricao, cnae: cnaeFinal, itemLc, codigoTribNacional,
+            aliquota: aliquota ? parseFloat(aliquota) : 0, issRetido: !!issRetido, retencoes: retencoes
         },
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
-        numeroDPS: dpsFinal,
-        serieDPS: serieFinal
+        numeroDPS: dpsFinal, serieDPS: serieFinal
     };
 
     const strategy = EmissorFactory.getStrategy(prestador);
@@ -179,42 +143,71 @@ export async function POST(request: Request) {
 
     await createLog({
         level: 'INFO', action: 'EMISSAO_INICIADA',
-        message: `Iniciando transmissão DPS ${dpsFinal} (Série ${serieFinal}).`,
-        empresaId: prestador.id,
-        vendaId: venda.id,
+        message: `Iniciando transmissão DPS ${dpsFinal} (Série ${serieFinal}) - Ambiente: ${prestador.ambiente}.`,
+        empresaId: prestador.id, vendaId: venda.id,
         details: { payloadOriginal: dadosParaEstrategia, xmlGerado: resultado.xmlGerado }
     });
 
-    if (!resultado.sucesso) {
-        await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
-        await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
-        return NextResponse.json({ error: "Emissão falhou.", details: resultado.erros }, { status: 400 });
+    // --- TRATAMENTO DE ERROS INTELIGENTE (Cenários 2, 3 e 0) ---
+   if (!resultado.sucesso) {
+        let customUserAction = null;
+        const errorStr = JSON.stringify(resultado.erros).toLowerCase();
+
+        if (errorStr.includes('inscrição municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
+            customUserAction = "Sua Inscrição Municipal está ausente ou incorreta. Por favor, acesse as Configurações da Empresa e atualize o número da sua I.M.";
+        } 
+        else if (errorStr.includes('já utilizado') || errorStr.includes('já existe') || errorStr.includes('duplicado') || errorStr.includes('e0171') || errorStr.includes('e0041')) {
+            customUserAction = `O número de DPS ${dpsFinal} já foi utilizado. Por favor, altere o número do DPS para o próximo sequencial disponível.`;
+        }
+
+        if (customUserAction) {
+            // CENÁRIO 2 e 3: Erro contornável. Apaga a venda e os logs gerados para não sujar o sistema.
+            if (!vendaId) { // Só apaga se for uma venda nova. Se for reenvio, mantém.
+                await prisma.systemLog.deleteMany({ where: { vendaId: venda.id } });
+                await prisma.venda.delete({ where: { id: venda.id } });
+            }
+        } else {
+            // CENÁRIO 0: Erro Geral. Aí sim mantemos a venda registrada como ERRO.
+            await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
+            await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
+        }
+
+        return NextResponse.json({ 
+            error: "Emissão falhou.", 
+            details: resultado.erros,
+            userAction: customUserAction 
+        }, { status: 400 });
     }
 
-    // === DEBITA PLANO SE TIVER ID ===
+    // --- CENÁRIO 1: BYPASS DE HOMOLOGAÇÃO ---
+    if (prestador.ambiente === 'HOMOLOGACAO') {
+        // Como é apenas validação, apagamos a "venda fantasma" para não constar nos relatórios financeiros
+        if (!vendaId) { 
+            await prisma.systemLog.deleteMany({ where: { vendaId: venda.id } });
+            await prisma.venda.delete({ where: { id: venda.id } });
+        }
+
+        return NextResponse.json({ 
+            success: true, 
+            isHomologation: true, 
+            message: "Tudo Certo! Sua nota é válida. Acesse as Configurações e mude para PRODUÇÃO para emitir com valor fiscal." 
+        }, { status: 200 });
+    }
+
+    // === FLUXO DE PRODUÇÃO NORMAL ===
     if(planHistoryId) await incrementUsage(planHistoryId);
 
     const nota = await prisma.notaFiscal.create({
         data: {
-            vendaId: venda.id,
-            empresaId: prestador.id,
-            clienteId: tomador.id, 
-            numero: parseInt(resultado.notaGov!.numero) || 0,
-            valor: valorFloat,
-            descricao: descricao,
-            prestadorCnpj: prestador.documento.replace(/\D/g, ''),
-            tomadorCnpj: tomador.documento ? tomador.documento.replace(/\D/g, '') : 'EXTERIOR',
-            status: 'AUTORIZADA',
-            chaveAcesso: resultado.notaGov!.chave,
-            protocolo: resultado.notaGov!.protocolo, 
-            xmlBase64: resultado.notaGov!.xml,
-            cnae: cnaeFinal,
-            dataEmissao: new Date()
+            vendaId: venda.id, empresaId: prestador.id, clienteId: tomador.id, 
+            numero: parseInt(resultado.notaGov!.numero) || 0, valor: valorFloat, descricao: descricao,
+            prestadorCnpj: prestador.documento.replace(/\D/g, ''), tomadorCnpj: tomador.documento ? tomador.documento.replace(/\D/g, '') : 'EXTERIOR',
+            status: 'AUTORIZADA', chaveAcesso: resultado.notaGov!.chave, protocolo: resultado.notaGov!.protocolo, 
+            xmlBase64: resultado.notaGov!.xml, cnae: cnaeFinal, dataEmissao: new Date()
         }
     });
 
     await createLog({ level: 'INFO', action: 'NOTA_AUTORIZADA', message: `Nota ${nota.numero} autorizada!`, empresaId: prestador.id, vendaId: venda.id });
-    
     processarRetornoNota(nota.id, prestador.id, venda.id).catch(console.error);
 
     return NextResponse.json({ success: true, nota }, { status: 201 });
@@ -225,6 +218,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+// ... GET (Listagem) Mantido igual
 
 // === GET: LISTAGEM DE NOTAS ===
 export async function GET(request: Request) {

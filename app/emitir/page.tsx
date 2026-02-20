@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Users, Briefcase, Loader2, Home, UserPlus } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Users, Briefcase, Loader2, Home, UserPlus, Settings, AlertTriangle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import Link from "next/link";
@@ -60,36 +60,67 @@ function EmitirNotaContent() {
       csll: { retido: false, aliquota: '1.00', valor: 0 }
   });
 
-  // === TRATAMENTO DE ERROS INTELIGENTE ===
+  // === TRATAMENTO DE ERROS INTELIGENTE (ATUALIZADO PARA OS 5 CENÁRIOS) ===
   const tratarErroEmissao = async (respostaErro: any) => {
+      // 1. O Backend mandou uma "User Action" específica (Cadastro Incompleto, Certificado, IM, DPS)?
+      if (respostaErro.userAction) {
+          const actionText = respostaErro.userAction;
+
+          // Cenário 4 e 5: Faltou algo no cadastro (Certificado ou Dados Básicos)
+          if (actionText.includes("Certificado Digital") || actionText.includes("Cadastro incompleto")) {
+              const irConfig = await dialog.showConfirm({
+                  type: 'danger',
+                  title: 'Atenção ao Cadastro',
+                  description: actionText,
+                  confirmText: 'Ir para Configurações',
+                  cancelText: 'Mais tarde'
+              });
+              if (irConfig) router.push('/configuracoes');
+              return;
+          }
+
+          // Cenário 2: Erro de Inscrição Municipal na Sefaz
+          if (actionText.includes("Inscrição Municipal")) {
+              const irConfig = await dialog.showConfirm({
+                  type: 'danger',
+                  title: 'Inscrição Municipal (I.M)',
+                  description: actionText,
+                  confirmText: 'Atualizar I.M Agora',
+                  cancelText: 'Mais tarde'
+              });
+              if (irConfig) router.push('/configuracoes');
+              return;
+          }
+
+          // Cenário 3: DPS Duplicado
+          if (actionText.includes("número de DPS")) {
+               await dialog.showAlert({ 
+                  type: 'warning', 
+                  title: 'Numeração Duplicada', 
+                  description: actionText 
+              });
+              // Opcional: Se quiser que ele não saia da tela, comente a linha abaixo. 
+              // Mas o ideal é voltar pro dashboard para ele não gerar duplicidade.
+              router.push('/cliente/dashboard');
+              return;
+          }
+      }
+
+      // Cenário 0: Erro Genérico / Técnico (Se o backend não previu)
       let msgTecnica = "";
       if (Array.isArray(respostaErro.details)) {
           msgTecnica = respostaErro.details.map((d: any) => d.mensagem || JSON.stringify(d)).join('. ');
       } else if (typeof respostaErro.details === 'string') {
           msgTecnica = respostaErro.details;
       } else {
-          msgTecnica = respostaErro.error || "Erro desconhecido.";
+          msgTecnica = respostaErro.error || "Erro desconhecido ao comunicar com a Prefeitura.";
       }
 
-      if (msgTecnica.includes("Certificado Digital não encontrado") || msgTecnica.includes("Senha do certificado")) {
-          const irConfig = await dialog.showConfirm({
-              type: 'danger',
-              title: 'Certificado Digital Inválido',
-              description: 'Para emitir notas, você precisa configurar seu Certificado A1.',
-              confirmText: 'Configurar Agora',
-              cancelText: 'Mais tarde'
-          });
-          if (irConfig) router.push('/configuracoes');
-          return;
-      }
-
-      if (msgTecnica.includes("DPS já informado") || msgTecnica.includes("número da nota")) {
-          await dialog.showAlert({ type: 'warning', title: 'Numeração Duplicada', description: 'O sistema ajustará a numeração automaticamente na próxima tentativa.' });
-          router.push('/cliente/dashboard');
-          return;
-      }
-
-      await dialog.showAlert({ type: 'danger', title: 'Falha na Emissão', description: `O servidor retornou: ${msgTecnica}` });
+      await dialog.showAlert({ 
+          type: 'danger', 
+          title: 'Falha na Emissão', 
+          description: `Houve uma rejeição na Prefeitura: ${msgTecnica}` 
+      });
       router.push('/cliente/dashboard');
   };
 
@@ -164,7 +195,6 @@ function EmitirNotaContent() {
                          const principal = data.atividades.find((c: CnaeDB) => c.principal);
                          updates.codigoCnae = principal ? principal.codigo : data.atividades[0].codigo;
                      }
-                     // Se não for MEI, a alíquota pode vir do padrão, mas agora só aparece se retido
                      updates.aliquota = data.regimeTributario === 'MEI' ? '0' : (data.aliquotaPadrao || '');
                      updates.issRetido = data.issRetidoPadrao || false;
                      return { ...prev, ...updates };
@@ -293,8 +323,26 @@ function EmitirNotaContent() {
       if (res.ok) {
         setProgressPercent(100);
         setProgressStatus("Concluído!");
-        await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida e autorizada.' });
-        router.push('/cliente/dashboard');
+
+        // --- CENÁRIO 1: BYPASS DE HOMOLOGAÇÃO ---
+        if (resposta.isHomologation) {
+            const irConfig = await dialog.showConfirm({
+                type: 'success',
+                title: 'Tudo certo em Homologação!',
+                description: 'As configurações da sua nota estão perfeitas. Para emitir com valor fiscal real, mude o ambiente da sua empresa para PRODUÇÃO nas configurações.',
+                confirmText: 'Mudar para Produção',
+                cancelText: 'Voltar ao Início'
+            });
+            if (irConfig) {
+                 router.push('/configuracoes');
+            } else {
+                 router.push('/cliente/dashboard');
+            }
+        } else {
+            // Cenário Produção Normal
+            await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida e autorizada na Prefeitura.' });
+            router.push('/cliente/dashboard');
+        }
       } else {
         await tratarErroEmissao(resposta);
       }
@@ -387,10 +435,6 @@ function EmitirNotaContent() {
                   <label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label>
                   <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
                 </div>
-                
-                {/* AQUI: Campo de Alíquota foi removido da grade principal para ser 
-                   exibido apenas se ISS Retido for marcado.
-                */}
             </div>
             
             {perfilEmpresa?.regimeTributario !== 'MEI' && (
@@ -399,7 +443,6 @@ function EmitirNotaContent() {
                         <Calculator size={16}/> Retenções e Impostos
                     </h4>
 
-                    {/* === ÁREA DE ISS (MODIFICADA) === */}
                     <div className="mb-4 bg-slate-50 p-3 rounded border">
                         <div className="flex items-center justify-between">
                             <label className="flex items-center gap-2 cursor-pointer">
@@ -408,7 +451,6 @@ function EmitirNotaContent() {
                             </label>
                         </div>
                         
-                        {/* INPUT CONDICIONAL DA ALÍQUOTA */}
                         {nfData.issRetido && (
                              <div className="mt-3 animate-in fade-in slide-in-from-top-2 border-t border-slate-200 pt-3">
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Alíquota ISS (%)</label>
@@ -498,7 +540,6 @@ function EmitirNotaContent() {
                   <span className="font-medium text-slate-900">{nfData.codigoCnae}</span>
               </div>
 
-              {/* === NOVO: DESCRIÇÃO DO SERVIÇO === */}
               <div className="border-b pb-2">
                   <span className="text-slate-500 block mb-1 text-sm">Descrição do Serviço:</span>
                   <div className="font-medium text-slate-700 text-sm whitespace-pre-wrap bg-white p-3 rounded border border-slate-200 shadow-sm">
@@ -527,7 +568,17 @@ function EmitirNotaContent() {
                   <span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span>
               </div>
             </div>
-            <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será processada no ambiente nacional.</p>
+
+            {/* Aviso de Ambiente */}
+            {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? (
+                 <div className="bg-orange-50 border border-orange-200 p-3 rounded-lg flex items-start gap-2 text-sm text-orange-800 font-medium">
+                     <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                     <p>Você está no ambiente de <strong>HOMOLOGAÇÃO</strong>. A nota será apenas validada pela prefeitura, sem valor fiscal. Se quiser emitir com valor, mude para Produção nas configurações.</p>
+                 </div>
+            ) : (
+                <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será processada no ambiente nacional e possuirá valor fiscal.</p>
+            )}
+            
           </div>
         )}
 
@@ -560,8 +611,8 @@ function EmitirNotaContent() {
                         </div>
                     </div>
                 ) : (
-                    <button onClick={handleEmitir} className="bg-green-600 text-white px-8 py-3 rounded-lg flex items-center gap-2 hover:bg-green-700 shadow-lg font-bold transition-transform transform hover:scale-105">
-                        <CheckCircle size={20} /> EMITIR NOTA
+                    <button onClick={handleEmitir} className={`${perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'} text-white px-8 py-3 rounded-lg flex items-center gap-2 shadow-lg font-bold transition-transform transform hover:scale-105`}>
+                        <CheckCircle size={20} /> {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'VALIDAR NOTA (TESTE)' : 'EMITIR NOTA'}
                     </button>
                 )
             )}
@@ -573,7 +624,6 @@ function EmitirNotaContent() {
   );
 }
 
-// === EXPORTAÇÃO COM SUSPENSE ===
 export default function EmitirNotaPage() {
     return (
         <Suspense fallback={<div className="h-screen flex items-center justify-center text-slate-500"><Loader2 className="animate-spin mr-2"/> Carregando...</div>}>
