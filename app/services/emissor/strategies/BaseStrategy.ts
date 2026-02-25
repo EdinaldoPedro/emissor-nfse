@@ -146,7 +146,8 @@ export abstract class BaseStrategy {
                 cert: credenciais.cert,
                 key: credenciais.key,
                 rejectUnauthorized: false,
-                keepAlive: true
+                keepAlive: true,
+                family: 4 // <--- FORÇA O USO DE IPv4 (Bypass de bloqueio do Serpro)
             });
 
             const url = prestador.ambiente === 'PRODUCAO' ? URL_PRODUCAO : URL_HOMOLOGACAO;

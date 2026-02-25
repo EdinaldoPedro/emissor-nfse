@@ -118,7 +118,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     async consultar(chave: string, empresa: any): Promise<IResultadoConsulta> {
         try {
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
-            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: false });
+            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: false, family: 4 });
             
             const urlBase = empresa.ambiente === 'PRODUCAO' 
                 ? "https://sefin.nfse.gov.br/SefinNacional/nfse" 
@@ -226,7 +226,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             const payloadBase64 = xmlGzip.toString('base64');
 
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
-            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: false });
+            const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: false, family: 4 });
             
             const urlBase = empresa.ambiente === 'PRODUCAO' 
                 ? "https://sefin.nfse.gov.br/SefinNacional/nfse"
