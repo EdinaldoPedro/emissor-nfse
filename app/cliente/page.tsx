@@ -38,6 +38,7 @@ interface Cliente {
   bairro?: string;
   codigoIbge?: string;
   pais?: string;
+  moeda?: string;
 }
 
 export default function MeusClientes() {
@@ -62,7 +63,7 @@ export default function MeusClientes() {
     id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', 
     email: '', documento: '', cidade: '', uf: '', cep: '', 
     logradouro: '', numero: '', bairro: '', codigoIbge: '',
-    tipo: 'PJ', pais: 'Brasil'
+    tipo: 'PJ', pais: 'Brasil', moeda: 'BRL'
   });
 
   const isPJ = clienteAtual.tipo === 'PJ';
@@ -115,7 +116,7 @@ export default function MeusClientes() {
     setClienteAtual({ 
         id: '', nome: '', nomeFantasia: '', inscricaoMunicipal: '', email: '', 
         documento: '', cidade: '', uf: '', cep: '', logradouro: '', 
-        numero: '', bairro: '', codigoIbge: '', tipo: 'PJ', pais: 'Brasil' 
+        numero: '', bairro: '', codigoIbge: '', tipo: 'PJ', pais: 'Brasil', moeda: 'BRL'
     });
     setModalStep('SELECAO');
     setIsFormOpen(true);
@@ -476,19 +477,36 @@ export default function MeusClientes() {
 
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         {clienteAtual.tipo === 'EXT' && (
-                                            <div className="md:col-span-3">
-                                                <label className={labelClass}>País</label>
-                                                <select 
-                                                    className={`${inputClass} bg-yellow-50 font-bold text-slate-800`}
-                                                    value={clienteAtual.pais || ''}
-                                                    onChange={e => setClienteAtual({...clienteAtual, pais: e.target.value})}
-                                                >
-                                                    <option value="">Selecione o País...</option>
-                                                    {LISTA_PAISES.map(p => (
-                                                        <option key={p} value={p}>{p}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
+                                            <>
+                                                <div className="md:col-span-2">
+                                                    <label className={labelClass}>País</label>
+                                                    <select 
+                                                        className={`${inputClass} bg-yellow-50 font-bold text-slate-800`}
+                                                        value={clienteAtual.pais || ''}
+                                                        onChange={e => setClienteAtual({...clienteAtual, pais: e.target.value})}
+                                                    >
+                                                        <option value="">Selecione o País...</option>
+                                                        {LISTA_PAISES.map(p => (
+                                                            <option key={p} value={p}>{p}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                
+                                                <div className="md:col-span-1">
+                                                    <label className={labelClass}>Moeda</label>
+                                                    <select 
+                                                        className={`${inputClass} font-bold text-slate-800`}
+                                                        value={clienteAtual.moeda || 'BRL'}
+                                                        onChange={e => setClienteAtual({...clienteAtual, moeda: e.target.value})}
+                                                    >
+                                                        <option value="BRL">BRL - Real</option>
+                                                        <option value="USD">USD - Dólar</option>
+                                                        <option value="EUR">EUR - Euro</option>
+                                                        <option value="GBP">GBP - Libra</option>
+                                                        <option value="ARS">ARS - Peso Arg.</option>
+                                                    </select>
+                                                </div>
+                                            </>
                                         )}
 
                                         <div className="md:col-span-1">

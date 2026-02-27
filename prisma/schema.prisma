@@ -163,6 +163,9 @@ model Cliente {
   
   // Documento agora é ÚNICO GLOBALMENTE (ex: Se a Google já existe, usa o mesmo ID)
   documento     String?  @unique 
+
+  nif           String?          // <--- NOVO CAMPO
+  moeda         String?  @default("BRL") // <--- NOVO CAMPO
   
   nome          String   // Razão Social ou Nome Completo (Dado Oficial)
   nomeFantasia  String?  // Dado Oficial

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { validateRequest } from '@/app/utils/api-security';
+import { sanitizeStringExternal } from '@/app/utils/formatters';
 
 const prisma = new PrismaClient();
 
@@ -82,30 +83,49 @@ export async function POST(request: Request) {
         }
 
         const body = await request.json();
-        const { 
+        let { 
             id, tipo, nome, nomeFantasia, documento, 
             email, telefone, 
             cep, logradouro, numero, bairro, cidade, uf, codigoIbge, pais,
-            inscricaoMunicipal 
+            inscricaoMunicipal, nif, moeda, complemento
         } = body;
+
+        // === 2. Limpeza e Sanitização ===
+        if (tipo === 'EXT') {
+            // Garante que o documento (CPF/CNPJ) seja nulo para não dar conflito de Unique
+            documento = null; 
+            
+            // Limpa o NIF para deixar só números e no máximo 9 dígitos
+            if (nif) nif = nif.replace(/\D/g, '').slice(0, 9);
+
+            // Aplica a sanitização obrigatória do Padrão Nacional
+            nome = sanitizeStringExternal(nome);
+            logradouro = sanitizeStringExternal(logradouro);
+            numero = sanitizeStringExternal(numero);
+            bairro = sanitizeStringExternal(bairro);
+            cidade = sanitizeStringExternal(cidade);
+            uf = sanitizeStringExternal(uf);
+            pais = sanitizeStringExternal(pais);
+            if (complemento) complemento = sanitizeStringExternal(complemento);
+        }
 
         // Validações Básicas
         if (!nome) return NextResponse.json({ error: 'Nome é obrigatório.' }, { status: 400 });
         const docLimpo = documento ? documento.replace(/\D/g, '') : null;
         if (tipo !== 'EXT' && !docLimpo) return NextResponse.json({ error: 'Documento obrigatório.' }, { status: 400 });
 
-        // Tratamento de IBGE
+        // Tratamento de IBGE (Ignorar se for exterior)
         let ibgeFinal = codigoIbge;
-        if (cep && (!ibgeFinal || ibgeFinal.length < 7)) {
+        if (cep && (!ibgeFinal || ibgeFinal.length < 7) && tipo !== 'EXT') {
             const ibgeResgatado = await buscarIbgePorCep(cep);
             if (ibgeResgatado) ibgeFinal = ibgeResgatado;
         }
 
-        // === 2. Verifica se o Cliente já existe no Catálogo Global ===
+        // === 3. Verifica se o Cliente já existe no Catálogo Global ===
         let clienteGlobal = null;
         
         if (id) {
-            // Edição direta (Cuidado: Edita para TODOS. Se quiser bloquear, tire isso)
+            // Edição direta
             clienteGlobal = await prisma.cliente.findUnique({ where: { id } });
         } else if (tipo !== 'EXT') {
             clienteGlobal = await prisma.cliente.findUnique({ where: { documento: docLimpo } });
@@ -114,16 +134,20 @@ export async function POST(request: Request) {
             clienteGlobal = await prisma.cliente.findFirst({ where: { nome, tipo: 'EXT' } });
         }
 
+        // Monta o objeto com os dados finais limpos
         const dadosCliente = {
             tipo: tipo || 'PJ',
             nome,
             nomeFantasia,
-            documento: docLimpo,
+            documento: docLimpo, // Ficará null para EXT
+            nif: nif || null,
+            moeda: moeda || 'BRL',
             email,
             telefone,
-            cep: cep ? cep.replace(/\D/g, '') : null,
+            cep: tipo === 'EXT' ? cep : (cep ? cep.replace(/\D/g, '') : null), // Preserva letras no CEP do exterior se houver
             logradouro,
             numero,
+            complemento,
             bairro,
             cidade,
             uf,
@@ -132,9 +156,8 @@ export async function POST(request: Request) {
             inscricaoMunicipal
         };
 
-        // === 3. Cria ou Atualiza no Global ===
+        // === 4. Cria ou Atualiza no Global ===
         if (clienteGlobal) {
-            // Atualiza dados globais (Opcional: Você pode optar por não atualizar se já existir)
             clienteGlobal = await prisma.cliente.update({
                 where: { id: clienteGlobal.id },
                 data: dadosCliente
@@ -145,8 +168,7 @@ export async function POST(request: Request) {
             });
         }
 
-        // === 4. Cria o Vínculo na Carteira (Se não existir) ===
-        // Isso é o que faz o cliente aparecer na lista "Meus Clientes"
+        // === 5. Cria o Vínculo na Carteira (Se não existir) ===
         const vinculoExistente = await prisma.vinculoCarteira.findUnique({
             where: {
                 empresaId_clienteId: {
@@ -185,9 +207,18 @@ export async function DELETE(request: Request) {
         
         if (!id) return NextResponse.json({ error: 'ID necessário.' }, { status: 400 });
 
-        // Descobre a empresa do usuário
-        const user = await prisma.user.findUnique({ where: { id: targetId } });
-        const empresaId = user?.empresaId;
+        // === CORREÇÃO: Lê a empresa do Header primeiro (Essencial para o Contador) ===
+        let empresaId = request.headers.get('x-empresa-id');
+
+        if (!empresaId || empresaId === 'null' || empresaId === 'undefined') {
+            const user = await prisma.user.findUnique({ where: { id: targetId } });
+            empresaId = user?.empresaId || null;
+            
+            if (!empresaId) {
+                const vinculo = await prisma.userCliente.findFirst({ where: { userId: targetId } });
+                if (vinculo) empresaId = vinculo.empresaId;
+            }
+        }
 
         if (!empresaId) return NextResponse.json({ error: 'Empresa não identificada.' }, { status: 400 });
 
