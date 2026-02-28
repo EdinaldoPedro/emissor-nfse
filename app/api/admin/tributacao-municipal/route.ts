@@ -8,11 +8,10 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '10');
-  const search = searchParams.get('search') || ''; // <--- Novo parâmetro
+  const search = searchParams.get('search') || '';
   
   const skip = (page - 1) * limit;
 
-  // Monta o filtro de busca (se houver texto)
   const whereClause = search ? {
     OR: [
         { cnae: { contains: search } },
@@ -24,12 +23,12 @@ export async function GET(request: Request) {
   try {
     const [lista, total] = await prisma.$transaction([
       prisma.tributacaoMunicipal.findMany({
-        where: whereClause, // <--- Aplica o filtro
+        where: whereClause, 
         skip: skip,
         take: limit,
         orderBy: { createdAt: 'desc' }
       }),
-      prisma.tributacaoMunicipal.count({ where: whereClause }) // <--- Conta só os filtrados
+      prisma.tributacaoMunicipal.count({ where: whereClause }) 
     ]);
 
     return NextResponse.json({
@@ -53,11 +52,9 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    // 1. Validação de Duplicidade (TRIPLA)
-    // Verifica se JÁ EXISTE essa combinação exata de 3 campos
     const existe = await prisma.tributacaoMunicipal.findUnique({
       where: {
-        cnae_codigoIbge_codigoTributacaoMunicipal: { // O Prisma cria esse nome composto automaticamente
+        cnae_codigoIbge_codigoTributacaoMunicipal: { 
             cnae: body.cnae,
             codigoIbge: body.codigoIbge,
             codigoTributacaoMunicipal: body.codigoTributacaoMunicipal
@@ -72,13 +69,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Se não existe a trinca, cria (mesmo que CNAE e Cidade repitam)
     const novo = await prisma.tributacaoMunicipal.create({
       data: {
         cnae: body.cnae,
         codigoIbge: body.codigoIbge,
         codigoTributacaoMunicipal: body.codigoTributacaoMunicipal,
-        descricaoServicoMunicipal: body.descricaoServicoMunicipal
+        descricaoServicoMunicipal: body.descricaoServicoMunicipal,
+        aliquotaIss: body.aliquotaIss ? parseFloat(body.aliquotaIss) : null // <--- NOVO
       }
     });
 
@@ -96,15 +93,13 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
     
-    // Na edição, permitimos mudar o código municipal, mas precisamos garantir
-    // que não vai bater com outra regra já existente
     if (body.codigoTributacaoMunicipal) {
         const conflito = await prisma.tributacaoMunicipal.findFirst({
             where: {
                 cnae: body.cnae,
                 codigoIbge: body.codigoIbge,
                 codigoTributacaoMunicipal: body.codigoTributacaoMunicipal,
-                NOT: { id: body.id } // Ignora o próprio registro que está sendo editado
+                NOT: { id: body.id } 
             }
         });
 
@@ -117,7 +112,8 @@ export async function PUT(request: Request) {
         where: { id: body.id },
         data: {
             codigoTributacaoMunicipal: body.codigoTributacaoMunicipal,
-            descricaoServicoMunicipal: body.descricaoServicoMunicipal
+            descricaoServicoMunicipal: body.descricaoServicoMunicipal,
+            aliquotaIss: body.aliquotaIss !== undefined && body.aliquotaIss !== null ? parseFloat(body.aliquotaIss) : null // <--- NOVO
         }
     });
     return NextResponse.json(atualizado);

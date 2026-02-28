@@ -54,16 +54,31 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json();
-    // ATUALIZADO: Agora recebemos os novos campos
-    const { id, itemLc, codigoTributacaoNacional, codigoNbs, temRetencaoInss } = body;
+    
+    // ATUALIZADO: Recebendo todas as novas regras de retenção
+    const { 
+        id, 
+        itemLc, 
+        codigoTributacaoNacional, 
+        codigoNbs, 
+        temRetencaoInss,
+        retemCrsf,
+        aliquotaCrsf,
+        retemIr,
+        aliquotaIr
+    } = body;
 
     const atualizado = await prisma.globalCnae.update({
       where: { id },
       data: {
         itemLc,
         codigoTributacaoNacional,
-        codigoNbs,           // Novo
-        temRetencaoInss      // Novo
+        codigoNbs,
+        temRetencaoInss,
+        retemCrsf,
+        aliquotaCrsf: aliquotaCrsf ? parseFloat(aliquotaCrsf) : null,
+        retemIr,
+        aliquotaIr: aliquotaIr ? parseFloat(aliquotaIr) : null
       }
     });
 

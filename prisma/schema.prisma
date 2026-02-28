@@ -329,6 +329,10 @@ model GlobalCnae {
   aliquotaPadrao            Decimal? @db.Decimal(5,2)
   codigoNbs                 String?
   temRetencaoInss           Boolean  @default(false)
+  retemCrsf                 Boolean  @default(false) // NOVO: PIS/COFINS/CSLL
+  aliquotaCrsf              Decimal? @db.Decimal(5,2) // NOVO: Geralmente 4.65
+  retemIr                   Boolean  @default(false) // NOVO: Imposto de Renda
+  aliquotaIr                Decimal? @db.Decimal(5,2) // NOVO: Geralmente 1.5 ou 1.0
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 }
@@ -339,6 +343,7 @@ model TributacaoMunicipal {
   codigoIbge                String 
   codigoTributacaoMunicipal String 
   descricaoServicoMunicipal String?
+  aliquotaIss               Decimal? @db.Decimal(5,2)
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
   @@unique([cnae, codigoIbge, codigoTributacaoMunicipal])

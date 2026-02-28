@@ -28,7 +28,8 @@ export default function TributacaoMunicipalPage() {
     cnae: '',
     codigoIbge: '',
     codigoTributacaoMunicipal: '',
-    descricaoServicoMunicipal: ''
+    descricaoServicoMunicipal: '',
+    aliquotaIss: '' // <--- NOVO
   });
 
   useEffect(() => {
@@ -43,11 +44,11 @@ export default function TributacaoMunicipalPage() {
   }, []);
 
   const carregarRegras = (pagina: number, busca: string = '') => {
-    const token = localStorage.getItem('token'); // <--- CORREÇÃO: Pegar Token
+    const token = localStorage.getItem('token'); 
     
     fetch(`/api/admin/tributacao-municipal?page=${pagina}&limit=${limit}&search=${busca}`, {
         headers: { 
-            'Authorization': `Bearer ${token}` // <--- CORREÇÃO: Enviar Token
+            'Authorization': `Bearer ${token}` 
         }
     })
       .then(r => r.json())
@@ -60,11 +61,11 @@ export default function TributacaoMunicipalPage() {
   };
 
   const carregarAuxiliares = async () => {
-    const token = localStorage.getItem('token'); // <--- CORREÇÃO: Pegar Token
+    const token = localStorage.getItem('token'); 
 
     // 1. Carrega CNAEs
     fetch('/api/admin/cnaes?limit=1000', {
-        headers: { 'Authorization': `Bearer ${token}` } // <--- Envia Token
+        headers: { 'Authorization': `Bearer ${token}` }
     }) 
         .then(r => r.json())
         .then(res => {
@@ -75,7 +76,7 @@ export default function TributacaoMunicipalPage() {
 
     // 2. Carrega Cidades
     fetch('/api/admin/empresas?limit=1000', {
-        headers: { 'Authorization': `Bearer ${token}` } // <--- Envia Token
+        headers: { 'Authorization': `Bearer ${token}` }
     })
         .then(r => r.json())
         .then((res: any) => {
@@ -101,6 +102,11 @@ export default function TributacaoMunicipalPage() {
 
     const token = localStorage.getItem('token');
     
+    const payload = {
+        ...form,
+        aliquotaIss: form.aliquotaIss ? parseFloat(form.aliquotaIss) : null
+    };
+
     const metodo = editing ? 'PUT' : 'POST';
     const res = await fetch('/api/admin/tributacao-municipal', {
         method: metodo,
@@ -108,7 +114,7 @@ export default function TributacaoMunicipalPage() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
     });
     const data = await res.json();
 
@@ -182,7 +188,7 @@ export default function TributacaoMunicipalPage() {
                 />
             </div>
 
-            <button onClick={() => { setEditing(null); setForm({ id:'', cnae:'', codigoIbge:'', codigoTributacaoMunicipal:'', descricaoServicoMunicipal:'' }); setModalOpen(true); }} 
+            <button onClick={() => { setEditing(null); setForm({ id:'', cnae:'', codigoIbge:'', codigoTributacaoMunicipal:'', descricaoServicoMunicipal:'', aliquotaIss: '' }); setModalOpen(true); }} 
                 className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
                 <Plus size={18}/> Nova Regra
             </button>
@@ -193,9 +199,9 @@ export default function TributacaoMunicipalPage() {
       {modalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg overflow-visible">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex justify-between items-center mb-4 border-b pb-2">
                     <h3 className="font-bold text-lg">{editing ? 'Editar Regra' : 'Nova Regra Municipal'}</h3>
-                    <button onClick={() => setModalOpen(false)}><X size={20}/></button>
+                    <button onClick={() => setModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
                 </div>
                 
                 <div className="space-y-4">
@@ -231,9 +237,26 @@ export default function TributacaoMunicipalPage() {
                         </div>
                     </div>
 
-                    <div className="border-t pt-4">
-                        <label className="block text-xs font-bold text-blue-700 uppercase mb-1">Cód. Municipal (CTM)</label>
-                        <input className="w-full p-2 border rounded bg-blue-50 focus:ring-2 focus:ring-blue-500 outline-none" value={form.codigoTributacaoMunicipal} onChange={e => setForm({...form, codigoTributacaoMunicipal: e.target.value})} placeholder="Ex: 010700188" />
+                    <div className="grid grid-cols-2 gap-4 border-t pt-4">
+                        <div>
+                            <label className="block text-xs font-bold text-blue-700 uppercase mb-1">Cód. Municipal (CTM)</label>
+                            <input 
+                                className="w-full p-2 border rounded bg-blue-50 focus:ring-2 focus:ring-blue-500 outline-none" 
+                                value={form.codigoTributacaoMunicipal} 
+                                onChange={e => setForm({...form, codigoTributacaoMunicipal: e.target.value})} 
+                                placeholder="Ex: 010700188" 
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-green-700 uppercase mb-1">Alíquota ISS (%) - Opcional</label>
+                            <input 
+                                type="number" step="0.01" min="0" max="5"
+                                className="w-full p-2 border rounded bg-green-50 focus:ring-2 focus:ring-green-500 outline-none" 
+                                value={form.aliquotaIss || ''} 
+                                onChange={e => setForm({...form, aliquotaIss: e.target.value})} 
+                                placeholder="Ex: 3.00" 
+                            />
+                        </div>
                     </div>
                     
                     <div>
@@ -243,6 +266,7 @@ export default function TributacaoMunicipalPage() {
                 </div>
 
                 <div className="mt-6 flex justify-end gap-2 pt-4 border-t">
+                    <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-100 rounded transition">Cancelar</button>
                     <button onClick={handleSave} className="bg-blue-600 text-white px-6 py-2 rounded flex items-center gap-2 hover:bg-blue-700 font-bold shadow-md"><Save size={18}/> Salvar</button>
                 </div>
             </div>
@@ -257,12 +281,13 @@ export default function TributacaoMunicipalPage() {
                     <th className="p-4 font-bold text-slate-500 uppercase text-xs">CNAE</th>
                     <th className="p-4 font-bold text-slate-500 uppercase text-xs">Cidade (IBGE)</th>
                     <th className="p-4 font-bold text-slate-500 uppercase text-xs">Cód. Municipal</th>
+                    <th className="p-4 font-bold text-slate-500 uppercase text-xs text-center">ISS</th>
                     <th className="p-4 text-right font-bold text-slate-500 uppercase text-xs">Ações</th>
                 </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
                 {lista.length === 0 ? (
-                    <tr><td colSpan={4} className="p-8 text-center text-gray-400">Nenhum registro encontrado.</td></tr>
+                    <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhum registro encontrado.</td></tr>
                 ) : (
                     lista.map(item => (
                         <tr key={item.id} className="hover:bg-slate-50 transition">
@@ -281,8 +306,24 @@ export default function TributacaoMunicipalPage() {
                             </td>
 
                             <td className="p-4"><span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-bold border border-orange-200">{item.codigoTributacaoMunicipal}</span></td>
+                            
+                            <td className="p-4 text-center">
+                                {item.aliquotaIss ? (
+                                    <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold border border-green-200">{Number(item.aliquotaIss).toFixed(2)}%</span>
+                                ) : (
+                                    <span className="text-gray-300">-</span>
+                                )}
+                            </td>
+
                             <td className="p-4 text-right flex justify-end gap-2">
-                                <button onClick={() => { setEditing(item); setForm(item); setModalOpen(true); }} className="text-blue-500 hover:bg-blue-50 p-2 rounded transition" title="Editar"><Edit size={18}/></button>
+                                <button onClick={() => { 
+                                    setEditing(item); 
+                                    setForm({
+                                        ...item,
+                                        aliquotaIss: item.aliquotaIss ? String(item.aliquotaIss) : ''
+                                    }); 
+                                    setModalOpen(true); 
+                                }} className="text-blue-500 hover:bg-blue-50 p-2 rounded transition" title="Editar"><Edit size={18}/></button>
                                 <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:bg-red-50 p-2 rounded transition" title="Excluir"><Trash2 size={18}/></button>
                             </td>
                         </tr>
