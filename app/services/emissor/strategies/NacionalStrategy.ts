@@ -19,17 +19,16 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     }
 
     async executar(dados: IDadosEmissao): Promise<IResultadoEmissao> {
-        // === 0. SANITIZAÇÃO DE DADOS (CORREÇÃO DO ERRO) ===
-        // O padrão nacional rejeita número vazio. Se vier vazio, forçamos S/N.
+        // === 0. SANITIZAÇÃO DE DADOS ===
         if (!dados.tomador.numero || dados.tomador.numero.trim() === '') {
             dados.tomador.numero = 'S/N';
         }
-        // O bairro também é obrigatório. Se vazio, usamos 'Centro' ou 'Bairro'
         if (!dados.tomador.bairro || dados.tomador.bairro.trim() === '') {
             dados.tomador.bairro = 'Bairro';
         }
-        // Garante que CEP tenha apenas números
-        if (dados.tomador.cep) {
+        
+        // Garante que CEP tenha apenas números (EXCETO SE FOR EXTERIOR)
+        if (dados.tomador.cep && dados.tomador.tipo !== 'EXT') {
             dados.tomador.cep = dados.tomador.cep.replace(/\D/g, '');
         }
 
@@ -76,16 +75,29 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     razaoSocial: tomador.razaoSocial,
                     email: tomador.email,
                     telefone: tomador.telefone,
+                    
+                    // === DADOS OBRIGATÓRIOS PARA EXPORTAÇÃO (CORREÇÃO AQUI) ===
+                    tipo: tomador.tipo,
+                    nif: tomador.nif,
+                    pais: tomador.pais,
+                    moeda: tomador.moeda,
+
                     endereco: {
                         cep: tomador.cep,
                         logradouro: tomador.logradouro,
-                        numero: tomador.numero, // Agora garantido que não é vazio
+                        numero: tomador.numero, 
                         bairro: tomador.bairro,
+                        cidade: tomador.cidade, // Cidade é necessária para <xCidade> no Exterior
                         codigoIbge: tomador.codigoIbge,
                         uf: tomador.uf
                     }
                 },
-                servico: dadosTributarios as ICanonicalRps['servico'],
+                // === MERGE DO SERVIÇO (Garante que valorMoedaEstrangeira e codigoNbs não sejam perdidos) ===
+                servico: {
+                    ...servico,
+                    ...dadosTributarios
+                } as ICanonicalRps['servico'],
+                
                 meta: {
                     ambiente: ambiente,
                     serie: serieDPS,
@@ -113,8 +125,6 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
         }
     }
 
-    // ... (Mantenha os métodos consultar, cancelar e assinarPedidoEvento iguais ao arquivo anterior)
-    
     async consultar(chave: string, empresa: any): Promise<IResultadoConsulta> {
         try {
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);

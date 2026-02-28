@@ -20,11 +20,16 @@ export interface ICanonicalRps {
         razaoSocial: string;
         email?: string;
         telefone?: string;
+        tipo?: string; 
+        nif?: string;
+        pais?: string;
+        moeda?: string;
         endereco: {
             cep: string;
             logradouro: string;
             numero: string;
             bairro: string;
+            cidade?: string;
             codigoIbge: string;
             uf: string;
         };
@@ -32,6 +37,7 @@ export interface ICanonicalRps {
     servico: {
         valor: number;
         valorLiquido: number;
+        valorMoedaEstrangeira?: number;
         descricao: string;
         cnae: string;
         

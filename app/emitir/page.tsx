@@ -20,6 +20,8 @@ interface ClienteDB {
   nome: string;
   documento: string;
   email?: string;
+  tipo: string;  
+  moeda?: string;
 }
 
 // === COMPONENTE DE CONTEÚDO ===
@@ -46,7 +48,8 @@ function EmitirNotaContent() {
     clienteId: "", 
     clienteNome: "", 
     servicoDescricao: "", 
-    valor: "", 
+    valor: "",
+    valorMoedaEstrangeira: "", 
     codigoCnae: "", 
     aliquota: "", 
     issRetido: false 
@@ -244,16 +247,35 @@ function EmitirNotaContent() {
     }
   }, [router, retryId]);
 
+  // === FORMATADORES DE MOEDA ===
   const formatarMoedaInput = (valor: string | number) => {
     const v = Number(valor) || 0;
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 }).format(v);
   };
 
+  const formatarMoedaEstrangeiraInput = (valor: string | number, moeda: string = 'USD') => {
+    const v = Number(valor) || 0;
+    try {
+        return new Intl.NumberFormat("en-US", { style: "currency", currency: moeda, minimumFractionDigits: 2 }).format(v);
+    } catch (e) {
+        // Fallback seguro caso o código da moeda seja inválido no Intl
+        return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(v);
+    }
+  };
+
+  // === HANDLERS DE VALOR ===
   const handleValorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const apenasNumeros = e.target.value.replace(/\D/g, "");
     if (!apenasNumeros) { setNfData({ ...nfData, valor: "0" }); return; }
     const valorNumerico = parseInt(apenasNumeros) / 100;
     setNfData({ ...nfData, valor: String(valorNumerico) });
+  };
+
+  const handleValorEstrangeiroChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const apenasNumeros = e.target.value.replace(/\D/g, "");
+    if (!apenasNumeros) { setNfData({ ...nfData, valorMoedaEstrangeira: "0" }); return; }
+    const valorNumerico = parseInt(apenasNumeros) / 100;
+    setNfData({ ...nfData, valorMoedaEstrangeira: String(valorNumerico) });
   };
 
   const handleNext = async () => {
@@ -310,6 +332,7 @@ function EmitirNotaContent() {
         body: JSON.stringify({
           clienteId: nfData.clienteId,
           valor: nfData.valor,
+          valorMoedaEstrangeira: nfData.valorMoedaEstrangeira,
           descricao: nfData.servicoDescricao,
           codigoCnae: nfData.codigoCnae,
           aliquota: nfData.aliquota,
@@ -355,8 +378,24 @@ function EmitirNotaContent() {
     }
   };
 
+  // === VARIÁVEIS DE CONTROLE E DEPENDÊNCIAS DO UI ===
+  const clienteSel = clientes.find(c => c.id === nfData.clienteId);
+  const isExterior = clienteSel?.tipo === 'EXT';
+
   const valorNumerico = parseFloat(nfData.valor) || 0;
-  const isStep2Invalid = step === 2 && (valorNumerico <= 0 || !nfData.servicoDescricao.trim());
+  const valorEstrangeiroNum = parseFloat(nfData.valorMoedaEstrangeira) || 0;
+  
+  const isStep2Invalid = step === 2 && (
+      valorNumerico <= 0 || 
+      !nfData.servicoDescricao.trim() || 
+      (isExterior && valorEstrangeiroNum <= 0)
+  );
+
+  // Trata a descrição do CNAE na aba de revisão
+  const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
+  const cnaeDescricaoCurta = cnaeSelecionadoObj?.descricao 
+      ? (cnaeSelecionadoObj.descricao.length > 20 ? cnaeSelecionadoObj.descricao.substring(0, 20) + '...' : cnaeSelecionadoObj.descricao)
+      : '';
 
   if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados...</div>;
 
@@ -406,7 +445,7 @@ function EmitirNotaContent() {
                 ) : (
                     <select className="w-full p-3 border rounded-lg bg-slate-50 outline-blue-500 text-slate-700 font-medium" value={nfData.clienteId} onChange={(e) => { const selected = clientes.find(c => c.id === e.target.value); setNfData({ ...nfData, clienteId: e.target.value, clienteNome: selected?.nome || "" }); }}>
                         <option value="">-- Selecione na lista --</option>
-                        {clientes.map(cliente => (<option key={cliente.id} value={cliente.id}>{cliente.nome} ({cliente.documento})</option>))}
+                        {clientes.map(cliente => (<option key={cliente.id} value={cliente.id}>{cliente.nome} ({cliente.documento || 'Exterior'})</option>))}
                     </select>
                 )}
                 <p className="text-xs text-slate-400 mt-2">
@@ -430,14 +469,43 @@ function EmitirNotaContent() {
                 )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label>
-                  <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
+            {/* === RENDERIZAÇÃO INTELIGENTE DA MOEDA === */}
+            {isExterior ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-purple-50 p-4 rounded-lg border border-purple-100">
+                    <div>
+                        <label className="block text-sm font-medium text-purple-900 mb-2">Valor Faturado ({clienteSel?.moeda || 'USD'})</label>
+                        <input 
+                            type="text" inputMode="numeric" 
+                            className="w-full p-3 border border-purple-200 rounded-lg outline-purple-500 text-slate-700 text-lg font-bold" 
+                            value={formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)} 
+                            onChange={handleValorEstrangeiroChange} 
+                            placeholder="0.00" 
+                        />
+                        <p className="text-[10px] text-purple-600 mt-1">* Valor na moeda do contrato (Obrigatório Sefaz)</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Valor Convertido (R$)</label>
+                        <input 
+                            type="text" inputMode="numeric" 
+                            className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" 
+                            value={formatarMoedaInput(nfData.valor)} 
+                            onChange={handleValorChange} 
+                            placeholder="R$ 0,00" 
+                        />
+                        <p className="text-[10px] text-slate-500 mt-1">* Valor fiscal em Reais para cálculo de impostos</p>
+                    </div>
                 </div>
-            </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label>
+                        <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
+                    </div>
+                </div>
+            )}
             
-            {perfilEmpresa?.regimeTributario !== 'MEI' && (
+            {/* === RENDERIZAÇÃO INTELIGENTE DE RETENÇÕES === */}
+            {perfilEmpresa?.regimeTributario !== 'MEI' && !isExterior && (
                 <div className="mt-6 border-t pt-4">
                     <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
                         <Calculator size={16}/> Retenções e Impostos
@@ -537,7 +605,9 @@ function EmitirNotaContent() {
               
               <div className="flex justify-between border-b pb-2">
                   <span className="text-slate-500">Atividade (CNAE):</span>
-                  <span className="font-medium text-slate-900">{nfData.codigoCnae}</span>
+                  <span className="font-medium text-slate-900">
+                    {nfData.codigoCnae} {cnaeDescricaoCurta ? `- ${cnaeDescricaoCurta}` : ''}
+                  </span>
               </div>
 
               <div className="border-b pb-2">
@@ -547,7 +617,8 @@ function EmitirNotaContent() {
                   </div>
               </div>
               
-              {perfilEmpresa?.regimeTributario !== 'MEI' && (
+              {/* Oculta retenções na aba de revisão se for Exterior */}
+              {perfilEmpresa?.regimeTributario !== 'MEI' && !isExterior && (
                   <>
                     <div className="flex justify-between border-b pb-2">
                         <span className="text-slate-500">Alíquota ISS:</span>
@@ -567,6 +638,16 @@ function EmitirNotaContent() {
                   <span className="text-slate-500">Valor Bruto:</span>
                   <span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span>
               </div>
+
+              {/* Destaque para o valor na Moeda Estrangeira */}
+              {isExterior && (
+                  <div className="flex justify-between pt-2 border-t border-slate-200 mt-2">
+                      <span className="text-slate-500">Valor Faturado ({clienteSel?.moeda || 'USD'}):</span>
+                      <span className="font-bold text-purple-700 text-lg">
+                          {formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)}
+                      </span>
+                  </div>
+              )}
             </div>
 
             {/* Aviso de Ambiente */}

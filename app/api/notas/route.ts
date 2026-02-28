@@ -36,13 +36,13 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes, numeroDPS, serieDPS } = body;
+    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes, numeroDPS, serieDPS, valorMoedaEstrangeira } = body;
 
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
     empresaIdLog = empresaIdAlvo;
 
-    // --- PRÉ-VALIDAÇÕES (Cenários 4 e 5) ANTES DE CRIAR A VENDA ---
+    // --- PRÉ-VALIDAÇÕES ANTES DE CRIAR A VENDA ---
     const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
     if (!prestador || !prestador.documento) {
         return NextResponse.json({ 
@@ -113,25 +113,54 @@ export async function POST(request: Request) {
     }
     if (!cnaeFinal) throw new Error("CNAE é obrigatório para emissão.");
 
+    // --- BLOCO CORRIGIDO: SEM DUPLICIDADE ---
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
+    let codigoNbs = '000000000'; // NBS Padrão para Exterior se não achar no banco
+
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
          itemLc = infoEstatica.itemLC;
          codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
+         if ((infoEstatica as any).codigoNbs) codigoNbs = (infoEstatica as any).codigoNbs;
     }
+    
     const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
     if (regraGlobal) {
         if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
         if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
+        if ((regraGlobal as any).codigoNbs) codigoNbs = (regraGlobal as any).codigoNbs;
     }
+    // ----------------------------------------
 
-    const tomadorAdaptado = { ...tomador, razaoSocial: tomador.nome, documento: tomador.documento || '', codigoIbge: tomador.codigoIbge || '9999999' };
+    // Monta o tomadorAdaptado com TODOS os campos necessários para a Strategy
+    const tomadorAdaptado = { 
+        ...tomador, 
+        razaoSocial: tomador.nome, 
+        documento: tomador.documento || '', 
+        codigoIbge: tomador.codigoIbge || '9999999',
+        tipo: tomador.tipo,
+        nif: tomador.nif,
+        pais: tomador.pais,
+        moeda: tomador.moeda,
+        endereco: {
+            cep: tomador.cep || '',
+            logradouro: tomador.logradouro || '',
+            numero: tomador.numero || '',
+            bairro: tomador.bairro || '',
+            cidade: tomador.cidade || '',
+            codigoIbge: tomador.codigoIbge || '9999999',
+            uf: tomador.uf || ''
+        }
+    };
 
     const dadosParaEstrategia = {
         prestador, tomador: tomadorAdaptado, venda,
         servico: {
-            valor: valorFloat, descricao, cnae: cnaeFinal, itemLc, codigoTribNacional,
+            valor: valorFloat, 
+            valorMoedaEstrangeira: valorMoedaEstrangeira ? parseFloat(valorMoedaEstrangeira) : undefined,
+            codigoNbs: codigoNbs, 
+            descricao, cnae: cnaeFinal, itemLc, codigoTribNacional,
             aliquota: aliquota ? parseFloat(aliquota) : 0, issRetido: !!issRetido, retencoes: retencoes
         },
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
@@ -148,8 +177,8 @@ export async function POST(request: Request) {
         details: { payloadOriginal: dadosParaEstrategia, xmlGerado: resultado.xmlGerado }
     });
 
-    // --- TRATAMENTO DE ERROS INTELIGENTE (Cenários 2, 3 e 0) ---
-   if (!resultado.sucesso) {
+    // --- TRATAMENTO DE ERROS INTELIGENTE ---
+    if (!resultado.sucesso) {
         let customUserAction = null;
         const errorStr = JSON.stringify(resultado.erros).toLowerCase();
 
@@ -161,13 +190,11 @@ export async function POST(request: Request) {
         }
 
         if (customUserAction) {
-            // CENÁRIO 2 e 3: Erro contornável. Apaga a venda e os logs gerados para não sujar o sistema.
-            if (!vendaId) { // Só apaga se for uma venda nova. Se for reenvio, mantém.
+            if (!vendaId) { 
                 await prisma.systemLog.deleteMany({ where: { vendaId: venda.id } });
                 await prisma.venda.delete({ where: { id: venda.id } });
             }
         } else {
-            // CENÁRIO 0: Erro Geral. Aí sim mantemos a venda registrada como ERRO.
             await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
             await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
         }
@@ -181,7 +208,6 @@ export async function POST(request: Request) {
 
     // --- CENÁRIO 1: BYPASS DE HOMOLOGAÇÃO ---
     if (prestador.ambiente === 'HOMOLOGACAO') {
-        // Como é apenas validação, apagamos a "venda fantasma" para não constar nos relatórios financeiros
         if (!vendaId) { 
             await prisma.systemLog.deleteMany({ where: { vendaId: venda.id } });
             await prisma.venda.delete({ where: { id: venda.id } });
@@ -218,8 +244,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
-// ... GET (Listagem) Mantido igual
 
 // === GET: LISTAGEM DE NOTAS ===
 export async function GET(request: Request) {

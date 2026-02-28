@@ -23,9 +23,9 @@ export class NacionalAdapter {
     private mapRegime(regime: string): string {
         switch(regime) {
             case 'MEI': return '2'; 
-            case 'SIMPLES': return '3'; // 3 = Optante ME/EPP
+            case 'SIMPLES': return '3';
             case 'LUCRO_PRESUMIDO': 
-            case 'LUCRO_REAL': return '1'; // 1 = Não Optante
+            case 'LUCRO_REAL': return '1';
             default: return '1';
         }
     }
@@ -39,19 +39,38 @@ export class NacionalAdapter {
         return `${dateBR.getUTCFullYear()}-${pad(dateBR.getUTCMonth() + 1)}-${pad(dateBR.getUTCDate())}T${pad(dateBR.getUTCHours())}:${pad(dateBR.getUTCMinutes())}:${pad(dateBR.getUTCSeconds())}-03:00`;
     }
 
+    // === DICIONÁRIOS PARA EXPORTAÇÃO ===
+    private mapPais(pais: string): string {
+        const dict: Record<string, string> = {
+            "África do Sul": "ZA", "Alemanha": "DE", "Angola": "AO", "Arábia Saudita": "SA", 
+            "Argentina": "AR", "Austrália": "AU", "Áustria": "AT", "Bélgica": "BE", "Bolívia": "BO", 
+            "Brasil": "BR", "Canadá": "CA", "Chile": "CL", "China": "CN", "Cingapura": "SG", 
+            "Colômbia": "CO", "Coreia do Sul": "KR", "Costa Rica": "CR", "Croácia": "HR", 
+            "Dinamarca": "DK", "Egito": "EG", "Emirados Árabes Unidos": "AE", "Equador": "EC", 
+            "Espanha": "ES", "Estados Unidos": "US", "Finlândia": "FI", "França": "FR", 
+            "Grécia": "GR", "Holanda": "NL", "Hong Kong": "HK", "Índia": "IN", "Indonésia": "ID", 
+            "Irlanda": "IE", "Israel": "IL", "Itália": "IT", "Japão": "JP", "México": "MX", 
+            "Noruega": "NO", "Nova Zelândia": "NZ", "Panamá": "PA", "Paraguai": "PY", "Peru": "PE", 
+            "Polônia": "PL", "Portugal": "PT", "Reino Unido": "GB", "Rússia": "RU", "Suécia": "SE", 
+            "Suíça": "CH", "Tailândia": "TH", "Turquia": "TR", "Uruguai": "UY", "Venezuela": "VE"
+        };
+        return dict[pais] || "US"; // Fallback para US se não achar
+    }
+
+    private mapMoeda(moeda: string): string {
+        const dict: Record<string, string> = {
+            "BRL": "986", "USD": "840", "EUR": "978", "GBP": "826", "ARS": "032"
+        };
+        return dict[moeda] || "840";
+    }
+
     public toXml(rps: ICanonicalRps): string {
         const p = rps.prestador;
         const t = rps.tomador;
         const s = rps.servico as any;
         const m = rps.meta;
         
-        const r = s.retencoes || { 
-            pis: { valor: 0, retido: false },
-            cofins: { valor: 0, retido: false },
-            inss: { valor: 0, retido: false },
-            ir: { valor: 0, retido: false },
-            csll: { valor: 0, retido: false }
-        };
+        const r = s.retencoes || { pis: {}, cofins: {}, inss: {}, ir: {}, csll: {} };
 
         const dhEmi = this.formatData(m.dataEmissao);
         const dCompet = dhEmi.split('T')[0];
@@ -60,38 +79,30 @@ export class NacionalAdapter {
         const tpAmb = m.ambiente === 'PRODUCAO' ? '1' : '2';
         const opSimpNac = this.mapRegime(p.regimeTributario);
         
-        const docTomador = this.clean(t.documento);
-        const tagDocTomador = docTomador.length === 11 
-            ? `<CPF>${docTomador}</CPF>` 
-            : `<CNPJ>${docTomador}</CNPJ>`;
+        // --- LÓGICA DE EXPORTAÇÃO ---
+        const isExterior = t.tipo === 'EXT' || (t.pais && t.pais !== 'Brasil' && t.pais !== 'BR');
+        const codPais = this.mapPais(t.pais || 'Estados Unidos');
+        const codMoeda = this.mapMoeda(t.moeda || 'USD');
 
+        const docTomador = this.clean(t.documento);
+        const tagDocTomador = docTomador.length === 11 ? `<CPF>${docTomador}</CPF>` : `<CNPJ>${docTomador}</CNPJ>`;
+
+        // Regras Tributárias
         let regTribXml = `<opSimpNac>${opSimpNac}</opSimpNac>`;
-        if (opSimpNac === '3') {
-            regTribXml += `<regApTribSN>1</regApTribSN>`;
-        }
+        if (opSimpNac === '3') regTribXml += `<regApTribSN>1</regApTribSN>`;
         regTribXml += `<regEspTrib>${p.configuracoes?.regimeEspecial || '0'}</regEspTrib>`;
 
         let tribXml = `<tribMun>`;
-        tribXml += `<tribISSQN>${s.tipoTributacao || '1'}</tribISSQN>`;
+        tribXml += `<tribISSQN>${s.tipoTributacao || (isExterior ? '4' : '1')}</tribISSQN>`; // 4 = Exportação (Isento)
         tribXml += `<tpRetISSQN>${s.issRetido ? '2' : '1'}</tpRetISSQN>`;
-        
-        if (s.aliquotaAplicada && s.aliquotaAplicada > 0) {
-            tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
-        }
-        if (s.valorIss && s.valorIss > 0) {
-            tribXml += `<vISSQN>${s.valorIss.toFixed(2)}</vISSQN>`;
-        }
+        if (s.aliquotaAplicada && s.aliquotaAplicada > 0 && !isExterior) tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
+        if (s.valorIss && s.valorIss > 0 && !isExterior) tribXml += `<vISSQN>${s.valorIss.toFixed(2)}</vISSQN>`;
         tribXml += `</tribMun>`;
         
-        // ==========================================
-        // CORREÇÃO APLICADA AQUI: Tratamento do totTrib
-        // ==========================================
         if (opSimpNac === '3') {
-            // Para Simples Nacional: Envia o percentual de tributos
             const aliquotaSN = (s.aliquotaAplicada && s.aliquotaAplicada > 0) ? s.aliquotaAplicada.toFixed(2) : '6.00';
             tribXml += `<totTrib><pTotTribSN>${aliquotaSN}</pTotTribSN></totTrib>`;
         } else {
-            // Para MEI (2) e Lucro Presumido/Real (1): O Schema exige o indTotTrib
             tribXml += `<totTrib><indTotTrib>0</indTotTrib></totTrib>`;
         }
 
@@ -109,6 +120,67 @@ export class NacionalAdapter {
         const enderecoBairro = this.escapeXml(t.endereco.bairro);
         const descricaoServico = this.escapeXml(s.descricao);
 
+        // Montagem do XML <toma>
+        let tomaXml = `<toma>`;
+        if (isExterior) {
+            if (t.nif) tomaXml += `<NIF>${this.escapeXml(t.nif)}</NIF>`;
+            else tomaXml += `<cNaoNIF>2</cNaoNIF>`;
+        } else {
+            tomaXml += tagDocTomador;
+        }
+        tomaXml += `<xNome>${razaoSocialTomador}</xNome>`;
+        tomaXml += `<end>`;
+        if (isExterior) {
+            tomaXml += `<endExt>` +
+                       `<cPais>${codPais}</cPais>` +
+                       `<cEndPost>${this.escapeXml(this.clean(t.endereco.cep) || '00000')}</cEndPost>` +
+                       `<xCidade>${this.escapeXml(t.endereco.cidade || 'Exterior')}</xCidade>` +
+                       `<xEstProvReg>${this.escapeXml(t.endereco.uf || 'EX')}</xEstProvReg>` +
+                       `</endExt>`;
+        } else {
+            tomaXml += `<endNac><cMun>${this.clean(t.endereco.codigoIbge)}</cMun><CEP>${this.clean(t.endereco.cep)}</CEP></endNac>`;
+        }
+        tomaXml += `<xLgr>${enderecoLogradouro}</xLgr>` +
+                   `<nro>${this.escapeXml(t.endereco.numero) || 'SN'}</nro>`;
+        if (enderecoBairro) tomaXml += `<xBairro>${enderecoBairro}</xBairro>`;
+        tomaXml += `</end>`;
+        if (t.email) tomaXml += `<email>${t.email}</email>`;
+        if (t.telefone) tomaXml += `<fone>${this.clean(t.telefone)}</fone>`;
+        tomaXml += `</toma>`;
+
+        // Montagem do XML <serv>
+        let locPrestXml = isExterior 
+            ? `<locPrest><cPaisPrestacao>${codPais}</cPaisPrestacao></locPrest>` 
+            : `<locPrest><cLocPrestacao>${this.clean(p.endereco.codigoIbge)}</cLocPrestacao></locPrest>`;
+
+        let servXml = `<serv>` + locPrestXml + `<cServ>` +
+                      `<cTribNac>${this.clean(s.codigoTributacaoNacional)}</cTribNac>`;
+        if (s.codigoTributacaoMunicipal) servXml += `<cTribMun>${this.clean(s.codigoTributacaoMunicipal)}</cTribMun>`;
+        servXml += `<xDescServ>${descricaoServico}</xDescServ>`;
+        
+        // NBS Obrigatório para exterior
+        if (isExterior) {
+            const nbs = s.codigoNbs ? this.clean(s.codigoNbs) : '000000000';
+            servXml += `<cNBS>${nbs}</cNBS>`;
+        }
+        servXml += `</cServ>`;
+
+        // Bloco comExt
+        if (isExterior && s.valorMoedaEstrangeira) {
+            servXml += `<comExt>` +
+                       `<mdPrestacao>4</mdPrestacao>` +
+                       `<vincPrest>0</vincPrest>` +
+                       `<tpMoeda>${codMoeda}</tpMoeda>` +
+                       `<vServMoeda>${Number(s.valorMoedaEstrangeira).toFixed(2)}</vServMoeda>` +
+                       `<mecAFComexP>01</mecAFComexP>` +
+                       `<mecAFComexT>01</mecAFComexT>` +
+                       `<movTempBens>1</movTempBens>` +
+                       `<mdic>0</mdic>` +
+                       `</comExt>`;
+        }
+        servXml += `</serv>`;
+
+        // FINAL XML
         let xml = `<?xml version="1.0" encoding="UTF-8"?>` + 
         `<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01">` + 
             `<infDPS Id="${idDps}">` + 
@@ -125,26 +197,8 @@ export class NacionalAdapter {
                     (p.inscricaoMunicipal ? `<IM>${this.clean(p.inscricaoMunicipal)}</IM>` : '') + 
                     `<regTrib>${regTribXml}</regTrib>` + 
                 `</prest>` + 
-                `<toma>` + 
-                    tagDocTomador + 
-                    `<xNome>${razaoSocialTomador}</xNome>` + 
-                    `<end>` +
-                        `<endNac><cMun>${this.clean(t.endereco.codigoIbge)}</cMun><CEP>${this.clean(t.endereco.cep)}</CEP></endNac>` +
-                        `<xLgr>${enderecoLogradouro}</xLgr>` +
-                        `<nro>${t.endereco.numero}</nro>` +
-                        `<xBairro>${enderecoBairro}</xBairro>` +
-                    `</end>` + 
-                    (t.email ? `<email>${t.email}</email>` : '') + 
-                    (t.telefone ? `<fone>${this.clean(t.telefone)}</fone>` : '') + 
-                `</toma>` + 
-                `<serv>` + 
-                    `<locPrest><cLocPrestacao>${this.clean(p.endereco.codigoIbge)}</cLocPrestacao></locPrest>` + 
-                    `<cServ>` + 
-                        `<cTribNac>${this.clean(s.codigoTributacaoNacional)}</cTribNac>` +
-                        (s.codigoTributacaoMunicipal ? `<cTribMun>${this.clean(s.codigoTributacaoMunicipal)}</cTribMun>` : '') + 
-                        `<xDescServ>${descricaoServico}</xDescServ>` + 
-                    `</cServ>` + 
-                `</serv>` + 
+                tomaXml + 
+                servXml + 
                 `<valores>` +
                     `<vServPrest><vServ>${s.valor.toFixed(2)}</vServ></vServPrest>` +
                     `<trib>${tribXml}</trib>` +
@@ -155,9 +209,7 @@ export class NacionalAdapter {
             xml += `<vLiq>${Number(vLiqFinal).toFixed(2)}</vLiq>`;
         }
 
-        xml += `</valores>` + 
-            `</infDPS>` + 
-        `</DPS>`;
+        xml += `</valores>` + `</infDPS>` + `</DPS>`;
 
         return xml;
     }

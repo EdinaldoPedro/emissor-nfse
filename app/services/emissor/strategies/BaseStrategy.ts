@@ -36,7 +36,10 @@ export abstract class BaseStrategy {
     }
 
     protected validarTomador(tomador: any) {
-        if (!tomador.documento) throw new Error("CPF/CNPJ do tomador é obrigatório.");
+        // Se não for do Exterior, obriga o CPF/CNPJ
+        if (tomador.tipo !== 'EXT' && !tomador.documento) {
+            throw new Error("CPF/CNPJ do tomador é obrigatório para clientes no Brasil.");
+        }
         if (!tomador.razaoSocial) throw new Error("Nome/Razão Social do tomador é obrigatório.");
     }
 
