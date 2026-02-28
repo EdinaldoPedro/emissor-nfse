@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  const userId = request.headers.get('x-user-id');
-  if (!userId) return NextResponse.json({ error: 'Acesso negado' }, { status: 401 });
+  // 1. Usa a validação padrão de segurança do sistema
+  const { targetId, errorResponse } = await validateRequest(request);
+  if (errorResponse) return errorResponse;
+
+  const contextId = request.headers.get('x-empresa-id');
 
   try {
     const venda = await prisma.venda.findUnique({
@@ -13,7 +17,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
       include: { 
           cliente: true,
           notas: true,
-          // ADICIONADO: Busca logs para recuperar dados perdidos em caso de erro
           logs: {
               where: { action: 'DPS_GERADA' },
               orderBy: { createdAt: 'desc' },
@@ -24,9 +27,26 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
     if (!venda) return NextResponse.json({ error: 'Venda não encontrada' }, { status: 404 });
 
-    const user = await prisma.user.findUnique({ where: { id: userId }, include: { empresa: true }});
-    if (venda.empresaId !== user?.empresa?.id) {
-        return NextResponse.json({ error: 'Não autorizado' }, { status: 403 });
+    // 2. Validação de Acesso Flexível (Admin, Dono ou Contador)
+    const user = await prisma.user.findUnique({ where: { id: targetId }});
+    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user?.role || '');
+
+    let hasAccess = false;
+    if (isStaff) {
+        hasAccess = true;
+    } else if (contextId && venda.empresaId === contextId) {
+        // Se for contador acessando a empresa do cliente
+        const vinculo = await prisma.contadorVinculo.findUnique({
+            where: { contadorId_empresaId: { contadorId: targetId, empresaId: contextId } }
+        });
+        if (vinculo && vinculo.status === 'APROVADO') hasAccess = true;
+    } else if (venda.empresaId === user?.empresaId) {
+        // Se for o próprio dono da empresa
+        hasAccess = true;
+    }
+
+    if (!hasAccess) {
+        return NextResponse.json({ error: 'Não autorizado a ver esta venda.' }, { status: 403 });
     }
 
     // --- LÓGICA DE RECUPERAÇÃO DE DADOS ---
@@ -40,7 +60,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
     else if (venda.logs.length > 0 && venda.logs[0].details) {
         try {
             let details = venda.logs[0].details;
-            // Tratamento para JSON salvo como string dupla
             if (typeof details === 'string') {
                 try { 
                     const parsed = JSON.parse(details); 

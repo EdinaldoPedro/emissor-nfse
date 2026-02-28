@@ -40,12 +40,20 @@ export default function RelatoriosPage() {
     const [downloading, setDownloading] = useState(false);
 
     // Data inicial padrão
+    // Data inicial padrão
     useEffect(() => {
         const date = new Date();
         const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
-        setStartDate(firstDay.toISOString().split('T')[0]);
-        setEndDate(date.toISOString().split('T')[0]);
-    }, []);
+        
+        // Helper para formatar no padrão "YYYY-MM-DD" usando o fuso local do PC do usuário
+        const formatLocal = (d: Date) => {
+            const pad = (n: number) => n.toString().padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        };
+
+        setStartDate(formatLocal(firstDay));
+        setEndDate(formatLocal(date));
+    }, []);;
 
     // Buscar dados
     useEffect(() => {

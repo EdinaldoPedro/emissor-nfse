@@ -63,8 +63,10 @@ export async function GET(request: Request) {
     };
 
     if (startDate && endDate) {
-        const start = new Date(`${startDate}T00:00:00`); 
-        const end = new Date(`${endDate}T23:59:59.999`);
+        // O sufixo -03:00 força o Vercel a calcular as 23:59 de Brasília, 
+        // evitando que notas emitidas depois das 21h sumam.
+        const start = new Date(`${startDate}T00:00:00-03:00`); 
+        const end = new Date(`${endDate}T23:59:59.999-03:00`);
         whereClause.dataEmissao = { gte: start, lte: end };
     }
 

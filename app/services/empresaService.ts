@@ -43,30 +43,33 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       console.log(`🌍 [SERVICE] Buscando dados na BrasilAPI...`);
       const res = await fetchSafe(`https://brasilapi.com.br/api/cnpj/v1/${docLimpo}`);
       
-      if (res && res.ok) {
-          const raw = await res.json();
-          let ibgeValido = null;
-          if (raw.codigo_municipio) {
-              const cod = String(raw.codigo_municipio).replace(/\D/g, '');
-              if (cod.length === 7) ibgeValido = cod;
-          }
-          dadosApi = {
-              razaoSocial: raw.razao_social,
-              nomeFantasia: raw.nome_fantasia || raw.razao_social,
-              email: raw.email,
-              cep: raw.cep,
-              logradouro: raw.logradouro,
-              numero: raw.numero,
-              bairro: raw.bairro,
-              cidade: raw.municipio,
-              uf: raw.uf,
-              codigoIbge: ibgeValido, 
-              cnaes: []
-          };
-          if (raw.cnae_fiscal) dadosApi.cnaes.push({ codigo: String(raw.cnae_fiscal), descricao: raw.cnae_fiscal_descricao, principal: true });
-          if (raw.cnaes_secundarios) {
-              raw.cnaes_secundarios.forEach((c: any) => dadosApi.cnaes.push({ codigo: String(c.codigo), descricao: c.descricao, principal: false }));
-          }
+      if (!res || !res.ok) {
+          // SE O CNPJ FOR INVÁLIDO OU A RECEITA CAIR, BLOQUEIA A CRIAÇÃO DE EMPRESA "FANTASMA"
+          throw new Error("CNPJ inválido ou não encontrado na base da Receita Federal.");
+      }
+
+      const raw = await res.json();
+      let ibgeValido = null;
+      if (raw.codigo_municipio) {
+          const cod = String(raw.codigo_municipio).replace(/\D/g, '');
+          if (cod.length === 7) ibgeValido = cod;
+      }
+      dadosApi = {
+          razaoSocial: raw.razao_social,
+          nomeFantasia: raw.nome_fantasia || raw.razao_social,
+          email: raw.email,
+          cep: raw.cep,
+          logradouro: raw.logradouro,
+          numero: raw.numero,
+          bairro: raw.bairro,
+          cidade: raw.municipio,
+          uf: raw.uf,
+          codigoIbge: ibgeValido, 
+          cnaes: []
+      };
+      if (raw.cnae_fiscal) dadosApi.cnaes.push({ codigo: String(raw.cnae_fiscal), descricao: raw.cnae_fiscal_descricao, principal: true });
+      if (raw.cnaes_secundarios) {
+          raw.cnaes_secundarios.forEach((c: any) => dadosApi.cnaes.push({ codigo: String(c.codigo), descricao: c.descricao, principal: false }));
       }
   }
 

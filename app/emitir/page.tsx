@@ -310,21 +310,33 @@ function EmitirNotaContent() {
 
     if (retryId) {
         setLoadingRetry(true);
-        fetch(`/api/vendas/${retryId}`, { headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}` } })
+        fetch(`/api/vendas/${retryId}`, { 
+            headers: { 
+                'x-user-id': userId, 
+                'Authorization': `Bearer ${token}`,
+                'x-empresa-id': contextId || '' // <--- A CORREÇÃO PRINCIPAL ESTÁ AQUI
+            } 
+        })
             .then(async res => {
                 if (res.ok) {
                     const venda = await res.json();
                     const cnaeParaUsar = venda.cnaeRecuperado || venda.notas?.[0]?.cnae || "";
                     setNfData(prev => ({
                         ...prev,
-                        clienteId: venda.clienteId, clienteNome: venda.cliente?.nome || "Cliente", 
-                        valor: venda.valor, servicoDescricao: venda.descricao,
+                        clienteId: venda.clienteId, 
+                        clienteNome: venda.cliente?.razaoSocial || venda.cliente?.nome || "Cliente", 
+                        valor: String(venda.valor), // Garante que é lido como string
+                        servicoDescricao: venda.descricao,
                         codigoCnae: cnaeParaUsar || prev.codigoCnae
                     }));
-                    setStep(2);
+                    setStep(2); // Avança para o Passo 2 automaticamente!
+                } else {
+                    // Impede de falhar silenciosamente se der erro de permissão
+                    const erro = await res.json();
+                    dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao recuperar dados da venda." });
                 }
             })
-            .catch(() => dialog.showAlert({ type: 'danger', description: "Erro ao recuperar dados." }))
+            .catch(() => dialog.showAlert({ type: 'danger', description: "Erro de conexão ao recuperar dados." }))
             .finally(() => setLoadingRetry(false));
     }
   }, [router, retryId]);
@@ -368,6 +380,7 @@ function EmitirNotaContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' },
         body: JSON.stringify({
+          vendaId: retryId, // <--- A CORREÇÃO ESTÁ AQUI (Avisa o backend para ATUALIZAR)
           clienteId: nfData.clienteId,
           valor: nfData.valor,
           valorMoedaEstrangeira: nfData.valorMoedaEstrangeira,
