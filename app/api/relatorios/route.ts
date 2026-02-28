@@ -3,6 +3,8 @@ import { PrismaClient } from '@prisma/client';
 import { checkPlanLimits } from '@/app/services/planService'; 
 import { validateRequest } from '@/app/utils/api-security';
 
+export const dynamic = 'force-dynamic';
+
 const prisma = new PrismaClient();
 
 export async function GET(request: Request) {
