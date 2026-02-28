@@ -6,7 +6,6 @@ export class SimplesNacionalHandler implements IRegimeHandler {
     async getDadosTributarios(venda: any, empresa: any): Promise<Partial<ICanonicalRps['servico']>> {
         
         // 1. Resolve particularidades municipais (Recife vs Rio)
-        // ATENÇÃO: Passamos empresa.id agora
         const codigosLocais = await TaxCodeResolver.resolve(
             empresa.codigoIbge, 
             venda.cnae || empresa.cnaePrincipal,
@@ -16,22 +15,20 @@ export class SimplesNacionalHandler implements IRegimeHandler {
         // 2. Prepara Valores
         const valor = Number(venda.valor);
         const issRetido = venda.issRetido === true;
-        
-        // Se retido, usa a alíquota da venda (2-5%). Se não, usa a do cadastro (DAS).
-        const aliquota = issRetido 
-            ? Number(venda.aliquota) 
-            : Number(empresa.aliquotaPadrao || 0);
+
+        const aliquota = Number(venda.aliquota) || Number(empresa.aliquotaPadrao) || 0;
             
         const valorIss = valor * (aliquota / 100);
+        
 
         // 3. Processa Retenções Federais (se houver)
         const r = venda.retencoes || {}; 
         const retencoes = {
-            pis: { valor: Number(r.pis?.valor) || 0, retido: !!r.pis?.retido },
-            cofins: { valor: Number(r.cofins?.valor) || 0, retido: !!r.cofins?.retido },
-            inss: { valor: Number(r.inss?.valor) || 0, retido: !!r.inss?.retido },
-            ir: { valor: Number(r.ir?.valor) || 0, retido: !!r.ir?.retido },
-            csll: { valor: Number(r.csll?.valor) || 0, retido: !!r.csll?.retido }
+            pis: { valor: Number(r.pis?.valor) || 0, retido: !!r.pis?.retido, aliquota: Number(r.pis?.aliquota) || 0 },
+            cofins: { valor: Number(r.cofins?.valor) || 0, retido: !!r.cofins?.retido, aliquota: Number(r.cofins?.aliquota) || 0 },
+            inss: { valor: Number(r.inss?.valor) || 0, retido: !!r.inss?.retido, aliquota: Number(r.inss?.aliquota) || 0 },
+            ir: { valor: Number(r.ir?.valor) || 0, retido: !!r.ir?.retido, aliquota: Number(r.ir?.aliquota) || 0 },
+            csll: { valor: Number(r.csll?.valor) || 0, retido: !!r.csll?.retido, aliquota: Number(r.csll?.aliquota) || 0 }
         };
 
         // 4. Calcula Líquido
@@ -49,7 +46,7 @@ export class SimplesNacionalHandler implements IRegimeHandler {
             descricao: venda.descricao,
             cnae: venda.cnae || empresa.cnaePrincipal,
             itemListaServico: venda.itemLc || '01.01',
-            codigoTributacaoNacional: venda.codigoTribNacional, // Ex: 1.01.01
+            codigoTributacaoNacional: venda.codigoTribNacional, // Ex: 010601
 
             // Dados Fiscais
             aliquotaAplicada: aliquota,
@@ -57,9 +54,10 @@ export class SimplesNacionalHandler implements IRegimeHandler {
             issRetido: issRetido,
             tipoTributacao: '1', // 1 - Tributação no município (Regra geral)
 
-            // Injeção do Resolver (Ex: Recife exige isso)
-            codigoNbs: codigosLocais.codigoNbs,
-            codigoTributacaoMunicipal: codigosLocais.codigoMunicipal,
+            // === A CORREÇÃO ESTÁ AQUI ===
+            // Dá preferência para a regra local (se existir), senão usa o banco global (da rota API)
+            codigoNbs: codigosLocais.codigoNbs || venda.codigoNbs,
+            codigoTributacaoMunicipal: codigosLocais.codigoMunicipal || venda.codigoTributacaoMunicipal,
 
             retencoes: retencoes
         };

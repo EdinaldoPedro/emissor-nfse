@@ -4,6 +4,8 @@ export interface ICanonicalRps {
         documento: string;
         inscricaoMunicipal?: string;
         regimeTributario: 'MEI' | 'SIMPLES' | 'LUCRO_PRESUMIDO' | 'LUCRO_REAL';
+        telefone?: string; // <--- ADICIONADO AQUI
+        email?: string;    // <--- ADICIONADO AQUI
         endereco: {
             codigoIbge: string;
             uf: string;
@@ -28,6 +30,7 @@ export interface ICanonicalRps {
             cep: string;
             logradouro: string;
             numero: string;
+            complemento?: string; // <--- ADICIONE ESTA LINHA
             bairro: string;
             cidade?: string;
             codigoIbge: string;

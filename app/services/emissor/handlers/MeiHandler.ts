@@ -17,11 +17,12 @@ export class MeiHandler implements IRegimeHandler {
             aliquotaAplicada: 0,
             valorIss: 0,
             issRetido: false,
-            tipoTributacao: '1', // Operação Tributável (ou específica de MEI dependendo do município)
+            tipoTributacao: '1', 
             
-            // MEI geralmente ignora códigos complexos
-            codigoNbs: undefined,
-            codigoTributacaoMunicipal: undefined,
+            // === A CORREÇÃO ESTÁ AQUI ===
+            // Repassa o que veio da API
+            codigoNbs: venda.codigoNbs,
+            codigoTributacaoMunicipal: venda.codigoTributacaoMunicipal,
 
             retencoes: {
                 pis: { valor: 0, retido: false },

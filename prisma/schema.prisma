@@ -95,7 +95,7 @@ model User {
 model Empresa {
   id        String   @id @default(uuid())
   documento String   @unique
-  ambiente  String   @default("HOMOLOGACAO")
+  ambiente  String   @default("PRODUCAO")
   
   cadastroCompleto Boolean @default(false)
 
@@ -310,7 +310,7 @@ model ConfiguracaoSistema {
   id             String @id @default("config")
   modeloDpsJson  String?
   versaoApi      String @default("1.00")
-  ambiente       String @default("HOMOLOGACAO")
+  ambiente       String @default("PRODUCAO")
   
   smtpHost       String?
   smtpPort       Int?    @default(587)

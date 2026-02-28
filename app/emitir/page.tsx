@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Users, Briefcase, Loader2, Home, UserPlus, Settings, AlertTriangle } from "lucide-react";
+import { CheckCircle, ArrowRight, ArrowLeft, Building2, Calculator, FileCheck, Briefcase, Loader2, Home, UserPlus, AlertTriangle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDialog } from "@/app/contexts/DialogContext";
 import Link from "next/link";
@@ -13,6 +13,11 @@ interface CnaeDB {
   principal: boolean;
   codigoNbs?: string;
   temRetencaoInss?: boolean; 
+  retemCrsf?: boolean;
+  aliquotaCrsf?: number;
+  retemIr?: boolean;
+  aliquotaIr?: number;
+  aliquotaIss?: number;
 }
 
 interface ClienteDB {
@@ -24,7 +29,6 @@ interface ClienteDB {
   moeda?: string;
 }
 
-// === COMPONENTE DE CONTEÚDO ===
 function EmitirNotaContent() {
   const router = useRouter();
   const searchParams = useSearchParams(); 
@@ -42,7 +46,7 @@ function EmitirNotaContent() {
   const [meusCnaes, setMeusCnaes] = useState<CnaeDB[]>([]);
   
   const [perfilEmpresa, setPerfilEmpresa] = useState<any>(null); 
-  const [permiteINSS, setPermiteINSS] = useState(false);
+  const [wasAboveThreshold, setWasAboveThreshold] = useState(false);
 
   const [nfData, setNfData] = useState({
     clienteId: "", 
@@ -55,61 +59,39 @@ function EmitirNotaContent() {
     issRetido: false 
   });
 
+  // Estado das retenções agora guarda os números formatados como string (sem a trava do checkbox)
   const [retencoes, setRetencoes] = useState({
-      inss: { retido: false, aliquota: '', base: '', valor: 0 },
-      pis: { retido: false, aliquota: '0.65', valor: 0 },
-      cofins: { retido: false, aliquota: '3.00', valor: 0 },
-      ir: { retido: false, aliquota: '1.50', valor: 0 },
-      csll: { retido: false, aliquota: '1.00', valor: 0 }
+      inss: { aliquota: '0.00', valor: '0.00' },
+      pis: { aliquota: '0.00', valor: '0.00' },
+      cofins: { aliquota: '0.00', valor: '0.00' },
+      csll: { aliquota: '0.00', valor: '0.00' },
+      ir: { aliquota: '0.00', valor: '0.00' }
   });
 
-  // === TRATAMENTO DE ERROS INTELIGENTE (ATUALIZADO PARA OS 5 CENÁRIOS) ===
+  // === TRATAMENTO DE ERROS ===
   const tratarErroEmissao = async (respostaErro: any) => {
-      // 1. O Backend mandou uma "User Action" específica (Cadastro Incompleto, Certificado, IM, DPS)?
       if (respostaErro.userAction) {
           const actionText = respostaErro.userAction;
 
-          // Cenário 4 e 5: Faltou algo no cadastro (Certificado ou Dados Básicos)
           if (actionText.includes("Certificado Digital") || actionText.includes("Cadastro incompleto")) {
-              const irConfig = await dialog.showConfirm({
-                  type: 'danger',
-                  title: 'Atenção ao Cadastro',
-                  description: actionText,
-                  confirmText: 'Ir para Configurações',
-                  cancelText: 'Mais tarde'
-              });
+              const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Atenção ao Cadastro', description: actionText, confirmText: 'Ir para Configurações', cancelText: 'Mais tarde' });
               if (irConfig) router.push('/configuracoes');
               return;
           }
 
-          // Cenário 2: Erro de Inscrição Municipal na Sefaz
           if (actionText.includes("Inscrição Municipal")) {
-              const irConfig = await dialog.showConfirm({
-                  type: 'danger',
-                  title: 'Inscrição Municipal (I.M)',
-                  description: actionText,
-                  confirmText: 'Atualizar I.M Agora',
-                  cancelText: 'Mais tarde'
-              });
+              const irConfig = await dialog.showConfirm({ type: 'danger', title: 'Inscrição Municipal (I.M)', description: actionText, confirmText: 'Atualizar I.M Agora', cancelText: 'Mais tarde' });
               if (irConfig) router.push('/configuracoes');
               return;
           }
 
-          // Cenário 3: DPS Duplicado
           if (actionText.includes("número de DPS")) {
-               await dialog.showAlert({ 
-                  type: 'warning', 
-                  title: 'Numeração Duplicada', 
-                  description: actionText 
-              });
-              // Opcional: Se quiser que ele não saia da tela, comente a linha abaixo. 
-              // Mas o ideal é voltar pro dashboard para ele não gerar duplicidade.
+               await dialog.showAlert({ type: 'warning', title: 'Numeração Duplicada', description: actionText });
               router.push('/cliente/dashboard');
               return;
           }
       }
 
-      // Cenário 0: Erro Genérico / Técnico (Se o backend não previu)
       let msgTecnica = "";
       if (Array.isArray(respostaErro.details)) {
           msgTecnica = respostaErro.details.map((d: any) => d.mensagem || JSON.stringify(d)).join('. ');
@@ -119,135 +101,11 @@ function EmitirNotaContent() {
           msgTecnica = respostaErro.error || "Erro desconhecido ao comunicar com a Prefeitura.";
       }
 
-      await dialog.showAlert({ 
-          type: 'danger', 
-          title: 'Falha na Emissão', 
-          description: `Houve uma rejeição na Prefeitura: ${msgTecnica}` 
-      });
+      await dialog.showAlert({ type: 'danger', title: 'Falha na Emissão', description: `Houve uma rejeição na Prefeitura: ${msgTecnica}` });
       router.push('/cliente/dashboard');
   };
 
-  const calcularRetencao = (tipo: string, baseVal: string, aliqVal: string) => {
-      const base = parseFloat(baseVal) || 0;
-      const aliq = parseFloat(aliqVal) || 0;
-      const valor = base * (aliq / 100);
-      setRetencoes(prev => ({
-          ...prev,
-          [tipo]: { ...prev[tipo as keyof typeof retencoes], base: baseVal, aliquota: aliqVal, valor }
-      }));
-  };
-
-  const toggleRetencao = (tipo: string) => {
-      setRetencoes(prev => {
-          const atual = prev[tipo as keyof typeof retencoes];
-          const novoEstado = !atual.retido;
-          
-          if (tipo === 'inss' && novoEstado) {
-              const valNota = nfData.valor || '0';
-              return { ...prev, inss: { ...atual, retido: true, base: valNota, aliquota: '11.00', valor: (parseFloat(valNota) * 0.11) } };
-          }
-          if (novoEstado && tipo !== 'inss') {
-               const valNota = parseFloat(nfData.valor) || 0;
-               const aliq = parseFloat(atual.aliquota) || 0;
-               return { ...prev, [tipo]: { ...atual, retido: true, valor: valNota * (aliq / 100) } };
-          }
-          return { ...prev, [tipo]: { ...atual, retido: novoEstado, valor: novoEstado ? atual.valor : 0 } };
-      });
-  };
-
-  useEffect(() => {
-      if (nfData.valor && retencoes.inss.retido) {
-          calcularRetencao('inss', nfData.valor, retencoes.inss.aliquota);
-      }
-  }, [nfData.valor]);
-
-  useEffect(() => {
-      if (!meusCnaes.length) return;
-      const cnaeSelecionado = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
-      const deveReter = cnaeSelecionado?.temRetencaoInss || false;
-      setPermiteINSS(deveReter);
-      if (!deveReter) {
-          setRetencoes(prev => ({ ...prev, inss: { ...prev.inss, retido: false, valor: 0 } }));
-      }
-  }, [nfData.codigoCnae, meusCnaes]);
-
-  // === CARREGAMENTO INICIAL ===
-  useEffect(() => {
-    const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
-    const contextId = localStorage.getItem('empresaContextId');
-    if(!userId || !token) { router.push('/login'); return; }
-
-    // Perfil
-    fetch('/api/perfil', { 
-        headers: { 
-            'x-user-id': userId,
-            'Authorization': `Bearer ${token}`,
-            'x-empresa-id': contextId || ''
-        } 
-    })
-      .then(res => res.json())
-      .then(data => {
-         if(data && !data.error) {
-             setPerfilEmpresa(data);
-             if (data.atividades && Array.isArray(data.atividades)) {
-                 setMeusCnaes(data.atividades);
-                 setNfData(prev => {
-                     const updates: any = {};
-                     if (!prev.codigoCnae && data.atividades.length > 0) {
-                         const principal = data.atividades.find((c: CnaeDB) => c.principal);
-                         updates.codigoCnae = principal ? principal.codigo : data.atividades[0].codigo;
-                     }
-                     updates.aliquota = data.regimeTributario === 'MEI' ? '0' : (data.aliquotaPadrao || '');
-                     updates.issRetido = data.issRetidoPadrao || false;
-                     return { ...prev, ...updates };
-                 });
-             }
-         }
-      }).catch(console.error);
-
-    // Clientes
-    fetch('/api/clientes', { 
-        headers: { 
-            'x-user-id': userId, 
-            'x-empresa-id': contextId || '',
-            'Authorization': `Bearer ${token}` 
-        } 
-    })
-      .then(res => res.json())
-      .then(data => {
-          if (Array.isArray(data)) setClientes(data);
-          else setClientes([]); 
-      }).catch(() => setClientes([]));
-
-    // Modo Retry
-    if (retryId) {
-        setLoadingRetry(true);
-        fetch(`/api/vendas/${retryId}`, { 
-            headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}` } 
-        })
-            .then(async res => {
-                if (res.ok) {
-                    const venda = await res.json();
-                    const cnaeParaUsar = venda.cnaeRecuperado || venda.notas?.[0]?.cnae || "";
-                    setNfData(prev => ({
-                        ...prev,
-                        clienteId: venda.clienteId,
-                        clienteNome: venda.cliente?.nome || "Cliente", 
-                        valor: venda.valor,
-                        servicoDescricao: venda.descricao,
-                        codigoCnae: cnaeParaUsar || prev.codigoCnae,
-                        aliquota: prev.aliquota 
-                    }));
-                    setStep(2);
-                }
-            })
-            .catch(() => dialog.showAlert({ type: 'danger', description: "Erro ao recuperar dados." }))
-            .finally(() => setLoadingRetry(false));
-    }
-  }, [router, retryId]);
-
-  // === FORMATADORES DE MOEDA ===
+  // === FORMATADORES DE MOEDA E PORCENTAGEM ===
   const formatarMoedaInput = (valor: string | number) => {
     const v = Number(valor) || 0;
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 }).format(v);
@@ -258,12 +116,16 @@ function EmitirNotaContent() {
     try {
         return new Intl.NumberFormat("en-US", { style: "currency", currency: moeda, minimumFractionDigits: 2 }).format(v);
     } catch (e) {
-        // Fallback seguro caso o código da moeda seja inválido no Intl
         return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(v);
     }
   };
 
-  // === HANDLERS DE VALOR ===
+  const formatarPorcentagem = (inputValue: string) => {
+      const apenasNumeros = inputValue.replace(/\D/g, "");
+      if (!apenasNumeros) return "0.00";
+      return (parseInt(apenasNumeros) / 100).toFixed(2);
+  };
+
   const handleValorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const apenasNumeros = e.target.value.replace(/\D/g, "");
     if (!apenasNumeros) { setNfData({ ...nfData, valor: "0" }); return; }
@@ -277,6 +139,195 @@ function EmitirNotaContent() {
     const valorNumerico = parseInt(apenasNumeros) / 100;
     setNfData({ ...nfData, valorMoedaEstrangeira: String(valorNumerico) });
   };
+
+  // === HANDLERS LIVRES PARA O USUÁRIO EDITAR RETENÇÕES ===
+  const handleAliquotaRetencaoChange = (imposto: string, inputValue: string) => {
+      const novaAliquota = formatarPorcentagem(inputValue);
+      setRetencoes(prev => {
+          const valorNota = parseFloat(nfData.valor) || 0;
+          return {
+              ...prev,
+              [imposto]: { 
+                  aliquota: novaAliquota, 
+                  valor: (valorNota * (parseFloat(novaAliquota) / 100)).toFixed(2) 
+              }
+          };
+      });
+  };
+
+  const handleValorRetencaoChange = (imposto: string, inputValue: string) => {
+      const apenasNumeros = inputValue.replace(/\D/g, "");
+      const novoValorStr = apenasNumeros ? (parseInt(apenasNumeros) / 100).toFixed(2) : "0.00";
+      setRetencoes(prev => ({
+          ...prev,
+          [imposto]: { 
+              ...prev[imposto as keyof typeof prev], 
+              valor: novoValorStr 
+          }
+      }));
+  };
+
+  // === INTELIGÊNCIA CEREBRAL (Cálculo Automático) ===
+  
+  // 1. Dispara ao selecionar o Cliente ou o CNAE (Define o Padrão do Painel Admin)
+  useEffect(() => {
+      const cliente = clientes.find(c => c.id === nfData.clienteId);
+      const cnae = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
+      const valorFloat = parseFloat(nfData.valor) || 0;
+
+      // Se for PF ou Exterior, esvazia tudo
+      if (!cliente || !cnae || cliente.tipo === 'PF' || cliente.tipo === 'EXT') {
+          setRetencoes({
+              inss: { aliquota: '0.00', valor: '0.00' },
+              pis: { aliquota: '0.00', valor: '0.00' },
+              cofins: { aliquota: '0.00', valor: '0.00' },
+              csll: { aliquota: '0.00', valor: '0.00' },
+              ir: { aliquota: '0.00', valor: '0.00' }
+          });
+          if (cliente?.tipo === 'PF' || cliente?.tipo === 'EXT') {
+              setNfData(prev => ({ ...prev, issRetido: false }));
+          }
+          return;
+      }
+
+      // Se for PJ e Lucro, monta a sugestão base
+      if (cliente.tipo === 'PJ' && ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario)) {
+          const isAbove = valorFloat > 215.05;
+          const next = {
+              inss: { aliquota: '0.00', valor: '0.00' },
+              pis: { aliquota: '0.00', valor: '0.00' },
+              cofins: { aliquota: '0.00', valor: '0.00' },
+              csll: { aliquota: '0.00', valor: '0.00' },
+              ir: { aliquota: '0.00', valor: '0.00' }
+          };
+
+          if (cnae.temRetencaoInss) next.inss.aliquota = '11.00';
+          if (cnae.retemIr) next.ir.aliquota = cnae.aliquotaIr ? Number(cnae.aliquotaIr).toFixed(2) : '1.50';
+
+          if (cnae.retemCrsf && isAbove) {
+              next.pis.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (0.65/4.65)).toFixed(2) : '0.65';
+              next.cofins.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (3.00/4.65)).toFixed(2) : '3.00';
+              next.csll.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (1.00/4.65)).toFixed(2) : '1.00';
+          }
+
+          // Calcula os valores em R$ com as alíquotas definidas
+          ['inss', 'pis', 'cofins', 'csll', 'ir'].forEach(key => {
+              const k = key as keyof typeof next;
+              next[k].valor = (valorFloat * (parseFloat(next[k].aliquota) / 100)).toFixed(2);
+          });
+
+          setRetencoes(next);
+          setWasAboveThreshold(isAbove);
+      }
+  }, [nfData.codigoCnae, nfData.clienteId]);
+
+  // 2. Dispara quando o Valor Bruto (R$) muda
+  useEffect(() => {
+      const cliente = clientes.find(c => c.id === nfData.clienteId);
+      const cnae = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
+      const valorFloat = parseFloat(nfData.valor) || 0;
+      const isAbove = valorFloat > 215.05;
+
+      if (!cliente || !cnae || cliente.tipo === 'PF' || cliente.tipo === 'EXT') return;
+
+      setRetencoes(prev => {
+          const next = JSON.parse(JSON.stringify(prev)); // Copia limpa do estado atual
+          
+          // Verifica a regra da Receita (Se cruzou a linha de 215,05 liga ou desliga sozinho)
+          if (cnae.retemCrsf && isAbove !== wasAboveThreshold) {
+              if (isAbove) {
+                  next.pis.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (0.65/4.65)).toFixed(2) : '0.65';
+                  next.cofins.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (3.00/4.65)).toFixed(2) : '3.00';
+                  next.csll.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (1.00/4.65)).toFixed(2) : '1.00';
+              } else {
+                  next.pis.aliquota = '0.00';
+                  next.cofins.aliquota = '0.00';
+                  next.csll.aliquota = '0.00';
+              }
+              setWasAboveThreshold(isAbove);
+          }
+
+          // Recalcula todos os valores baseados na alíquota visível na tela
+          ['inss', 'pis', 'cofins', 'csll', 'ir'].forEach(key => {
+              const k = key as keyof typeof next;
+              next[k].valor = (valorFloat * (parseFloat(next[k].aliquota) / 100)).toFixed(2);
+          });
+
+          return next;
+      });
+  }, [nfData.valor]);
+
+
+  // === CARREGAMENTO INICIAL ===
+  useEffect(() => {
+    const userId = localStorage.getItem('userId');
+    const token = localStorage.getItem('token');
+    const contextId = localStorage.getItem('empresaContextId');
+    if(!userId || !token) { router.push('/login'); return; }
+
+    fetch('/api/perfil', { headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' } })
+      .then(res => res.json())
+      .then(data => {
+         if(data && !data.error) {
+             setPerfilEmpresa(data);
+             if (data.atividades && Array.isArray(data.atividades)) {
+                 setMeusCnaes(data.atividades);
+                 setNfData(prev => {
+                     const updates: any = {};
+                     let cnaePrincipalObj = null;
+
+                     if (!prev.codigoCnae && data.atividades.length > 0) {
+                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.principal) || data.atividades[0];
+                         updates.codigoCnae = cnaePrincipalObj.codigo;
+                     } else {
+                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.codigo === prev.codigoCnae);
+                     }
+
+                     let aliquotaSugerida = '0.00';
+                     if (data.regimeTributario !== 'MEI') {
+                         // 1. Tenta pegar a alíquota específica do CNAE no Município
+                         if (cnaePrincipalObj && cnaePrincipalObj.aliquotaIss !== null && cnaePrincipalObj.aliquotaIss !== undefined) {
+                             aliquotaSugerida = Number(cnaePrincipalObj.aliquotaIss).toFixed(2);
+                         // 2. Fallback para a alíquota padrão da Empresa
+                         } else if (data.aliquotaPadrao !== null && data.aliquotaPadrao !== undefined) {
+                             aliquotaSugerida = Number(data.aliquotaPadrao).toFixed(2);
+                         } else {
+                             aliquotaSugerida = '3.00'; // Fallback final
+                         }
+                     }
+
+                     updates.aliquota = aliquotaSugerida;
+                     updates.issRetido = data.issRetidoPadrao || false;
+                     return { ...prev, ...updates };
+                 });
+             }
+         }
+      }).catch(console.error);
+
+    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '', 'Authorization': `Bearer ${token}` } })
+      .then(res => res.json())
+      .then(data => { if (Array.isArray(data)) setClientes(data); }).catch(() => setClientes([]));
+
+    if (retryId) {
+        setLoadingRetry(true);
+        fetch(`/api/vendas/${retryId}`, { headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}` } })
+            .then(async res => {
+                if (res.ok) {
+                    const venda = await res.json();
+                    const cnaeParaUsar = venda.cnaeRecuperado || venda.notas?.[0]?.cnae || "";
+                    setNfData(prev => ({
+                        ...prev,
+                        clienteId: venda.clienteId, clienteNome: venda.cliente?.nome || "Cliente", 
+                        valor: venda.valor, servicoDescricao: venda.descricao,
+                        codigoCnae: cnaeParaUsar || prev.codigoCnae
+                    }));
+                    setStep(2);
+                }
+            })
+            .catch(() => dialog.showAlert({ type: 'danger', description: "Erro ao recuperar dados." }))
+            .finally(() => setLoadingRetry(false));
+    }
+  }, [router, retryId]);
 
   const handleNext = async () => {
     if (step === 1) {
@@ -292,15 +343,6 @@ function EmitirNotaContent() {
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     
-    // Validação da Alíquota de Retenção
-    if (nfData.issRetido && perfilEmpresa?.regimeTributario !== 'MEI') {
-        const aliq = parseFloat(nfData.aliquota);
-        if (!aliq || aliq < 2 || aliq > 5) {
-            dialog.showAlert("A alíquota de ISS deve ser entre 2% e 5% quando retido.");
-            return;
-        }
-    }
-
     setLoading(true);
     setProgressPercent(10);
     setProgressStatus("Preparando envio...");
@@ -310,12 +352,13 @@ function EmitirNotaContent() {
     const contextId = localStorage.getItem('empresaContextId'); 
     
     try {
+      // Monta as retenções dinamicamente. Se o valor for > 0, manda "retido: true".
       const payloadRetencoes = {
-          inss: retencoes.inss.retido ? { retido: true, valor: retencoes.inss.valor, aliquota: parseFloat(retencoes.inss.aliquota) } : null,
-          pis: retencoes.pis.retido ? { retido: true, valor: retencoes.pis.valor } : null,
-          cofins: retencoes.cofins.retido ? { retido: true, valor: retencoes.cofins.valor } : null,
-          ir: retencoes.ir.retido ? { retido: true, valor: retencoes.ir.valor } : null,
-          csll: retencoes.csll.retido ? { retido: true, valor: retencoes.csll.valor } : null,
+          inss: parseFloat(retencoes.inss.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.inss.valor), aliquota: parseFloat(retencoes.inss.aliquota) } : null,
+          pis: parseFloat(retencoes.pis.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.pis.valor), aliquota: parseFloat(retencoes.pis.aliquota) } : null,
+          cofins: parseFloat(retencoes.cofins.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.cofins.valor), aliquota: parseFloat(retencoes.cofins.aliquota) } : null,
+          ir: parseFloat(retencoes.ir.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.ir.valor), aliquota: parseFloat(retencoes.ir.aliquota) } : null,
+          csll: parseFloat(retencoes.csll.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.csll.valor), aliquota: parseFloat(retencoes.csll.aliquota) } : null,
       };
 
       setProgressPercent(40);
@@ -323,12 +366,7 @@ function EmitirNotaContent() {
 
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json', 
-            'x-user-id': userId || '', 
-            'Authorization': `Bearer ${token}`,
-            'x-empresa-id': contextId || '' 
-        },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' },
         body: JSON.stringify({
           clienteId: nfData.clienteId,
           valor: nfData.valor,
@@ -347,22 +385,11 @@ function EmitirNotaContent() {
         setProgressPercent(100);
         setProgressStatus("Concluído!");
 
-        // --- CENÁRIO 1: BYPASS DE HOMOLOGAÇÃO ---
         if (resposta.isHomologation) {
-            const irConfig = await dialog.showConfirm({
-                type: 'success',
-                title: 'Tudo certo em Homologação!',
-                description: 'As configurações da sua nota estão perfeitas. Para emitir com valor fiscal real, mude o ambiente da sua empresa para PRODUÇÃO nas configurações.',
-                confirmText: 'Mudar para Produção',
-                cancelText: 'Voltar ao Início'
-            });
-            if (irConfig) {
-                 router.push('/configuracoes');
-            } else {
-                 router.push('/cliente/dashboard');
-            }
+            const irConfig = await dialog.showConfirm({ type: 'success', title: 'Tudo certo em Homologação!', description: 'As configurações da sua nota estão perfeitas. Mude para PRODUÇÃO nas configurações.', confirmText: 'Mudar para Produção', cancelText: 'Voltar ao Início' });
+            if (irConfig) router.push('/configuracoes');
+            else router.push('/cliente/dashboard');
         } else {
-            // Cenário Produção Normal
             await dialog.showAlert({ type: 'success', title: 'Sucesso Total!', description: 'Nota emitida e autorizada na Prefeitura.' });
             router.push('/cliente/dashboard');
         }
@@ -373,29 +400,27 @@ function EmitirNotaContent() {
         dialog.showAlert("Erro de Conexão. Verifique sua internet."); 
         router.push('/cliente/dashboard');
     } 
-    finally { 
-        setLoading(false); 
-    }
+    finally { setLoading(false); }
   };
 
-  // === VARIÁVEIS DE CONTROLE E DEPENDÊNCIAS DO UI ===
   const clienteSel = clientes.find(c => c.id === nfData.clienteId);
   const isExterior = clienteSel?.tipo === 'EXT';
+  const isPF = clienteSel?.tipo === 'PF';
+  const isPJ = clienteSel?.tipo === 'PJ';
+  
+  // Oculta completamente a tabela de impostos federais se for PF ou Exterior
+  const mostraRetencoesFederais = isPJ && !isPF && !isExterior && ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
+  
+  const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
 
   const valorNumerico = parseFloat(nfData.valor) || 0;
   const valorEstrangeiroNum = parseFloat(nfData.valorMoedaEstrangeira) || 0;
-  
-  const isStep2Invalid = step === 2 && (
-      valorNumerico <= 0 || 
-      !nfData.servicoDescricao.trim() || 
-      (isExterior && valorEstrangeiroNum <= 0)
-  );
+  const isStep2Invalid = step === 2 && (valorNumerico <= 0 || !nfData.servicoDescricao.trim() || (isExterior && valorEstrangeiroNum <= 0));
 
-  // Trata a descrição do CNAE na aba de revisão
-  const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
-  const cnaeDescricaoCurta = cnaeSelecionadoObj?.descricao 
-      ? (cnaeSelecionadoObj.descricao.length > 20 ? cnaeSelecionadoObj.descricao.substring(0, 20) + '...' : cnaeSelecionadoObj.descricao)
-      : '';
+  const cnaeDescricaoCurta = cnaeSelecionadoObj?.descricao ? (cnaeSelecionadoObj.descricao.length > 20 ? cnaeSelecionadoObj.descricao.substring(0, 20) + '...' : cnaeSelecionadoObj.descricao) : '';
+
+  const totalRetido = Object.values(retencoes).reduce((acc, curr) => acc + parseFloat(curr.valor), 0);
+  const valorLiquido = valorNumerico - (nfData.issRetido ? (valorNumerico * (parseFloat(nfData.aliquota)/100)) : 0) - totalRetido;
 
   if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados...</div>;
 
@@ -428,9 +453,7 @@ function EmitirNotaContent() {
           <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <h3 className="text-xl font-semibold text-slate-700">Quem é o cliente?</h3>
-                <Link href="/cliente" className="text-sm text-blue-600 font-bold hover:underline flex items-center gap-1">
-                    <UserPlus size={16}/> Cadastrar Novo Cliente
-                </Link>
+                <Link href="/cliente" className="text-sm text-blue-600 font-bold hover:underline flex items-center gap-1"><UserPlus size={16}/> Cadastrar Novo Cliente</Link>
             </div>
 
             <div>
@@ -438,9 +461,7 @@ function EmitirNotaContent() {
                 {clientes.length === 0 ? (
                     <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
                         <p className="text-slate-500 mb-2">Nenhum cliente encontrado.</p>
-                        <Link href="/cliente" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold inline-block hover:bg-blue-700">
-                            Cadastrar Primeiro Cliente
-                        </Link>
+                        <Link href="/cliente" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold inline-block hover:bg-blue-700">Cadastrar Primeiro Cliente</Link>
                     </div>
                 ) : (
                     <select className="w-full p-3 border rounded-lg bg-slate-50 outline-blue-500 text-slate-700 font-medium" value={nfData.clienteId} onChange={(e) => { const selected = clientes.find(c => c.id === e.target.value); setNfData({ ...nfData, clienteId: e.target.value, clienteNome: selected?.nome || "" }); }}>
@@ -448,9 +469,6 @@ function EmitirNotaContent() {
                         {clientes.map(cliente => (<option key={cliente.id} value={cliente.id}>{cliente.nome} ({cliente.documento || 'Exterior'})</option>))}
                     </select>
                 )}
-                <p className="text-xs text-slate-400 mt-2">
-                    * Certifique-se que o cliente está com o endereço completo no cadastro.
-                </p>
             </div>
           </div>
         )}
@@ -461,214 +479,159 @@ function EmitirNotaContent() {
             
             <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
                 <label className="block text-sm font-bold text-yellow-800 mb-2 flex items-center gap-2"><Briefcase size={18} /> Atividade Econômica (CNAE)</label>
-                {meusCnaes.length === 0 ? <div className="text-sm text-red-600">⚠️ Sem atividades cadastradas. Configure sua empresa.</div> : (
-                    <select className="w-full p-3 border rounded-lg bg-white outline-blue-500 text-slate-700" value={nfData.codigoCnae} onChange={(e) => setNfData({...nfData, codigoCnae: e.target.value})}>
-                        {!nfData.codigoCnae && <option value="">Selecione uma atividade...</option>}
-                        {meusCnaes.map(cnae => (<option key={cnae.id} value={cnae.codigo}>{cnae.codigo} - {cnae.descricao} {cnae.principal ? '(Principal)' : ''}</option>))}
-                    </select>
-                )}
+                <select className="w-full p-3 border rounded-lg bg-white outline-blue-500 text-slate-700" value={nfData.codigoCnae} onChange={(e) => setNfData({...nfData, codigoCnae: e.target.value})}>
+                    {!nfData.codigoCnae && <option value="">Selecione uma atividade...</option>}
+                    {meusCnaes.map(cnae => (<option key={cnae.id} value={cnae.codigo}>{cnae.codigo} - {cnae.descricao}</option>))}
+                </select>
             </div>
 
-            {/* === RENDERIZAÇÃO INTELIGENTE DA MOEDA === */}
             {isExterior ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-purple-50 p-4 rounded-lg border border-purple-100">
                     <div>
                         <label className="block text-sm font-medium text-purple-900 mb-2">Valor Faturado ({clienteSel?.moeda || 'USD'})</label>
-                        <input 
-                            type="text" inputMode="numeric" 
-                            className="w-full p-3 border border-purple-200 rounded-lg outline-purple-500 text-slate-700 text-lg font-bold" 
-                            value={formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)} 
-                            onChange={handleValorEstrangeiroChange} 
-                            placeholder="0.00" 
-                        />
+                        <input type="text" inputMode="numeric" className="w-full p-3 border border-purple-200 rounded-lg outline-purple-500 text-slate-700 text-lg font-bold" value={formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)} onChange={handleValorEstrangeiroChange} placeholder="0.00" />
                         <p className="text-[10px] text-purple-600 mt-1">* Valor na moeda do contrato (Obrigatório Sefaz)</p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">Valor Convertido (R$)</label>
-                        <input 
-                            type="text" inputMode="numeric" 
-                            className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" 
-                            value={formatarMoedaInput(nfData.valor)} 
-                            onChange={handleValorChange} 
-                            placeholder="R$ 0,00" 
-                        />
+                        <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
                         <p className="text-[10px] text-slate-500 mt-1">* Valor fiscal em Reais para cálculo de impostos</p>
                     </div>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-slate-700 mb-2">Valor (R$)</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Valor do Serviço (R$)</label>
                         <input type="text" inputMode="numeric" className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 text-lg font-bold" value={formatarMoedaInput(nfData.valor)} onChange={handleValorChange} placeholder="R$ 0,00" />
                     </div>
                 </div>
             )}
             
-            {/* === RENDERIZAÇÃO INTELIGENTE DE RETENÇÕES === */}
-            {perfilEmpresa?.regimeTributario !== 'MEI' && !isExterior && (
+            {/* SÓ MOSTRA SE NÃO FOR PF e NÃO FOR EXTERIOR */}
+            {perfilEmpresa?.regimeTributario !== 'MEI' && !isExterior && !isPF && (
                 <div className="mt-6 border-t pt-4">
-                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                        <Calculator size={16}/> Retenções e Impostos
-                    </h4>
+                    <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><Calculator size={16}/> Impostos e Retenções</h4>
 
+                    {/* CAIXA DE ISS (MUNICIPAL) */}
                     <div className="mb-4 bg-slate-50 p-3 rounded border">
-                        <div className="flex items-center justify-between">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
-                                <span className="text-sm text-slate-700 font-medium">ISS Retido pelo Tomador?</span>
-                            </label>
-                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer mb-2">
+                            <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
+                            <span className="text-sm text-slate-700 font-medium">ISS Retido pelo Tomador?</span>
+                        </label>
                         
                         {nfData.issRetido && (
-                             <div className="mt-3 animate-in fade-in slide-in-from-top-2 border-t border-slate-200 pt-3">
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Alíquota ISS (%)</label>
+                             <div className="flex items-center gap-2 animate-in fade-in pt-2 border-t border-slate-200 mt-2">
+                                <span className="text-xs font-bold text-slate-500 uppercase">Alíquota:</span>
                                 <input 
-                                    type="number" 
-                                    min="2.00" 
-                                    max="5.00" 
-                                    step="0.01"
-                                    className="w-full p-2 border rounded text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
+                                    type="text" inputMode="numeric"
+                                    className="w-24 p-1.5 border rounded text-sm outline-blue-500 text-center font-bold text-slate-700" 
                                     value={nfData.aliquota} 
-                                    onChange={e => setNfData({...nfData, aliquota: e.target.value})} 
-                                    placeholder="Ex: 5.00" 
+                                    onChange={e => setNfData({...nfData, aliquota: formatarPorcentagem(e.target.value)})} 
                                 />
-                                <p className="text-[10px] text-slate-400 mt-1">Valores permitidos para retenção: 2.00% a 5.00%</p>
+                                <span className="text-xs text-slate-500">%</span>
                             </div>
                         )}
                     </div>
 
-                    {permiteINSS && (
-                        <div className="bg-slate-50 p-3 rounded border mb-4 animate-in fade-in slide-in-from-top-2">
-                            <div className="flex justify-between items-center mb-2">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={retencoes.inss.retido} onChange={() => toggleRetencao('inss')} />
-                                    <span className="text-sm font-bold text-slate-700">Reter INSS?</span>
-                                </label>
-                            </div>
-                            
-                            {retencoes.inss.retido && (
-                                <div className="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-top-2">
-                                    <div>
-                                        <label className="block text-[10px] text-slate-500 uppercase font-bold">Base Cálculo</label>
-                                        <input className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.base} onChange={e => calcularRetencao('inss', e.target.value, retencoes.inss.aliquota)} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] text-slate-500 uppercase font-bold">Alíquota (%)</label>
-                                        <input type="number" className="w-full p-2 border rounded text-sm bg-white" value={retencoes.inss.aliquota} onChange={e => calcularRetencao('inss', retencoes.inss.base, e.target.value)} />
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] text-slate-500 uppercase font-bold">Valor Retido</label>
-                                        <div className="w-full p-2 border rounded text-sm bg-gray-200 text-slate-700 font-bold border-gray-300">R$ {retencoes.inss.valor.toFixed(2)}</div>
+                    {mostraRetencoesFederais && (
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
+                            {['pis', 'cofins', 'csll', 'ir', 'inss'].map(imposto => {
+                                // === LÓGICA DE OCULTAÇÃO (SÓ EXIBE SE O ADMIN ATIVOU) ===
+                                if (imposto === 'inss' && !cnaeSelecionadoObj?.temRetencaoInss) return null;
+                                if (['pis', 'cofins', 'csll'].includes(imposto) && !cnaeSelecionadoObj?.retemCrsf) return null;
+                                if (imposto === 'ir' && !cnaeSelecionadoObj?.retemIr) return null;
+
+                                const dadosImposto = retencoes[imposto as keyof typeof retencoes];
+                                const isActive = parseFloat(dadosImposto.valor) > 0 || parseFloat(dadosImposto.aliquota) > 0;
+                                
+                                return (
+                                <div key={imposto} className={`flex flex-col p-3 border rounded transition ${isActive ? 'bg-blue-50 border-blue-300 shadow-sm' : 'bg-white border-slate-200'}`}>
+                                    <span className="text-xs font-bold text-slate-700 uppercase mb-2">{imposto}</span>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center gap-1">
+                                            <label className="text-[10px] text-slate-500 uppercase w-1/3">Alíq.</label>
+                                            <div className="flex items-center w-2/3">
+                                                <input type="text" inputMode="numeric" className="w-full p-1 border rounded text-xs outline-blue-500 text-right font-bold" value={dadosImposto.aliquota} onChange={e => handleAliquotaRetencaoChange(imposto, e.target.value)} />
+                                                <span className="text-[10px] text-slate-400 ml-1">%</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between items-center gap-1">
+                                            <label className="text-[10px] text-slate-500 uppercase w-1/3">Valor</label>
+                                            <div className="flex items-center w-2/3">
+                                                <span className="text-[10px] text-slate-400 mr-1">R$</span>
+                                                <input type="text" inputMode="numeric" className={`w-full p-1 border rounded text-xs outline-blue-500 text-right font-bold ${isActive ? 'text-blue-700' : 'text-slate-500'}`} value={dadosImposto.valor} onChange={e => handleValorRetencaoChange(imposto, e.target.value)} />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                            )}
-                        </div>
-                    )}
-
-                    {['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario) && (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            {['pis', 'cofins', 'csll', 'ir'].map(imposto => (
-                                <label key={imposto} className={`flex flex-col p-3 border rounded cursor-pointer transition ${retencoes[imposto as keyof typeof retencoes].retido ? 'bg-blue-50 border-blue-200' : 'bg-white hover:bg-slate-50'}`}>
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={retencoes[imposto as keyof typeof retencoes].retido} onChange={() => toggleRetencao(imposto)} />
-                                        <span className="text-xs font-bold uppercase">{imposto}</span>
-                                    </div>
-                                    {retencoes[imposto as keyof typeof retencoes].retido && (
-                                        <div className="text-xs text-blue-700">
-                                            Aliq: <strong>{retencoes[imposto as keyof typeof retencoes].aliquota}%</strong><br/>
-                                            R$ {retencoes[imposto as keyof typeof retencoes].valor.toFixed(2)}
-                                        </div>
-                                    )}
-                                </label>
-                            ))}
+                            )})}
                         </div>
                     )}
                 </div>
             )}
             
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação</label>
+            <div className="pt-4 border-t">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Discriminação do Serviço</label>
               <textarea rows={4} placeholder="Descrição detalhada do serviço prestado..." className="w-full p-3 border rounded-lg outline-blue-500 text-slate-700 resize-none" value={nfData.servicoDescricao} onChange={(e) => setNfData({...nfData, servicoDescricao: e.target.value})}></textarea>
-              {nfData.servicoDescricao.trim().length === 0 && <p className="text-xs text-red-500 mt-1">* Obrigatório informar a descrição.</p>}
             </div>
           </div>
         )}
 
         {step === 3 && (
           <div className="space-y-6">
-            <h3 className="text-xl font-semibold text-slate-700">Revisão</h3>
+            <h3 className="text-xl font-semibold text-slate-700">Revisão e Fechamento</h3>
             <div className="bg-slate-50 p-6 rounded-lg space-y-4 border border-slate-200">
-              <div className="flex justify-between border-b pb-2">
-                  <span className="text-slate-500">Tomador:</span>
-                  <span className="font-medium text-slate-900">{nfData.clienteNome}</span>
-              </div>
+              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tomador:</span><span className="font-medium text-slate-900">{nfData.clienteNome}</span></div>
+              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Atividade (CNAE):</span><span className="font-medium text-slate-900 text-right max-w-xs truncate">{nfData.codigoCnae} {cnaeDescricaoCurta ? `- ${cnaeDescricaoCurta}` : ''}</span></div>
+              <div className="border-b pb-2"><span className="text-slate-500 block mb-1 text-sm">Descrição do Serviço:</span><div className="font-medium text-slate-700 text-sm whitespace-pre-wrap bg-white p-3 rounded border border-slate-200 shadow-sm">{nfData.servicoDescricao || "Sem descrição informada."}</div></div>
               
-              <div className="flex justify-between border-b pb-2">
-                  <span className="text-slate-500">Atividade (CNAE):</span>
-                  <span className="font-medium text-slate-900">
-                    {nfData.codigoCnae} {cnaeDescricaoCurta ? `- ${cnaeDescricaoCurta}` : ''}
-                  </span>
-              </div>
+              <div className="flex justify-between pt-2"><span className="text-slate-500">Valor Bruto:</span><span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span></div>
 
-              <div className="border-b pb-2">
-                  <span className="text-slate-500 block mb-1 text-sm">Descrição do Serviço:</span>
-                  <div className="font-medium text-slate-700 text-sm whitespace-pre-wrap bg-white p-3 rounded border border-slate-200 shadow-sm">
-                      {nfData.servicoDescricao || "Sem descrição informada."}
+              {/* DEDUÇÕES DINÂMICAS */}
+              {isPJ && !isPF && !isExterior && (nfData.issRetido || totalRetido > 0) && (
+                  <div className="bg-red-50 p-3 rounded border border-red-100 mt-2">
+                      <p className="text-[10px] font-bold text-red-800 uppercase mb-2 tracking-wider">Deduções na Fonte</p>
+                      {nfData.issRetido && (
+                          <div className="flex justify-between text-sm text-red-600 mb-1">
+                              <span>ISS ({nfData.aliquota}%):</span>
+                              <span>- R$ {(valorNumerico * (parseFloat(nfData.aliquota)/100)).toFixed(2)}</span>
+                          </div>
+                      )}
+                      {Object.entries(retencoes).map(([key, data]) => {
+                          if (parseFloat(data.valor) > 0) {
+                              return (
+                                  <div key={key} className="flex justify-between text-sm text-red-600 mb-1">
+                                      <span className="uppercase">{key} ({data.aliquota}%):</span>
+                                      <span>- R$ {data.valor}</span>
+                                  </div>
+                              );
+                          }
+                          return null;
+                      })}
+                      <div className="flex justify-between pt-2 border-t border-red-200 mt-2 text-sm font-bold text-slate-800">
+                          <span>Valor Líquido a Receber:</span>
+                          <span className="text-green-700">R$ {valorLiquido.toFixed(2)}</span>
+                      </div>
                   </div>
-              </div>
-              
-              {/* Oculta retenções na aba de revisão se for Exterior */}
-              {perfilEmpresa?.regimeTributario !== 'MEI' && !isExterior && (
-                  <>
-                    <div className="flex justify-between border-b pb-2">
-                        <span className="text-slate-500">Alíquota ISS:</span>
-                        <span className="font-medium text-slate-900">
-                            {nfData.issRetido ? `${nfData.aliquota}% (Retido)` : 'Não Retido'}
-                        </span>
-                    </div>
-                    {Object.entries(retencoes).map(([key, data]) => data.retido && (
-                        <div key={key} className="flex justify-between border-b pb-2 text-red-600 text-sm">
-                            <span className="uppercase">Retenção {key}:</span><span>- R$ {data.valor.toFixed(2)}</span>
-                        </div>
-                    ))}
-                  </>
               )}
 
-              <div className="flex justify-between pt-2">
-                  <span className="text-slate-500">Valor Bruto:</span>
-                  <span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span>
-              </div>
-
-              {/* Destaque para o valor na Moeda Estrangeira */}
               {isExterior && (
-                  <div className="flex justify-between pt-2 border-t border-slate-200 mt-2">
-                      <span className="text-slate-500">Valor Faturado ({clienteSel?.moeda || 'USD'}):</span>
-                      <span className="font-bold text-purple-700 text-lg">
-                          {formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)}
-                      </span>
-                  </div>
+                  <div className="flex justify-between pt-2 border-t border-slate-200 mt-2"><span className="text-slate-500">Valor Faturado ({clienteSel?.moeda || 'USD'}):</span><span className="font-bold text-purple-700 text-lg">{formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)}</span></div>
               )}
             </div>
 
-            {/* Aviso de Ambiente */}
             {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? (
-                 <div className="bg-orange-50 border border-orange-200 p-3 rounded-lg flex items-start gap-2 text-sm text-orange-800 font-medium">
-                     <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-                     <p>Você está no ambiente de <strong>HOMOLOGAÇÃO</strong>. A nota será apenas validada pela prefeitura, sem valor fiscal. Se quiser emitir com valor, mude para Produção nas configurações.</p>
-                 </div>
+                 <div className="bg-orange-50 border border-orange-200 p-3 rounded-lg flex items-start gap-2 text-sm text-orange-800 font-medium"><AlertTriangle size={18} className="shrink-0 mt-0.5" /><p>Você está no ambiente de <strong>HOMOLOGAÇÃO</strong>. A nota será apenas validada pela prefeitura, sem valor fiscal. Se quiser emitir com valor, mude para Produção nas configurações.</p></div>
             ) : (
                 <p className="text-xs text-center text-slate-400">Ao clicar em emitir, a nota será processada no ambiente nacional e possuirá valor fiscal.</p>
             )}
-            
           </div>
         )}
 
         <div className="flex justify-between mt-8 pt-6 border-t border-slate-100">
           <div>
             {step > 1 && !loading && (
-                <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded">
-                    <ArrowLeft size={18} /> Voltar
-                </button>
+                <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 px-4 py-2 hover:bg-gray-100 rounded"><ArrowLeft size={18} /> Voltar</button>
             )}
           </div>
           
@@ -679,27 +642,13 @@ function EmitirNotaContent() {
                 </button>
             ) : (
                 loading ? (
-                    <div className="w-full max-w-xs">
-                        <div className="flex justify-between text-xs font-bold text-blue-600 mb-1">
-                            <span>{progressStatus}</span>
-                            <span>{progressPercent}%</span>
-                        </div>
-                        <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                            <div 
-                                className="bg-blue-600 h-3 rounded-full transition-all duration-500 ease-out" 
-                                style={{ width: `${progressPercent}%` }}
-                            ></div>
-                        </div>
-                    </div>
+                    <div className="w-full max-w-xs"><div className="flex justify-between text-xs font-bold text-blue-600 mb-1"><span>{progressStatus}</span><span>{progressPercent}%</span></div><div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden"><div className="bg-blue-600 h-3 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div></div></div>
                 ) : (
-                    <button onClick={handleEmitir} className={`${perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'} text-white px-8 py-3 rounded-lg flex items-center gap-2 shadow-lg font-bold transition-transform transform hover:scale-105`}>
-                        <CheckCircle size={20} /> {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'VALIDAR NOTA (TESTE)' : 'EMITIR NOTA'}
-                    </button>
+                    <button onClick={handleEmitir} className={`${perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'} text-white px-8 py-3 rounded-lg flex items-center gap-2 shadow-lg font-bold transition-transform transform hover:scale-105`}><CheckCircle size={20} /> {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'VALIDAR NOTA (TESTE)' : 'EMITIR NOTA'}</button>
                 )
             )}
           </div>
         </div>
-
       </div>
     </div>
   );

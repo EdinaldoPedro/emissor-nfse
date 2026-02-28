@@ -154,12 +154,30 @@ export async function GET(request: Request) {
           where: { codigo: { in: codigos } }
       });
 
+      // NOVO: Puxa as regras municipais para a cidade da empresa
+      const regrasMunicipais = await prisma.tributacaoMunicipal.findMany({
+          where: { 
+              cnae: { in: codigos },
+              codigoIbge: dadosEmpresa.codigoIbge
+          }
+      });
+
       atividadesEnriquecidas = atividadesEnriquecidas.map((local: any) => {
           const global = globais.find((g: any) => g.codigo === local.codigo);
+          const regraMun = regrasMunicipais.find((r: any) => r.cnae === local.codigo);
+
           return {
               ...local,
-              temRetencaoInss: global ? global.temRetencaoInss : local.temRetencaoInss,
-              codigoNbs: global?.codigoNbs || local.codigoNbs
+              // === REGRAS FEDERAIS (Global) ===
+              temRetencaoInss: global?.temRetencaoInss || local.temRetencaoInss,
+              retemCrsf: global?.retemCrsf || false,
+              aliquotaCrsf: global?.aliquotaCrsf ? Number(global.aliquotaCrsf) : 4.65,
+              retemIr: global?.retemIr || false,
+              aliquotaIr: global?.aliquotaIr ? Number(global.aliquotaIr) : 1.50,
+              codigoNbs: global?.codigoNbs || local.codigoNbs,
+              
+              // === REGRAS MUNICIPAIS (Local) ===
+              aliquotaIss: regraMun?.aliquotaIss ? Number(regraMun.aliquotaIss) : null
           };
       });
   }

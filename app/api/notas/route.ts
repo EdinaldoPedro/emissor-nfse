@@ -113,10 +113,9 @@ export async function POST(request: Request) {
     }
     if (!cnaeFinal) throw new Error("CNAE é obrigatório para emissão.");
 
-    // --- BLOCO CORRIGIDO: SEM DUPLICIDADE ---
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
-    let codigoNbs = '000000000'; // NBS Padrão para Exterior se não achar no banco
+    let codigoNbs = '000000000'; // NBS Padrão Fallback
 
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
@@ -131,7 +130,14 @@ export async function POST(request: Request) {
         if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
         if ((regraGlobal as any).codigoNbs) codigoNbs = (regraGlobal as any).codigoNbs;
     }
-    // ----------------------------------------
+
+    // === NOVO: BUSCA O CÓDIGO TRIBUTÁRIO MUNICIPAL (CTM) ===
+    const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
+        where: {
+            cnae: cnaeFinal,
+            codigoIbge: prestador.codigoIbge || ''
+        }
+    });
 
     // Monta o tomadorAdaptado com TODOS os campos necessários para a Strategy
     const tomadorAdaptado = { 
@@ -160,6 +166,7 @@ export async function POST(request: Request) {
             valor: valorFloat, 
             valorMoedaEstrangeira: valorMoedaEstrangeira ? parseFloat(valorMoedaEstrangeira) : undefined,
             codigoNbs: codigoNbs, 
+            codigoTributacaoMunicipal: regraMunicipal?.codigoTributacaoMunicipal, // REPASSA O CTM
             descricao, cnae: cnaeFinal, itemLc, codigoTribNacional,
             aliquota: aliquota ? parseFloat(aliquota) : 0, issRetido: !!issRetido, retencoes: retencoes
         },
