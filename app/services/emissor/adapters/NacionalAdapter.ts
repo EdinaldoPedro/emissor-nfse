@@ -160,14 +160,22 @@ export class NacionalAdapter {
 
         // --- TRIBUTOS (A MÁGICA DO LUCRO PRESUMIDO) ---
         let tribXml = `<tribMun>`;
-        tribXml += `<tribISSQN>${s.tipoTributacao || (isExterior ? '4' : '1')}</tribISSQN>`;
-        tribXml += `<tpRetISSQN>${s.issRetido ? '2' : '1'}</tpRetISSQN>`;
         
-        // Tags pAliq e vISSQN soltas são exclusivas do Simples Nacional (opSimpNac = 3).
-        // Lucro Presumido (1) NÃO leva essas tags aqui.
-        if (opSimpNac === '3' && !isExterior) {
-            if (s.aliquotaAplicada && s.aliquotaAplicada > 0) tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
-            if (s.valorIss && s.valorIss > 0) tribXml += `<vISSQN>${s.valorIss.toFixed(2)}</vISSQN>`;
+        if (isExterior) {
+            // Emissão para o Exterior - Força os códigos de exportação/isenção
+            tribXml += `<tribISSQN>3</tribISSQN>`;
+            tribXml += `<tpRetISSQN>1</tpRetISSQN>`;
+        } else {
+            // Regra Nacional normal
+            tribXml += `<tribISSQN>${s.tipoTributacao || '1'}</tribISSQN>`;
+            tribXml += `<tpRetISSQN>${s.issRetido ? '2' : '1'}</tpRetISSQN>`;
+            
+            // Tags pAliq e vISSQN soltas são exclusivas do Simples Nacional (opSimpNac = 3).
+            // Lucro Presumido (1) NÃO leva essas tags aqui.
+            if (opSimpNac === '3') {
+                if (s.aliquotaAplicada && s.aliquotaAplicada > 0) tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
+                if (s.valorIss && s.valorIss > 0) tribXml += `<vISSQN>${s.valorIss.toFixed(2)}</vISSQN>`;
+            }
         }
         tribXml += `</tribMun>`;
 
