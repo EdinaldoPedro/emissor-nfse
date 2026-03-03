@@ -75,7 +75,8 @@ export async function POST(request: Request) {
         codigoIbge: body.codigoIbge,
         codigoTributacaoMunicipal: body.codigoTributacaoMunicipal,
         descricaoServicoMunicipal: body.descricaoServicoMunicipal,
-        aliquotaIss: body.aliquotaIss ? parseFloat(body.aliquotaIss) : null // <--- NOVO
+        aliquotaIss: body.aliquotaIss ? parseFloat(body.aliquotaIss) : null,
+        exigeNbs: Boolean(body.exigeNbs) // <--- NOVO
       }
     });
 
@@ -113,10 +114,13 @@ export async function PUT(request: Request) {
         data: {
             codigoTributacaoMunicipal: body.codigoTributacaoMunicipal,
             descricaoServicoMunicipal: body.descricaoServicoMunicipal,
-            aliquotaIss: body.aliquotaIss !== undefined && body.aliquotaIss !== null ? parseFloat(body.aliquotaIss) : null // <--- NOVO
+            aliquotaIss: body.aliquotaIss !== undefined && body.aliquotaIss !== null ? parseFloat(body.aliquotaIss) : null,
+            exigeNbs: body.exigeNbs !== undefined ? Boolean(body.exigeNbs) : false // <--- NOVO
         }
     });
+
     return NextResponse.json(atualizado);
+    
   } catch (e) {
     return NextResponse.json({ error: 'Erro ao atualizar' }, { status: 500 });
   }

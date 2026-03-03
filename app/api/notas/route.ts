@@ -115,29 +115,34 @@ export async function POST(request: Request) {
 
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
-    let codigoNbs = '000000000'; // NBS Padrão Fallback
+    let nbsEncontrado = ''; // Armazena o NBS do CNAE, mas não injeta ainda
+    let codigoNbs = '';     // Fica VAZIO por padrão!
 
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
          itemLc = infoEstatica.itemLC;
          codigoTribNacional = infoEstatica.codigoTributacaoNacional.replace(/\D/g, '');
-         if ((infoEstatica as any).codigoNbs) codigoNbs = (infoEstatica as any).codigoNbs;
+         if ((infoEstatica as any).codigoNbs) nbsEncontrado = (infoEstatica as any).codigoNbs;
     }
     
     const regraGlobal = await prisma.globalCnae.findUnique({ where: { codigo: cnaeFinal } });
     if (regraGlobal) {
         if (regraGlobal.itemLc) itemLc = regraGlobal.itemLc;
         if (regraGlobal.codigoTributacaoNacional) codigoTribNacional = regraGlobal.codigoTributacaoNacional.replace(/\D/g, '');
-        if ((regraGlobal as any).codigoNbs) codigoNbs = (regraGlobal as any).codigoNbs;
+        if ((regraGlobal as any).codigoNbs) nbsEncontrado = (regraGlobal as any).codigoNbs;
     }
 
-    // === NOVO: BUSCA O CÓDIGO TRIBUTÁRIO MUNICIPAL (CTM) ===
+    // === NOVO: BUSCA A REGRA MUNICIPAL E O CHECKBOX DO NBS ===
     const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
         where: {
             cnae: cnaeFinal,
             codigoIbge: prestador.codigoIbge || ''
         }
     });
+
+    if (regraMunicipal?.exigeNbs && nbsEncontrado) {
+        codigoNbs = nbsEncontrado;
+    }
 
     // Monta o tomadorAdaptado com TODOS os campos necessários para a Strategy
     const tomadorAdaptado = { 

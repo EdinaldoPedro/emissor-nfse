@@ -29,7 +29,8 @@ export default function TributacaoMunicipalPage() {
     codigoIbge: '',
     codigoTributacaoMunicipal: '',
     descricaoServicoMunicipal: '',
-    aliquotaIss: '' // <--- NOVO
+    aliquotaIss: '',
+    exigeNbs: false // <--- NOVO
   });
 
   useEffect(() => {
@@ -188,7 +189,7 @@ export default function TributacaoMunicipalPage() {
                 />
             </div>
 
-            <button onClick={() => { setEditing(null); setForm({ id:'', cnae:'', codigoIbge:'', codigoTributacaoMunicipal:'', descricaoServicoMunicipal:'', aliquotaIss: '' }); setModalOpen(true); }} 
+            <button onClick={() => { setEditing(null); setForm({ id:'', cnae:'', codigoIbge:'', codigoTributacaoMunicipal:'', descricaoServicoMunicipal:'', aliquotaIss: '', exigeNbs: false }); setModalOpen(true); }}
                 className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
                 <Plus size={18}/> Nova Regra
             </button>
@@ -263,6 +264,20 @@ export default function TributacaoMunicipalPage() {
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Descrição (Opcional)</label>
                         <textarea className="w-full p-2 border rounded resize-none focus:ring-2 focus:ring-blue-500 outline-none" value={form.descricaoServicoMunicipal || ''} onChange={e => setForm({...form, descricaoServicoMunicipal: e.target.value})} rows={2} />
                     </div>
+
+                    <div className="mt-4 flex items-center gap-2 bg-slate-50 p-3 rounded border">
+                        <input 
+                            type="checkbox" 
+                            id="exigeNbs" 
+                            checked={form.exigeNbs} 
+                            onChange={e => setForm({...form, exigeNbs: e.target.checked})} 
+                            className="w-4 h-4 text-blue-600 rounded cursor-pointer" 
+                        />
+                        <label htmlFor="exigeNbs" className="text-sm font-bold text-slate-700 cursor-pointer">
+                            Prefeitura exige Código NBS obrigatoriamente?
+                        </label>
+                    </div>
+                    
                 </div>
 
                 <div className="mt-6 flex justify-end gap-2 pt-4 border-t">
@@ -320,8 +335,9 @@ export default function TributacaoMunicipalPage() {
                                     setEditing(item); 
                                     setForm({
                                         ...item,
-                                        aliquotaIss: item.aliquotaIss ? String(item.aliquotaIss) : ''
-                                    }); 
+                                        aliquotaIss: item.aliquotaIss ? String(item.aliquotaIss) : '',
+                                        exigeNbs: item.exigeNbs || false // <--- NOVO
+                                    });
                                     setModalOpen(true); 
                                 }} className="text-blue-500 hover:bg-blue-50 p-2 rounded transition" title="Editar"><Edit size={18}/></button>
                                 <button onClick={() => handleDelete(item.id)} className="text-red-500 hover:bg-red-50 p-2 rounded transition" title="Excluir"><Trash2 size={18}/></button>

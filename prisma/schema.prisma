@@ -344,6 +344,7 @@ model TributacaoMunicipal {
   codigoTributacaoMunicipal String 
   descricaoServicoMunicipal String?
   aliquotaIss               Decimal? @db.Decimal(5,2)
+  exigeNbs                  Boolean  @default(false) // <--- NOVO: Controla a tag NBS
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
   @@unique([cnae, codigoIbge, codigoTributacaoMunicipal])

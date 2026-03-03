@@ -141,8 +141,13 @@ export class NacionalAdapter {
         
         servXml += `<xDescServ>${descricaoServico}</xDescServ>`;
         
-        const nbs = s.codigoNbs ? this.clean(s.codigoNbs) : '000000000';
-        servXml += `<cNBS>${nbs}</cNBS></cServ>`;
+        // Só injeta o NBS se o Backend tiver cruzado os dados e confirmado que precisa
+        const nbsLimpo = s.codigoNbs ? this.clean(s.codigoNbs) : '';
+        if (nbsLimpo.length > 0) {
+            servXml += `<cNBS>${nbsLimpo}</cNBS>`;
+        }
+        
+        servXml += `</cServ>`
 
         if (isExterior && s.valorMoedaEstrangeira) {
             servXml += `<comExt>` +
