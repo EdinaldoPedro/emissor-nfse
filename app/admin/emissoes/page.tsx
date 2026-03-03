@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { Server, AlertTriangle, CheckCircle, ArrowRight, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
+export const dynamic = 'force-dynamic';
+
 export default function ListaEmissores() {
   const [emissores, setEmissores] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

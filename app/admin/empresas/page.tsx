@@ -158,6 +158,7 @@ export default function BaseEmpresas() {
                     {viewType === 'PRESTADOR' && (
                         <div className="md:col-span-2">
                             <label className="block font-bold text-slate-500 mb-1">Nome Fantasia</label>
+                            
                             <input className="w-full p-2 border rounded" value={editingItem.nomeFantasia || ''} onChange={e => setEditingItem({...editingItem, nomeFantasia: e.target.value})} />
                         </div>
                     )}

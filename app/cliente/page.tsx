@@ -3,23 +3,22 @@
 import { useEffect, useState } from 'react';
 import { 
     Plus, Search, Edit, Trash2, MapPin, 
-    User, Building2, Globe, Loader2, X, CheckCircle, 
-    ArrowLeft, Save
+    User, Building2, Globe, Loader2, X, 
+    ArrowLeft, Save, RefreshCw
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDialog } from '@/app/contexts/DialogContext';
 import { validarCPF } from '@/app/utils/cpf';
 
-// Lista de Países para Padronização (ISO 3166 / BACEN simplificado)
+// Lista de Países para Padronização (ISO 3166 / BACEN simplificado) - SEM ACENTOS PARA SEGURANÇA
 const LISTA_PAISES = [
-    "África do Sul", "Alemanha", "Angola", "Arábia Saudita", "Argentina", "Austrália", "Áustria", 
-    "Bélgica", "Bolívia", "Brasil", "Canadá", "Chile", "China", "Cingapura", "Colômbia", "Coreia do Sul", 
-    "Costa Rica", "Croácia", "Dinamarca", "Egito", "Emirados Árabes Unidos", "Equador", "Espanha", 
-    "Estados Unidos", "Finlândia", "França", "Grécia", "Holanda", "Hong Kong", "Índia", "Indonésia", 
-    "Irlanda", "Israel", "Itália", "Japão", "México", "Noruega", "Nova Zelândia", "Panamá", "Paraguai", 
-    "Peru", "Polônia", "Portugal", "Reino Unido", "Rússia", "Suécia", "Suíça", "Tailândia", "Turquia", 
+    "Africa do Sul", "Alemanha", "Angola", "Arabia Saudita", "Argentina", "Australia", "Austria", 
+    "Belgica", "Bolivia", "Brasil", "Canada", "Chile", "China", "Cingapura", "Colombia", "Coreia do Sul", 
+    "Costa Rica", "Croacia", "Dinamarca", "Egito", "Emirados Arabes Unidos", "Equador", "Espanha", 
+    "Estados Unidos", "Finlandia", "Franca", "Grecia", "Holanda", "Hong Kong", "India", "Indonesia", 
+    "Irlanda", "Israel", "Italia", "Japao", "Mexico", "Noruega", "Nova Zelandia", "Panama", "Paraguai", 
+    "Peru", "Polonia", "Portugal", "Reino Unido", "Russia", "Suecia", "Suica", "Tailandia", "Turquia", 
     "Uruguai", "Venezuela"
-    // Pode adicionar mais conforme a necessidade
 ];
 
 interface Cliente {
@@ -67,6 +66,7 @@ export default function MeusClientes() {
   });
 
   const isPJ = clienteAtual.tipo === 'PJ';
+  const isEdicaoPJ = !!clienteAtual.id && clienteAtual.tipo === 'PJ';
 
   // --- CARREGAMENTO ---
   const carregarClientes = async () => {
@@ -200,6 +200,53 @@ export default function MeusClientes() {
           }
       } catch (e) { } 
       finally { setBuscandoDados(false); }
+  };
+
+  const handleAtualizarCadastroPJ = async () => {
+      if (!isEdicaoPJ) return;
+
+      const cnpjLimpo = clienteAtual.documento.replace(/\D/g, '');
+      if (cnpjLimpo.length !== 14) {
+          dialog.showAlert('CNPJ inválido para atualização automática.');
+          return;
+      }
+
+      setBuscandoDados(true);
+      const token = localStorage.getItem('token');
+
+      try {
+          const resCnpj = await fetch('/api/external/cnpj', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ cnpj: cnpjLimpo })
+          });
+          const dados = await resCnpj.json();
+
+          if (!resCnpj.ok) {
+              dialog.showAlert('Não foi possível consultar o CNPJ no momento.');
+              return;
+          }
+
+          setClienteAtual(prev => ({
+              ...prev,
+              nome: dados.razaoSocial,
+              nomeFantasia: dados.nomeFantasia,
+              email: dados.email,
+              cep: dados.cep,
+              logradouro: dados.logradouro,
+              numero: dados.numero,
+              bairro: dados.bairro,
+              cidade: dados.cidade,
+              uf: dados.uf,
+              codigoIbge: dados.codigoIbge
+          }));
+
+          dialog.showAlert({ type: 'success', description: 'Dados oficiais carregados. Clique em Salvar para confirmar.' });
+      } catch {
+          dialog.showAlert('Erro de conexão ao atualizar cadastro.');
+      } finally {
+          setBuscandoDados(false);
+      }
   };
 
   const handleDocumentoChange = async (val: string) => {
@@ -415,6 +462,7 @@ export default function MeusClientes() {
                                                 className={`${inputClass} font-mono pr-10`}
                                                 value={clienteAtual.documento || ''} 
                                                 onChange={e => handleDocumentoChange(e.target.value)}
+                                                disabled={isEdicaoPJ}
                                                 // Verifica se existe no banco ao sair do campo (para Exterior)
                                                 onBlur={(e) => {
                                                     if(clienteAtual.tipo === 'EXT' && e.target.value.length > 3) verificarClienteExistente(e.target.value);
@@ -433,6 +481,7 @@ export default function MeusClientes() {
                                         <label className={labelClass}>Email</label>
                                         <input type="email" placeholder="email@cliente.com" className={inputClass}
                                             value={clienteAtual.email || ''} onChange={e => setClienteAtual({...clienteAtual, email: e.target.value})}
+                                            disabled={isEdicaoPJ}
                                         />
                                     </div>
                                 </div>
@@ -447,6 +496,7 @@ export default function MeusClientes() {
                                             className={inputClass}
                                             value={clienteAtual.nome} 
                                             onChange={e => setClienteAtual({...clienteAtual, nome: e.target.value})}
+                                            disabled={isEdicaoPJ}
                                         />
                                     </div>
                                     
@@ -455,17 +505,15 @@ export default function MeusClientes() {
                                             <label className={labelClass}>Nome Fantasia</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.nomeFantasia || ''} onChange={e => setClienteAtual({...clienteAtual, nomeFantasia: e.target.value})}
+                                                disabled={isEdicaoPJ}
                                             />
                                         </div>
                                     )}
                                 </div>
 
-                                {isPJ && (
-                                    <div>
-                                        <label className={labelClass}>Inscrição Municipal (Opcional)</label>
-                                        <input placeholder="Ex: 12345" className={inputClass}
-                                            value={clienteAtual.inscricaoMunicipal || ''} onChange={e => setClienteAtual({...clienteAtual, inscricaoMunicipal: e.target.value})}
-                                        />
+                                {isEdicaoPJ && (
+                                    <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+                                        Para tomador com CNPJ, os dados são automáticos e não podem ser editados manualmente.
                                     </div>
                                 )}
 
@@ -499,11 +547,21 @@ export default function MeusClientes() {
                                                         value={clienteAtual.moeda || 'BRL'}
                                                         onChange={e => setClienteAtual({...clienteAtual, moeda: e.target.value})}
                                                     >
-                                                        <option value="BRL">BRL - Real</option>
-                                                        <option value="USD">USD - Dólar</option>
+                                                        <option value="BRL">BRL - Real Brasileiro</option>
+                                                        <option value="USD">USD - Dólar Americano</option>
                                                         <option value="EUR">EUR - Euro</option>
-                                                        <option value="GBP">GBP - Libra</option>
-                                                        <option value="ARS">ARS - Peso Arg.</option>
+                                                        <option value="GBP">GBP - Libra Esterlina</option>
+                                                        <option value="CAD">CAD - Dólar Canadiano</option>
+                                                        <option value="AUD">AUD - Dólar Australiano</option>
+                                                        <option value="JPY">JPY - Iene Japonês</option>
+                                                        <option value="CHF">CHF - Franco Suíço</option>
+                                                        <option value="CNY">CNY - Yuan Chinês</option>
+                                                        <option value="MXN">MXN - Peso Mexicano</option>
+                                                        <option value="ARS">ARS - Peso Argentino</option>
+                                                        <option value="CLP">CLP - Peso Chileno</option>
+                                                        <option value="COP">COP - Peso Colombiano</option>
+                                                        <option value="PYG">PYG - Guarani Paraguaio</option>
+                                                        <option value="UYU">UYU - Peso Uruguaio</option>
                                                     </select>
                                                 </div>
                                             </>
@@ -516,36 +574,42 @@ export default function MeusClientes() {
                                                 onChange={e => setClienteAtual({...clienteAtual, cep: e.target.value})}
                                                 onBlur={handleBuscarCep}
                                                 placeholder={clienteAtual.tipo === 'EXT' ? 'Ex: A2B-3C4' : '00000-000'}
+                                                disabled={isEdicaoPJ}
                                             />
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className={labelClass}>Logradouro</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.logradouro || ''} onChange={e => setClienteAtual({...clienteAtual, logradouro: e.target.value})}
+                                                disabled={isEdicaoPJ}
                                             />
                                         </div>
                                         <div>
                                             <label className={labelClass}>Número</label>
                                             <input required placeholder="Nº" className={inputClass}
                                                 value={clienteAtual.numero || ''} onChange={e => setClienteAtual({...clienteAtual, numero: e.target.value})}
+                                                disabled={isEdicaoPJ}
                                             />
                                         </div>
                                         <div className="md:col-span-2">
                                             <label className={labelClass}>Bairro</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.bairro || ''} onChange={e => setClienteAtual({...clienteAtual, bairro: e.target.value})}
+                                                disabled={isEdicaoPJ}
                                             />
                                         </div>
                                         <div>
                                             <label className={labelClass}>Cidade</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.cidade || ''} onChange={e => setClienteAtual({...clienteAtual, cidade: e.target.value})}
+                                                disabled={isEdicaoPJ}
                                             />
                                         </div>
                                         <div>
                                             <label className={labelClass}>{clienteAtual.tipo === 'EXT' ? 'Província/Estado' : 'UF'}</label>
                                             <input className={inputClass}
                                                 value={clienteAtual.uf || ''} onChange={e => setClienteAtual({...clienteAtual, uf: e.target.value})} maxLength={clienteAtual.tipo === 'EXT' ? 50 : 2}
+                                                disabled={isEdicaoPJ}
                                             />
                                         </div>
                                     </div>
@@ -558,7 +622,17 @@ export default function MeusClientes() {
                     {modalStep === 'FORMULARIO' && (
                         <div className="flex justify-end gap-3 p-6 border-t bg-white">
                             <button type="button" onClick={() => setIsFormOpen(false)} className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition font-medium">Cancelar</button>
-                            <button onClick={handleSalvar} disabled={salvando} className="bg-green-600 text-white px-8 py-2 rounded-lg hover:bg-green-700 transition font-bold shadow-lg shadow-green-100 flex items-center gap-2">
+                            {isEdicaoPJ && (
+                                <button
+                                    type="button"
+                                    onClick={handleAtualizarCadastroPJ}
+                                    disabled={buscandoDados || salvando}
+                                    className="border border-orange-300 text-orange-700 px-6 py-2 rounded-lg hover:bg-orange-50 transition font-bold flex items-center gap-2 disabled:opacity-60"
+                                >
+                                    {buscandoDados ? <Loader2 className="animate-spin" size={18}/> : <RefreshCw size={18} />} Atualizar cadastro
+                                </button>
+                            )}
+                            <button onClick={handleSalvar} disabled={salvando} className="bg-green-600 text-white px-8 py-2 rounded-lg hover:bg-green-700 transition font-bold shadow-lg shadow-green-100 flex items-center gap-2 disabled:opacity-60">
                                 {salvando ? <Loader2 className="animate-spin" size={18}/> : <><Save size={18} /> Salvar</>}
                             </button>
                         </div>

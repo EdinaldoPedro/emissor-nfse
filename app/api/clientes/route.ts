@@ -235,3 +235,7 @@ export async function DELETE(request: Request) {
         return NextResponse.json({ error: 'Erro ao desvincular.' }, { status: 500 });
     }
 }
+// PUT: Atualizar Cliente (compatibilidade com edição no SaaS)
+export async function PUT(request: Request) {
+    return POST(request);
+}

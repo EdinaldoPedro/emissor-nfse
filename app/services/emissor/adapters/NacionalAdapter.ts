@@ -40,18 +40,50 @@ export class NacionalAdapter {
     }
 
     private mapPais(pais: string): string {
+        // Converte para minúsculas e remove espaços extras para garantir a correspondência
+        const p = pais.trim().toLowerCase();
+        
+        // Dicionário universal em minúsculas e sem acentos
         const dict: Record<string, string> = {
-            "África do Sul": "ZA", "Alemanha": "DE", "Angola": "AO", "Argentina": "AR", "Austrália": "AU", 
-            "Brasil": "BR", "Canadá": "CA", "Chile": "CL", "China": "CN", "Colômbia": "CO", 
-            "Espanha": "ES", "Estados Unidos": "US", "França": "FR", "Itália": "IT", "Japão": "JP", 
-            "México": "MX", "Paraguai": "PY", "Peru": "PE", "Portugal": "PT", "Reino Unido": "GB", "Uruguai": "UY"
+            "africa do sul": "ZA", "alemanha": "DE", "angola": "AO", "arabia saudita": "SA", 
+            "argentina": "AR", "australia": "AU", "austria": "AT", "belgica": "BE", 
+            "bolivia": "BO", "brasil": "BR", "canada": "CA", "chile": "CL", "china": "CN", 
+            "cingapura": "SG", "colombia": "CO", "coreia do sul": "KR", "costa rica": "CR", 
+            "croacia": "HR", "dinamarca": "DK", "egito": "EG", "emirados arabes unidos": "AE", 
+            "equador": "EC", "espanha": "ES", "estados unidos": "US", "finlandia": "FI", 
+            "franca": "FR", "grecia": "GR", "holanda": "NL", "hong kong": "HK", "india": "IN", 
+            "indonesia": "ID", "irlanda": "IE", "israel": "IL", "italia": "IT", "japao": "JP", 
+            "mexico": "MX", "noruega": "NO", "nova zelandia": "NZ", "panama": "PA", 
+            "paraguai": "PY", "peru": "PE", "polonia": "PL", "portugal": "PT", 
+            "reino unido": "GB", "russia": "RU", "suecia": "SE", "suica": "CH", 
+            "tailandia": "TH", "turquia": "TR", "uruguai": "UY", "venezuela": "VE"
         };
-        return dict[pais] || "US";
+        
+        return dict[p] || "XX"; // Se algo muito estranho acontecer, o fallback de segurança é US
     }
 
     private mapMoeda(moeda: string): string {
-        const dict: Record<string, string> = { "BRL": "986", "USD": "840", "EUR": "978", "GBP": "826", "ARS": "032" };
-        return dict[moeda] || "840";
+        // Tabela de Códigos Numéricos de Moeda (Padrão ISO 4217 / Sefaz)
+        const dict: Record<string, string> = { 
+            "BRL": "986", // Real
+            "USD": "840", // Dólar Americano
+            "EUR": "978", // Euro
+            "GBP": "826", // Libra Esterlina
+            "CAD": "124", // Dólar Canadiano
+            "AUD": "036", // Dólar Australiano
+            "JPY": "392", // Iene Japonês
+            "CHF": "426", // Franco Suíço
+            "CNY": "156", // Yuan Chinês
+            "MXN": "484", // Peso Mexicano
+            "ARS": "032", // Peso Argentino
+            "CLP": "152", // Peso Chileno
+            "COP": "170", // Peso Colombiano
+            "PYG": "600", // Guarani Paraguaio
+            "UYU": "858"  // Peso Uruguaio
+        };
+        
+        // Retorna a moeda correspondente ou o Dólar (840) como fallback padrão para exportação
+        return dict[moeda?.toUpperCase()] || "840";
     }
 
     public toXml(rps: ICanonicalRps): string {
