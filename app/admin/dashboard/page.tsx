@@ -19,8 +19,9 @@ export default function AdminDashboard() {
 
     fetch('/api/admin/stats', {
         headers: {
-            'Authorization': `Bearer ${token}` // <--- O SEGREDO ESTÁ AQUI
-        }
+            'Authorization': `Bearer ${token}`
+        },
+        cache: 'no-store' // <--- ADICIONE ESTA LINHA
     })
     .then(async (res) => {
         if (res.status === 401 || res.status === 403) {

@@ -9,6 +9,8 @@ import {
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
 
+export const dynamic = 'force-dynamic';
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [authorized, setAuthorized] = useState(false);

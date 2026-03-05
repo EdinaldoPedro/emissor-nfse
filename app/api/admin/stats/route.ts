@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 
+export const dynamic = 'force-dynamic';
+
 const prisma = new PrismaClient();
 
 export async function GET(request: Request) {

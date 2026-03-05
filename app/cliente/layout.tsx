@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { ShieldAlert, LogOut, ArrowLeftCircle } from 'lucide-react'; // Ícone novo
 import AppTour from '@/components/AppTour';
 
+export const dynamic = 'force-dynamic';
+
 export default function ClienteLayout({ children }: { children: React.ReactNode }) {
   const [isSupport, setIsSupport] = useState(false);
   const [isContadorContext, setIsContadorContext] = useState(false);

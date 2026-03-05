@@ -14,7 +14,8 @@ export default function ListaEmissores() {
     const token = localStorage.getItem('token');
     
     fetch('/api/admin/emissoes', {
-        headers: { 'Authorization': `Bearer ${token}` } // <--- Token adicionado
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store' // <--- ADICIONE ESTA LINHA
     })
       .then(async (r) => {
         if (!r.ok) throw new Error('Falha ao buscar emissores');
