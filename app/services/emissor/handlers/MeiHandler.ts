@@ -22,7 +22,7 @@ export class MeiHandler implements IRegimeHandler {
             // === A CORREÇÃO ESTÁ AQUI ===
             // Repassa o que veio da API
             codigoNbs: venda.codigoNbs,
-            codigoTributacaoMunicipal: venda.codigoTributacaoMunicipal,
+            codigoTributacaoMunicipal: "",
 
             retencoes: {
                 pis: { valor: 0, retido: false },
