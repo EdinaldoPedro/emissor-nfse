@@ -180,7 +180,18 @@ export async function POST(request: Request) {
     };
 
     const strategy = EmissorFactory.getStrategy(prestador);
-    const resultado = await strategy.executar(dadosParaEstrategia);
+    
+    let resultado: any; // O ": any" resolve o alerta vermelho do VS Code
+    for (let tentativa = 1; tentativa <= 5; tentativa++) {
+        resultado = await strategy.executar(dadosParaEstrategia);
+        
+        const erroTexto = resultado.erros ? JSON.stringify(resultado.erros).toLowerCase() : '';
+        if (!resultado.sucesso && (erroTexto.includes('e999') || erroTexto.includes('e0008')) && tentativa < 5) {
+            await new Promise(resolve => setTimeout(resolve, 4000)); // Aguarda 4 segundos
+            continue;
+        }
+        break; // Sai do loop se der sucesso ou se for outro erro
+    }
 
     await createLog({
         level: 'INFO', action: 'EMISSAO_INICIADA',
@@ -192,21 +203,29 @@ export async function POST(request: Request) {
     // --- TRATAMENTO DE ERROS INTELIGENTE ---
     if (!resultado.sucesso) {
         let customUserAction = null;
+        let apagarVenda = false; // NOVO: Controle de deleção
         const errorStr = JSON.stringify(resultado.erros).toLowerCase();
 
-        if (errorStr.includes('inscrição municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
+        if (errorStr.includes('e999')) {
+            customUserAction = "Instabilidade no Portal Nacional. Verifique se está no ambiente de 'Produção', se não estiver, mude e tente de novo.";
+            apagarVenda = false; // Mantém a venda para o usuário poder clicar em "Corrigir" depois!
+        }
+        else if (errorStr.includes('inscrição municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
             customUserAction = "Sua Inscrição Municipal está ausente ou incorreta. Por favor, acesse as Configurações da Empresa e atualize o número da sua I.M.";
+            apagarVenda = true; // Apaga a venda, pois é erro de cadastro
         } 
         else if (errorStr.includes('já utilizado') || errorStr.includes('já existe') || errorStr.includes('duplicado') || errorStr.includes('e0171') || errorStr.includes('e0041')) {
             customUserAction = `O número de DPS ${dpsFinal} já foi utilizado. Por favor, altere o número do DPS para o próximo sequencial disponível.`;
+            apagarVenda = true; // Apaga a venda
         }
 
-        if (customUserAction) {
+        if (customUserAction && apagarVenda) {
             if (!vendaId) { 
                 await prisma.systemLog.deleteMany({ where: { vendaId: venda.id } });
                 await prisma.venda.delete({ where: { id: venda.id } });
             }
         } else {
+            // Se for E999 (ou erro normal), mantém a venda salva com status de ERRO_EMISSAO
             await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
             await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
         }

@@ -90,6 +90,11 @@ function EmitirNotaContent() {
               router.push('/cliente/dashboard');
               return;
           }
+
+          // === CORREÇÃO: Fallback que captura o erro E999 (Instabilidade) ===
+          await dialog.showAlert({ type: 'warning', title: 'Atenção', description: actionText });
+          router.push('/cliente/dashboard');
+          return;
       }
 
       let msgTecnica = "";

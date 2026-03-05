@@ -33,7 +33,12 @@ export class NacionalAdapter {
     private formatData(date: Date): string {
         const timestamp = date.getTime();
         const offsetBrasilia = -3 * 60 * 60 * 1000;
-        const dateBR = new Date(timestamp + offsetBrasilia);
+        
+        // --- PREVENÇÃO DO ERRO E0008 ---
+        // Subtraímos 2 minutos (120.000 ms) do horário atual para garantir que o 
+        // nosso XML nunca chegue "no futuro" para o relógio da Sefaz (Clock Skew).
+        const margemDeSeguranca = 2 * 60 * 1000; 
+        const dateBR = new Date(timestamp + offsetBrasilia - margemDeSeguranca);
         
         const pad = (n: number) => n.toString().padStart(2, '0');
         return `${dateBR.getUTCFullYear()}-${pad(dateBR.getUTCMonth() + 1)}-${pad(dateBR.getUTCDate())}T${pad(dateBR.getUTCHours())}:${pad(dateBR.getUTCMinutes())}:${pad(dateBR.getUTCSeconds())}-03:00`;
