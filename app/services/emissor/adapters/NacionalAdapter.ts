@@ -100,7 +100,8 @@ export class NacionalAdapter {
         const r = s.retencoes || { pis: {}, cofins: {}, inss: {}, ir: {}, csll: {} };
 
         const dhEmi = this.formatData(m.dataEmissao);
-        const dCompet = dhEmi.split('T')[0];
+        // Usa a data de competência fornecida ou cai para a data de emissão como fallback
+        const dCompet = m.dataCompetencia ? m.dataCompetencia : dhEmi.split('T')[0]; 
         const idDps = `DPS${this.clean(p.endereco.codigoIbge).padStart(7,'0')}2${this.clean(p.documento).padStart(14,'0')}${this.clean(m.serie).padStart(5,'0')}${String(m.numero).padStart(15,'0')}`;
         
         const tpAmb = m.ambiente === 'PRODUCAO' ? '1' : '2';

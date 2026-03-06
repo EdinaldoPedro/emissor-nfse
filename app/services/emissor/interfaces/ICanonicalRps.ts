@@ -71,5 +71,6 @@ export interface ICanonicalRps {
         serie: string;
         numero: number;
         dataEmissao: Date;
+        dataCompetencia?: string;
     };
 }

@@ -56,7 +56,9 @@ function EmitirNotaContent() {
     valorMoedaEstrangeira: "", 
     codigoCnae: "", 
     aliquota: "", 
-    issRetido: false 
+    issRetido: false,
+    inssRetido: false,
+    dataCompetencia: new Date().toLocaleDateString('en-CA') 
   });
 
   // Estado das retenções agora guarda os números formatados como string (sem a trava do checkbox)
@@ -145,6 +147,30 @@ function EmitirNotaContent() {
     setNfData({ ...nfData, valorMoedaEstrangeira: String(valorNumerico) });
   };
 
+  // --- MÁSCARAS E LIMITES (DA DIREITA PARA ESQUERDA) ---
+  const formatarPorcentagemDirEsq = (valor: string) => {
+      // Remove tudo que não for número
+      const numeros = valor.replace(/\D/g, '');
+      if (!numeros) return '0.00';
+      // Converte para decimal (ex: digitou 1100 -> vira 11.00)
+      return (parseInt(numeros, 10) / 100).toFixed(2);
+  };
+
+  const handleBlurLimites = (tipo: 'iss' | 'inss') => {
+      // Aplica a trava de limites apenas quando o utilizador sai do campo (blur)
+      if (tipo === 'iss') {
+          let val = parseFloat(nfData.aliquota || '0');
+          if (val < 2.00) val = 2.00;
+          if (val > 5.00) val = 5.00;
+          setNfData(prev => ({ ...prev, aliquota: val.toFixed(2) }));
+      } else if (tipo === 'inss') {
+          let val = parseFloat(retencoes.inss.aliquota || '0');
+          if (val < 3.50) val = 3.50;
+          if (val > 11.00) val = 11.00;
+          handleAliquotaRetencaoChange('inss', val.toFixed(2));
+      }
+  };
+
   // === HANDLERS LIVRES PARA O USUÁRIO EDITAR RETENÇÕES ===
   const handleAliquotaRetencaoChange = (imposto: string, inputValue: string) => {
       const novaAliquota = formatarPorcentagem(inputValue);
@@ -174,7 +200,8 @@ function EmitirNotaContent() {
 
   // === INTELIGÊNCIA CEREBRAL (Cálculo Automático) ===
   
-  // 1. Dispara ao selecionar o Cliente ou o CNAE (Define o Padrão do Painel Admin)
+
+  // 1. Dispara ao selecionar o Cliente ou o CNAE (Define o Padrão Inicial)
   useEffect(() => {
       const cliente = clientes.find(c => c.id === nfData.clienteId);
       const cnae = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
@@ -190,23 +217,32 @@ function EmitirNotaContent() {
               ir: { aliquota: '0.00', valor: '0.00' }
           });
           if (cliente?.tipo === 'PF' || cliente?.tipo === 'EXT') {
-              setNfData(prev => ({ ...prev, issRetido: false }));
+              setNfData(prev => ({ ...prev, issRetido: false, inssRetido: false }));
           }
           return;
       }
 
-      // Se for PJ e Lucro, monta a sugestão base
-      if (cliente.tipo === 'PJ' && ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario)) {
-          const isAbove = valorFloat > 215.05;
-          const next = {
-              inss: { aliquota: '0.00', valor: '0.00' },
-              pis: { aliquota: '0.00', valor: '0.00' },
-              cofins: { aliquota: '0.00', valor: '0.00' },
-              csll: { aliquota: '0.00', valor: '0.00' },
-              ir: { aliquota: '0.00', valor: '0.00' }
-          };
+      const isLucro = ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
+      const next = {
+          inss: { aliquota: '0.00', valor: '0.00' },
+          pis: { aliquota: '0.00', valor: '0.00' },
+          cofins: { aliquota: '0.00', valor: '0.00' },
+          csll: { aliquota: '0.00', valor: '0.00' },
+          ir: { aliquota: '0.00', valor: '0.00' }
+      };
 
-          if (cnae.temRetencaoInss) next.inss.aliquota = '11.00';
+      // REGRA DO INSS (Para PJ que não seja MEI)
+      if (cnae.temRetencaoInss && perfilEmpresa?.regimeTributario !== 'MEI') {
+          setNfData(prev => ({ ...prev, inssRetido: false })); // INICIA DESMARCADO
+          next.inss.aliquota = '11.00';
+      } else {
+          setNfData(prev => ({ ...prev, inssRetido: false }));
+      }
+
+      // Se for PJ e Lucro, monta a sugestão base de Federais
+      if (cliente.tipo === 'PJ' && isLucro) {
+          const isAbove = valorFloat > 215.05;
+
           if (cnae.retemIr) next.ir.aliquota = cnae.aliquotaIr ? Number(cnae.aliquotaIr).toFixed(2) : '1.50';
 
           if (cnae.retemCrsf && isAbove) {
@@ -214,19 +250,20 @@ function EmitirNotaContent() {
               next.cofins.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (3.00/4.65)).toFixed(2) : '3.00';
               next.csll.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (1.00/4.65)).toFixed(2) : '1.00';
           }
-
-          // Calcula os valores em R$ com as alíquotas definidas
-          ['inss', 'pis', 'cofins', 'csll', 'ir'].forEach(key => {
-              const k = key as keyof typeof next;
-              next[k].valor = (valorFloat * (parseFloat(next[k].aliquota) / 100)).toFixed(2);
-          });
-
-          setRetencoes(next);
           setWasAboveThreshold(isAbove);
       }
-  }, [nfData.codigoCnae, nfData.clienteId]);
 
-  // 2. Dispara quando o Valor Bruto (R$) muda
+      // Calcula os valores em R$ com as alíquotas definidas
+      ['inss', 'pis', 'cofins', 'csll', 'ir'].forEach(key => {
+          const k = key as keyof typeof next;
+          next[k].valor = (valorFloat * (parseFloat(next[k].aliquota) / 100)).toFixed(2);
+      });
+
+      setRetencoes(next);
+      
+  }, [nfData.codigoCnae, nfData.clienteId, perfilEmpresa?.regimeTributario]);
+
+  // 2. Dispara quando o Valor Bruto (R$) muda ou a trava dos 215 altera
   useEffect(() => {
       const cliente = clientes.find(c => c.id === nfData.clienteId);
       const cnae = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
@@ -234,12 +271,12 @@ function EmitirNotaContent() {
       const isAbove = valorFloat > 215.05;
 
       if (!cliente || !cnae || cliente.tipo === 'PF' || cliente.tipo === 'EXT') return;
+      const isLucro = ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
 
-      setRetencoes(prev => {
-          const next = JSON.parse(JSON.stringify(prev)); // Copia limpa do estado atual
-          
-          // Verifica a regra da Receita (Se cruzou a linha de 215,05 liga ou desliga sozinho)
-          if (cnae.retemCrsf && isAbove !== wasAboveThreshold) {
+      if (isLucro && cnae.retemCrsf && isAbove !== wasAboveThreshold) {
+          setWasAboveThreshold(isAbove);
+          setRetencoes(prev => {
+              const next = JSON.parse(JSON.stringify(prev)); // Cópia segura
               if (isAbove) {
                   next.pis.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (0.65/4.65)).toFixed(2) : '0.65';
                   next.cofins.aliquota = cnae.aliquotaCrsf ? (cnae.aliquotaCrsf * (3.00/4.65)).toFixed(2) : '3.00';
@@ -249,18 +286,25 @@ function EmitirNotaContent() {
                   next.cofins.aliquota = '0.00';
                   next.csll.aliquota = '0.00';
               }
-              setWasAboveThreshold(isAbove);
-          }
-
-          // Recalcula todos os valores baseados na alíquota visível na tela
-          ['inss', 'pis', 'cofins', 'csll', 'ir'].forEach(key => {
-              const k = key as keyof typeof next;
-              next[k].valor = (valorFloat * (parseFloat(next[k].aliquota) / 100)).toFixed(2);
+              // Calcula valores com a nova decisão
+              ['inss', 'pis', 'cofins', 'csll', 'ir'].forEach(key => {
+                  const k = key as keyof typeof next;
+                  next[k].valor = (valorFloat * (parseFloat(next[k].aliquota) / 100)).toFixed(2);
+              });
+              return next;
           });
-
-          return next;
-      });
-  }, [nfData.valor]);
+      } else {
+          // Se não cruzou a linha, APENAS ATUALIZA A MATEMÁTICA com base na digitação
+          setRetencoes(prev => {
+              const next = JSON.parse(JSON.stringify(prev));
+              ['inss', 'pis', 'cofins', 'csll', 'ir'].forEach(key => {
+                  const k = key as keyof typeof next;
+                  next[k].valor = (valorFloat * (parseFloat(next[k].aliquota) / 100)).toFixed(2);
+              });
+              return next;
+          });
+      }
+  }, [nfData.valor, wasAboveThreshold]);
 
 
   // === CARREGAMENTO INICIAL ===
@@ -334,7 +378,8 @@ function EmitirNotaContent() {
                         servicoDescricao: venda.descricao,
                         codigoCnae: cnaeParaUsar || prev.codigoCnae
                     }));
-                    setStep(2); // Avança para o Passo 2 automaticamente!
+                    setTimeout(() => setStep(3), 500);
+                    setStep(3); // Avança para o Passo 2 automaticamente!
                 } else {
                     // Impede de falhar silenciosamente se der erro de permissão
                     const erro = await res.json();
@@ -371,7 +416,7 @@ function EmitirNotaContent() {
     try {
       // Monta as retenções dinamicamente. Se o valor for > 0, manda "retido: true".
       const payloadRetencoes = {
-          inss: parseFloat(retencoes.inss.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.inss.valor), aliquota: parseFloat(retencoes.inss.aliquota) } : null,
+          inss: nfData.inssRetido && parseFloat(retencoes.inss.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.inss.valor), aliquota: parseFloat(retencoes.inss.aliquota) } : null,
           pis: parseFloat(retencoes.pis.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.pis.valor), aliquota: parseFloat(retencoes.pis.aliquota) } : null,
           cofins: parseFloat(retencoes.cofins.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.cofins.valor), aliquota: parseFloat(retencoes.cofins.aliquota) } : null,
           ir: parseFloat(retencoes.ir.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.ir.valor), aliquota: parseFloat(retencoes.ir.aliquota) } : null,
@@ -393,6 +438,7 @@ function EmitirNotaContent() {
           codigoCnae: nfData.codigoCnae,
           aliquota: nfData.aliquota,
           issRetido: nfData.issRetido,
+          dataCompetencia: nfData.dataCompetencia,
           retencoes: payloadRetencoes
         })
       });
@@ -437,10 +483,23 @@ function EmitirNotaContent() {
 
   const cnaeDescricaoCurta = cnaeSelecionadoObj?.descricao ? (cnaeSelecionadoObj.descricao.length > 20 ? cnaeSelecionadoObj.descricao.substring(0, 20) + '...' : cnaeSelecionadoObj.descricao) : '';
 
-  const totalRetido = Object.values(retencoes).reduce((acc, curr) => acc + parseFloat(curr.valor), 0);
-  const valorLiquido = valorNumerico - (nfData.issRetido ? (valorNumerico * (parseFloat(nfData.aliquota)/100)) : 0) - totalRetido;
+  // === CÁLCULOS FINAIS ===
+  const valorIss = nfData.issRetido ? (valorNumerico * (parseFloat(nfData.aliquota || "0") / 100)) : 0;
+  const valorInss = nfData.inssRetido ? (valorNumerico * (parseFloat(retencoes.inss.aliquota || "0") / 100)) : 0;
+  
+  const totalRetidoFederais = ['pis', 'cofins', 'csll', 'ir'].reduce((acc, curr) => acc + parseFloat(retencoes[curr as keyof typeof retencoes].valor || "0"), 0);
+  const totalDeducoes = valorIss + valorInss + totalRetidoFederais;
+  const valorLiquido = valorNumerico - totalDeducoes;
 
   if(loadingRetry) return <div className="h-screen flex items-center justify-center text-blue-600 font-bold"><Loader2 className="animate-spin mr-2"/> Recuperando dados...</div>;
+
+  // --- VALIDAÇÃO DATA DE COMPETÊNCIA ---
+  const maxDateStr = new Date().toLocaleDateString('en-CA');
+  const minDateObj = new Date();
+  minDateObj.setDate(minDateObj.getDate() - 30);
+  const minDateStr = minDateObj.toLocaleDateString('en-CA');
+  
+  const isDataCompetenciaInvalida = nfData.dataCompetencia > maxDateStr || nfData.dataCompetencia < minDateStr;
 
   return (
     <div className="max-w-4xl mx-auto py-10 relative">
@@ -530,32 +589,59 @@ function EmitirNotaContent() {
                 <div className="mt-6 border-t pt-4">
                     <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2"><Calculator size={16}/> Impostos e Retenções</h4>
 
-                    {/* CAIXA DE ISS (MUNICIPAL) */}
-                    <div className="mb-4 bg-slate-50 p-3 rounded border">
-                        <label className="flex items-center gap-2 cursor-pointer mb-2">
-                            <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
-                            <span className="text-sm text-slate-700 font-medium">ISS Retido pelo Tomador?</span>
-                        </label>
-                        
-                        {nfData.issRetido && (
-                             <div className="flex items-center gap-2 animate-in fade-in pt-2 border-t border-slate-200 mt-2">
-                                <span className="text-xs font-bold text-slate-500 uppercase">Alíquota:</span>
-                                <input 
-                                    type="text" inputMode="numeric"
-                                    className="w-24 p-1.5 border rounded text-sm outline-blue-500 text-center font-bold text-slate-700" 
-                                    value={nfData.aliquota} 
-                                    onChange={e => setNfData({...nfData, aliquota: formatarPorcentagem(e.target.value)})} 
-                                />
-                                <span className="text-xs text-slate-500">%</span>
+                    {/* CAIXAS LADO A LADO: ISS e INSS */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 mt-4">
+                        {/* CAIXA DE ISS (MUNICIPAL) */}
+                        <div className="bg-slate-50 p-3 rounded border">
+                            <label className="flex items-center gap-2 cursor-pointer mb-2">
+                                <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.issRetido} onChange={e => setNfData({...nfData, issRetido: e.target.checked})} />
+                                <span className="text-sm text-slate-700 font-medium">ISS Retido pelo Tomador?</span>
+                            </label>
+                            
+                            {nfData.issRetido && (
+                                 <div className="flex items-center gap-2 animate-in fade-in pt-2 border-t border-slate-200 mt-2">
+                                    <span className="text-xs font-bold text-slate-500 uppercase">Alíquota (2% a 5%):</span>
+                                    <input 
+                                        type="text" inputMode="numeric"
+                                        className="w-24 p-1.5 border rounded text-sm outline-blue-500 text-center font-bold text-slate-700" 
+                                        value={nfData.aliquota} 
+                                        onChange={e => setNfData({...nfData, aliquota: formatarPorcentagemDirEsq(e.target.value)})}
+                                        onBlur={() => handleBlurLimites('iss')}
+                                    />
+                                    <span className="text-xs text-slate-500">%</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* CAIXA DE INSS (FEDERAL) */}
+                        {cnaeSelecionadoObj?.temRetencaoInss && perfilEmpresa?.regimeTributario !== 'MEI' && (
+                            <div className="bg-slate-50 p-3 rounded border">
+                                <label className="flex items-center gap-2 cursor-pointer mb-2">
+                                    <input type="checkbox" className="w-4 h-4 text-blue-600 rounded" checked={nfData.inssRetido} onChange={e => setNfData({...nfData, inssRetido: e.target.checked})} />
+                                    <span className="text-sm text-slate-700 font-medium">INSS Retido pelo Tomador?</span>
+                                </label>
+                                
+                                {nfData.inssRetido && (
+                                     <div className="flex items-center gap-2 animate-in fade-in pt-2 border-t border-slate-200 mt-2">
+                                        <span className="text-xs font-bold text-slate-500 uppercase">Alíquota (3.5% a 11%):</span>
+                                        <input 
+                                            type="text" inputMode="numeric"
+                                            className="w-24 p-1.5 border rounded text-sm outline-blue-500 text-center font-bold text-slate-700" 
+                                            value={retencoes.inss.aliquota} 
+                                            onChange={e => handleAliquotaRetencaoChange('inss', formatarPorcentagemDirEsq(e.target.value))}
+                                            onBlur={() => handleBlurLimites('inss')}
+                                        />
+                                        <span className="text-xs text-slate-500">%</span>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
 
                     {mostraRetencoesFederais && (
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
-                            {['pis', 'cofins', 'csll', 'ir', 'inss'].map(imposto => {
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                            {['pis', 'cofins', 'csll', 'ir'].map(imposto => {
                                 // === LÓGICA DE OCULTAÇÃO (SÓ EXIBE SE O ADMIN ATIVOU) ===
-                                if (imposto === 'inss' && !cnaeSelecionadoObj?.temRetencaoInss) return null;
                                 if (['pis', 'cofins', 'csll'].includes(imposto) && !cnaeSelecionadoObj?.retemCrsf) return null;
                                 if (imposto === 'ir' && !cnaeSelecionadoObj?.retemIr) return null;
 
@@ -599,23 +685,69 @@ function EmitirNotaContent() {
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-slate-700">Revisão e Fechamento</h3>
             <div className="bg-slate-50 p-6 rounded-lg space-y-4 border border-slate-200">
-              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Tomador:</span><span className="font-medium text-slate-900">{nfData.clienteNome}</span></div>
-              <div className="flex justify-between border-b pb-2"><span className="text-slate-500">Atividade (CNAE):</span><span className="font-medium text-slate-900 text-right max-w-xs truncate">{nfData.codigoCnae} {cnaeDescricaoCurta ? `- ${cnaeDescricaoCurta}` : ''}</span></div>
-              <div className="border-b pb-2"><span className="text-slate-500 block mb-1 text-sm">Descrição do Serviço:</span><div className="font-medium text-slate-700 text-sm whitespace-pre-wrap bg-white p-3 rounded border border-slate-200 shadow-sm">{nfData.servicoDescricao || "Sem descrição informada."}</div></div>
               
-              <div className="flex justify-between pt-2"><span className="text-slate-500">Valor Bruto:</span><span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span></div>
+              <div className="flex justify-between border-b border-slate-200 pb-2 items-center">
+                  <span className="text-slate-500 text-sm">Tomador:</span>
+                  <span className="font-medium text-slate-900 text-sm">{nfData.clienteNome}</span>
+              </div>
+              
+              <div className="flex justify-between border-b border-slate-200 pb-2 items-center">
+                  <span className="text-slate-500 text-sm">Atividade (CNAE):</span>
+                  <span className="font-medium text-slate-900 text-sm text-right max-w-xs truncate">{nfData.codigoCnae} {cnaeDescricaoCurta ? `- ${cnaeDescricaoCurta}` : ''}</span>
+              </div>
+              
+              {/* === DATA DE COMPETÊNCIA EDITÁVEL COM DESTAQUE SUTIL === */}
+              <div className="flex justify-between border-b border-slate-200 pb-2 items-center">
+                  <span className="text-slate-500 text-sm">Data de Competência:</span>
+                  <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 uppercase tracking-wider hidden sm:block" title="Pode alterar a data se precisar">EDITÁVEL até 30 Dias ➔</span>
+                      <input 
+                          type="date" 
+                          className={`text-sm font-bold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 rounded-md px-2 py-1 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer text-right shadow-sm ${isDataCompetenciaInvalida ? 'text-red-600 border-red-300 bg-red-50' : ''}`}
+                          max={maxDateStr}
+                          min={minDateStr}
+                          value={nfData.dataCompetencia}
+                          onChange={(e) => setNfData({...nfData, dataCompetencia: e.target.value})}
+                      />
+                  </div>
+              </div>
+              
+              {/* === DESCRIÇÃO LADO A LADO === */}
+              <div className="flex justify-between border-b border-slate-200 pb-3 gap-4">
+                  <span className="text-slate-500 text-sm whitespace-nowrap">Descrição:</span>
+                  <span className="font-medium text-slate-700 text-sm text-right whitespace-pre-wrap">
+                      {nfData.servicoDescricao || "Sem descrição informada."}
+                  </span>
+              </div>
+              
+              <div className="flex justify-between pt-2 items-center">
+                  <span className="text-slate-500 text-sm">Valor Bruto:</span>
+                  <span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span>
+              </div>
+              
 
-              {/* DEDUÇÕES DINÂMICAS */}
-              {isPJ && !isPF && !isExterior && (nfData.issRetido || totalRetido > 0) && (
+              {/* === DEDUÇÕES DINÂMICAS === */}
+              {isPJ && !isPF && !isExterior && totalDeducoes > 0 && (
                   <div className="bg-red-50 p-3 rounded border border-red-100 mt-2">
                       <p className="text-[10px] font-bold text-red-800 uppercase mb-2 tracking-wider">Deduções na Fonte</p>
+                      
                       {nfData.issRetido && (
                           <div className="flex justify-between text-sm text-red-600 mb-1">
                               <span>ISS ({nfData.aliquota}%):</span>
-                              <span>- R$ {(valorNumerico * (parseFloat(nfData.aliquota)/100)).toFixed(2)}</span>
+                              <span>- R$ {valorIss.toFixed(2)}</span>
                           </div>
                       )}
-                      {Object.entries(retencoes).map(([key, data]) => {
+                      
+                      {/* === INSS AGORA APARECE AQUI! === */}
+                      {nfData.inssRetido && (
+                          <div className="flex justify-between text-sm text-red-600 mb-1">
+                              <span>INSS ({retencoes.inss.aliquota}%):</span>
+                              <span>- R$ {valorInss.toFixed(2)}</span>
+                          </div>
+                      )}
+                      
+                      {['pis', 'cofins', 'csll', 'ir'].map(key => {
+                          const data = retencoes[key as keyof typeof retencoes];
                           if (parseFloat(data.valor) > 0) {
                               return (
                                   <div key={key} className="flex justify-between text-sm text-red-600 mb-1">
@@ -626,6 +758,7 @@ function EmitirNotaContent() {
                           }
                           return null;
                       })}
+                      
                       <div className="flex justify-between pt-2 border-t border-red-200 mt-2 text-sm font-bold text-slate-800">
                           <span>Valor Líquido a Receber:</span>
                           <span className="text-green-700">R$ {valorLiquido.toFixed(2)}</span>
@@ -634,7 +767,10 @@ function EmitirNotaContent() {
               )}
 
               {isExterior && (
-                  <div className="flex justify-between pt-2 border-t border-slate-200 mt-2"><span className="text-slate-500">Valor Faturado ({clienteSel?.moeda || 'USD'}):</span><span className="font-bold text-purple-700 text-lg">{formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)}</span></div>
+                  <div className="flex justify-between pt-2 border-t border-slate-200 mt-2">
+                      <span className="text-slate-500">Valor Faturado ({clienteSel?.moeda || 'USD'}):</span>
+                      <span className="font-bold text-purple-700 text-lg">{formatarMoedaEstrangeiraInput(nfData.valorMoedaEstrangeira, clienteSel?.moeda)}</span>
+                  </div>
               )}
             </div>
 
@@ -662,7 +798,7 @@ function EmitirNotaContent() {
                 loading ? (
                     <div className="w-full max-w-xs"><div className="flex justify-between text-xs font-bold text-blue-600 mb-1"><span>{progressStatus}</span><span>{progressPercent}%</span></div><div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden"><div className="bg-blue-600 h-3 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div></div></div>
                 ) : (
-                    <button onClick={handleEmitir} className={`${perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'} text-white px-8 py-3 rounded-lg flex items-center gap-2 shadow-lg font-bold transition-transform transform hover:scale-105`}><CheckCircle size={20} /> {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'VALIDAR NOTA (TESTE)' : 'EMITIR NOTA'}</button>
+                    <button onClick={handleEmitir} disabled={isDataCompetenciaInvalida} className={`${perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-green-600 hover:bg-green-700'} text-white px-8 py-3 rounded-lg flex items-center gap-2 shadow-lg font-bold transition-transform transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none`}><CheckCircle size={20} /> {perfilEmpresa?.ambiente === 'HOMOLOGACAO' ? 'VALIDAR NOTA (TESTE)' : 'EMITIR NOTA'}</button>
                 )
             )}
           </div>

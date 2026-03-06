@@ -36,7 +36,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes, numeroDPS, serieDPS, valorMoedaEstrangeira } = body;
+    const { clienteId, valor, descricao, codigoCnae, vendaId, aliquota, issRetido, retencoes, numeroDPS, serieDPS, valorMoedaEstrangeira, dataCompetencia } = body;
 
     const empresaIdAlvo = await getEmpresaContexto(user, contextId);
     if (!empresaIdAlvo) return forbidden();
@@ -176,7 +176,7 @@ export async function POST(request: Request) {
             aliquota: aliquota ? parseFloat(aliquota) : 0, issRetido: !!issRetido, retencoes: retencoes
         },
         ambiente: prestador.ambiente as 'HOMOLOGACAO' | 'PRODUCAO',
-        numeroDPS: dpsFinal, serieDPS: serieFinal
+        numeroDPS: dpsFinal, serieDPS: serieFinal, dataCompetencia: dataCompetencia
     };
 
     const strategy = EmissorFactory.getStrategy(prestador);

@@ -32,7 +32,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
             dados.tomador.cep = dados.tomador.cep.replace(/\D/g, '');
         }
 
-        const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente } = dados;
+        const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente, dataCompetencia } = dados as any;
 
         try {
             // 1. Validações Prévias
@@ -102,7 +102,8 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                     ambiente: ambiente,
                     serie: serieDPS,
                     numero: numeroDPS,
-                    dataEmissao: new Date()
+                    dataEmissao: new Date(),
+                    dataCompetencia: dataCompetencia
                 }
             };
 
