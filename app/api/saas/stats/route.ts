@@ -3,10 +3,10 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(request: Request) {
     try {
-        // Apenas verifica se a pessoa está logada no sistema (segurança básica)
         const userId = request.headers.get('x-user-id');
         if (!userId) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
@@ -18,12 +18,12 @@ export async function GET(request: Request) {
             where: { status: 'AUTORIZADA' }
         });
 
-        // 3. Municípios atingidos globalmente (cidades únicas registradas)
-        const clientesCidades = await prisma.cliente.findMany({
-            select: { cidade: true },
-            distinct: ['cidade']
+        // 3. Municípios atingidos (Resolvido no JS para não quebrar o banco SQLite)
+        const clientes = await prisma.cliente.findMany({
+            select: { cidade: true }
         });
-        const municipios = clientesCidades.filter(c => c.cidade).length;
+        const municipiosUnicos = new Set(clientes.map(c => c.cidade).filter(Boolean));
+        const municipios = municipiosUnicos.size;
 
         // 4. Valor Total do Mês Atual de todas as notas do SaaS
         const hoje = new Date();
@@ -41,7 +41,13 @@ export async function GET(request: Request) {
             totalNotas,
             totalClientes,
             municipios,
-            valorMes: notasMes._sum.valor || 0
+            valorMes: Number(notasMes._sum.valor) || 0
+        }, {
+            headers: {
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+            }
         });
 
     } catch (error) {

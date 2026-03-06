@@ -5,11 +5,17 @@ import Joyride, { CallBackProps, STATUS, Step } from 'react-joyride';
 import { usePathname, useRouter } from 'next/navigation';
 
 export default function AppTour() {
+  const [isMounted, setIsMounted] = useState(false);
   const [run, setRun] = useState(false);
   const [steps, setSteps] = useState<Step[]>([]);
   const [stepIndex, setStepIndex] = useState(0); 
   const pathname = usePathname();
   const router = useRouter();
+
+  // === NOVO: PREVINE ERRO DE HYDRATION ===
+  useEffect(() => {
+      setIsMounted(true);
+  }, []);
 
   // === 1. LISTENER DO MENU (AVANÇO AUTOMÁTICO) ===
   useEffect(() => {
@@ -137,6 +143,11 @@ export default function AppTour() {
           body: JSON.stringify({ step })
       });
   };
+
+  // ... fim das funções ...
+
+  // === NOVO: TRAVA DE SEGURANÇA ===
+  if (!isMounted) return null;
 
   return (
     <Joyride

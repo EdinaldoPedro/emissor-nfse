@@ -15,17 +15,20 @@ export default function Vitrine() {
     useEffect(() => {
         const userId = localStorage.getItem('userId');
         const token = localStorage.getItem('token');
-        const empresaId = localStorage.getItem('empresaId'); // <--- CRUCIAL: Pegar a empresa atual
 
         if (userId && token) {
-            fetch('/api/cliente/stats', { 
+            // CORREÇÃO: URL alterada de 'cliente' para 'clientes' e adição do bypass de cache
+            fetch(`/api/saas/stats?t=${Date.now()}`, { 
+                cache: 'no-store',
                 headers: { 
                     'x-user-id': userId,
-                    'x-empresa-id': empresaId || '', // <--- CRUCIAL: Enviar no cabeçalho
                     'Authorization': `Bearer ${token}` 
                 } 
             })
-                .then(res => res.json())
+                .then(res => {
+                    if (!res.ok) throw new Error('Erro na API');
+                    return res.json();
+                })
                 .then(data => {
                     if (data && !data.error) setStats(data);
                 })
