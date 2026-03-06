@@ -1,0 +1,185 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { Package, Globe, Lightbulb, ChevronRight, TrendingUp } from 'lucide-react';
+
+export default function Vitrine() {
+    const [currentIndex, setCurrentIndex] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
+    
+    // Estado para guardar os números reais do banco
+    const [stats, setStats] = useState({ totalNotas: 0, totalClientes: 0, municipios: 0, valorMes: 0 });
+
+    // Busca as estatísticas ao carregar
+    useEffect(() => {
+        const userId = localStorage.getItem('userId');
+        const token = localStorage.getItem('token');
+        const empresaId = localStorage.getItem('empresaId'); // <--- CRUCIAL: Pegar a empresa atual
+
+        if (userId && token) {
+            fetch('/api/cliente/stats', { 
+                headers: { 
+                    'x-user-id': userId,
+                    'x-empresa-id': empresaId || '', // <--- CRUCIAL: Enviar no cabeçalho
+                    'Authorization': `Bearer ${token}` 
+                } 
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data && !data.error) setStats(data);
+                })
+                .catch(console.error);
+        }
+    }, []);
+
+    // === DADOS DA VITRINE ===
+    const vitrineCards = [
+        {
+            id: 'dashboard', 
+            titulo: "O Poder da Nossa Rede",
+            descricao: "Milhares de notas são emitidas diariamente. Confie na robustez do NFSe Goo para escalar o seu negócio de forma segura.",
+            badge: "NÚMEROS DA PLATAFORMA",
+            btnTexto: "Ver Nossos Planos",
+            btnLink: "/configuracoes/minha-conta",
+            bgClass: "bg-gradient-to-br from-slate-800 to-slate-900",
+            Icon: TrendingUp,
+            isDashboard: true
+        },
+        {
+            id: 1,
+            titulo: "Pacotes Avulsos de Notas",
+            descricao: "O seu volume de faturação aumentou este mês? Adquira notas extras sem alterar a sua subscrição atual.",
+            badge: "NOVIDADE",
+            btnTexto: "Ver Pacotes",
+            btnLink: "/configuracoes/minha-conta",
+            bgClass: "bg-gradient-to-br from-blue-600 to-indigo-700",
+            Icon: Package
+        },
+        {
+            id: 2,
+            titulo: "Fature para o Exterior",
+            descricao: "Sabia que o NFSe Goo permite emitir faturas em Dólar e Euro de forma nativa e automática?",
+            badge: "DICA",
+            btnTexto: "Saber Mais",
+            btnLink: "/cliente/suporte",
+            bgClass: "bg-gradient-to-br from-emerald-500 to-teal-700",
+            Icon: Globe
+        },
+        {
+            id: 3,
+            titulo: "Precisa de Ajuda?",
+            descricao: "A nossa equipa de suporte está pronta para ajudar a configurar o seu certificado digital ou tirar dúvidas.",
+            badge: "SUPORTE",
+            btnTexto: "Abrir Ticket",
+            btnLink: "/cliente/suporte/novo",
+            bgClass: "bg-gradient-to-br from-amber-500 to-orange-600",
+            Icon: Lightbulb
+        }
+    ];
+
+    // Motor do Carrossel (Pausa no hover, roda a cada 6s para dar tempo de ler)
+    useEffect(() => {
+        if (isPaused) return;
+        
+        const timer = setInterval(() => {
+            setCurrentIndex((prev) => (prev + 1) % vitrineCards.length);
+        }, 6000); 
+        
+        return () => clearInterval(timer);
+    }, [isPaused, vitrineCards.length]);
+
+    return (
+        <div 
+            className="relative w-full h-full min-h-[400px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 group"
+            onMouseEnter={() => setIsPaused(true)}
+            onMouseLeave={() => setIsPaused(false)}
+        >
+            {vitrineCards.map((card, index) => {
+                const isActive = index === currentIndex;
+                const Icon = card.Icon;
+                
+                return (
+                    <div 
+                        key={card.id}
+                        className={`absolute inset-0 w-full h-full p-6 sm:p-8 flex flex-col justify-between transition-all duration-700 ease-in-out ${card.bgClass} ${isActive ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8 pointer-events-none'}`}
+                    >
+                        <div className="absolute top-0 right-0 p-6 opacity-10 transform group-hover:scale-110 transition-transform duration-700">
+                            <Icon size={140} />
+                        </div>
+                        
+                        {card.isDashboard ? (
+                            // === LAYOUT ESPECIAL DO MINI DASHBOARD ===
+                            <div className="relative z-10 flex flex-col h-full">
+                                <div>
+                                    <span className="inline-block px-3 py-1 bg-white/20 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-widest rounded-full mb-3">
+                                        {card.badge}
+                                    </span>
+                                    <h3 className="text-2xl font-black text-white mb-2 leading-tight drop-shadow-sm">{card.titulo}</h3>
+                                    <p className="text-slate-300 text-xs font-medium mb-4">{card.descricao}</p>
+                                </div>
+                                
+                                {/* A Grelha de Números do Cliente */}
+                                <div className="grid grid-cols-2 gap-3 mb-4 flex-1">
+                                    <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total NFS-e</span>
+                                        <span className="text-xl font-black text-white">{stats.totalNotas}</span>
+                                    </div>
+                                    <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Clientes</span>
+                                        <span className="text-xl font-black text-white">{stats.totalClientes}</span>
+                                    </div>
+                                    <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Municípios</span>
+                                        <span className="text-xl font-black text-white">{stats.municipios}</span>
+                                    </div>
+                                    <div className="bg-blue-500/20 rounded-xl p-3 border border-blue-400/30 backdrop-blur-sm flex flex-col justify-center transition hover:bg-blue-500/30">
+                                        <span className="text-[10px] text-blue-200 font-bold uppercase mb-1">Valor do Mês</span>
+                                        <span className="text-lg font-black text-blue-100">{Number(stats.valorMes).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                    </div>
+                                </div>
+                                
+                                <div className="mt-auto">
+                                    <Link href={card.btnLink} className="flex items-center gap-2 text-white/90 hover:text-white py-1 text-sm font-bold transition-colors w-fit group/btn">
+                                        {card.btnTexto} <ChevronRight size={16} className="group-hover/btn:translate-x-1 transition-transform" />
+                                    </Link>
+                                </div>
+                            </div>
+                        ) : (
+                            // === LAYOUT DOS CARDS NORMAIS ===
+                            <>
+                                <div className="relative z-10">
+                                    <span className="inline-block px-3 py-1 bg-white/20 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-widest rounded-full mb-4">
+                                        {card.badge}
+                                    </span>
+                                    <h3 className="text-2xl font-black text-white mb-3 leading-tight drop-shadow-sm">{card.titulo}</h3>
+                                    <p className="text-white/90 text-sm leading-relaxed max-w-[90%] font-medium">
+                                        {card.descricao}
+                                    </p>
+                                </div>
+
+                                <div className="relative z-10 flex items-center justify-between mt-auto pt-6">
+                                    <Link href={card.btnLink} className="flex items-center gap-2 bg-white text-slate-900 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors shadow-sm">
+                                        {card.btnTexto} <ChevronRight size={16} />
+                                    </Link>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                );
+            })}
+
+            {/* Bolinhas Indicadoras (Navegação) */}
+            <div className="absolute bottom-5 left-0 right-0 flex justify-center gap-2 z-20">
+                {vitrineCards.map((_, idx) => (
+                    <button 
+                        key={idx} 
+                        onClick={() => setCurrentIndex(idx)}
+                        className={`h-1.5 rounded-full transition-all duration-300 ${idx === currentIndex ? 'w-6 bg-white' : 'w-2 bg-white/40 hover:bg-white/60'}`}
+                        aria-label={`Ir para o slide ${idx + 1}`}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}

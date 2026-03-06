@@ -326,9 +326,14 @@ export async function GET(request: Request) {
   
       const dadosFinais = vendas.map(v => {
           let codigoTribDisplay = '---';
+          let nomeServicoDisplay = v.descricao || ''; // NOVO
+          
           if (v.notas.length > 0 && v.notas[0].cnae) {
              const info = getTributacaoPorCnae(v.notas[0].cnae);
-             if (info && info.codigoTributacaoNacional) codigoTribDisplay = info.codigoTributacaoNacional;
+             if (info && info.codigoTributacaoNacional) {
+                 codigoTribDisplay = info.codigoTributacaoNacional;
+                 nomeServicoDisplay = info.descricao; // NOVO: Pega o nome oficial do CNAE/Serviço
+             }
           }
 
           return {
@@ -337,7 +342,7 @@ export async function GET(request: Request) {
                 ...v.cliente, 
                 razaoSocial: v.cliente?.nome || 'Consumidor'
             },
-            notas: v.notas.map(n => ({ ...n, codigoTribNacional: codigoTribDisplay })),
+            notas: v.notas.map(n => ({ ...n, codigoTribNacional: codigoTribDisplay, nomeServico: nomeServicoDisplay })),
             motivoErro: v.status === 'ERRO_EMISSAO' && v.logs[0] ? v.logs[0].message : null
           };
       });

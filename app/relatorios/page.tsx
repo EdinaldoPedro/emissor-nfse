@@ -161,7 +161,7 @@ export default function RelatoriosPage() {
             n.numero || 'Pending',
             n.cliente?.razaoSocial || n.cliente?.nome || 'Consumidor',
             // CORREÇÃO 3: No PDF também mostramos o código se possível, ou a descrição curta
-            n.codigoTribNacional || (n.descricao ? n.descricao.substring(0,20)+'...' : '-'),
+            n.codigoTribNacional || n.cnae || '-',
             formatCurrency(n.valor),
             n.status
         ]);
@@ -414,10 +414,8 @@ export default function RelatoriosPage() {
                                             <div className="text-[10px] text-slate-400 font-mono">{nota.tomadorCnpj}</div>
                                         </td>
                                         <td className="p-4">
-                                            {/* === CORREÇÃO DO ITEM (CÓDIGO) === */}
-                                            {/* Mostra o Código do Serviço (17.03) ou o CNAE */}
-                                            <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100" title={nota.descricao}>
-                                                {nota.codigoServico || nota.cnae || '-'}
+                                            <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100 cursor-help" title={nota.nomeServico || nota.descricao}>
+                                                {nota.codigoTribNacional || nota.cnae || '-'}
                                             </span>
                                         </td>
                                         <td className="p-4 text-right font-bold text-slate-700">

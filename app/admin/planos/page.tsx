@@ -251,7 +251,7 @@ export default function AdminPlanos() {
                     </div>
 
                     <div className="mb-4">
-                        <p className="text-3xl font-black text-slate-900">R$ {Number(plan.priceMonthly).toFixed(2)}<span className="text-sm font-normal text-slate-500">/mês</span></p>
+                        <p className="text-3xl font-black text-slate-900">{Number(plan.priceMonthly).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}<span className="text-sm font-normal text-slate-500">/mês</span></p>
                     </div>
                     
                     {/* Regras Visuais */}

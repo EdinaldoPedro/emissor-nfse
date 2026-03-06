@@ -272,8 +272,10 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
                         {/* MENSAGENS DO CHAT */}
                         <div className="space-y-4">
                             {ticket.mensagens.map((msg) => {
-                                // LÓGICA: Se role for 'CLIENTE', sou EU -> Direita
-                                const isMe = msg.usuario.role === 'CLIENTE'; 
+                                // LÓGICA CORRIGIDA: Se NÃO for um cargo da equipa (Staff), então sou EU (Cliente)
+                                const isStaff = ['ADMIN', 'MASTER', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(msg.usuario.role);
+                                const isMe = !isStaff; 
+                                
                                 if (msg.interno) return null; 
 
                                 return (
@@ -281,10 +283,10 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
                                         <div className={`flex max-w-[85%] sm:max-w-[70%] gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                                             
                                             {/* AVATAR */}
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 shadow-sm border mt-auto ${
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 shadow-sm border ${
                                                 isMe 
-                                                    ? 'bg-blue-600 text-white border-blue-600' // Eu (Azul Sólido)
-                                                    : 'bg-white text-orange-600 border-orange-200' // Suporte (Branco)
+                                                    ? 'bg-blue-100 text-blue-700 border-blue-200' // Eu (Cliente)
+                                                    : 'bg-white text-orange-600 border-orange-200' // Suporte
                                             }`}>
                                                 {isMe ? <User size={14}/> : <Headphones size={14}/>}
                                             </div>
@@ -292,8 +294,8 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
                                             {/* BALÃO DE MENSAGEM */}
                                             <div className={`p-4 rounded-2xl shadow-sm text-sm border leading-relaxed whitespace-pre-wrap ${
                                                 isMe 
-                                                    ? 'bg-blue-600 text-white border-blue-600 rounded-br-none' // Balão Azul
-                                                    : 'bg-white text-slate-700 border-slate-200 rounded-bl-none' // Balão Branco
+                                                    ? 'bg-blue-600 text-white border-blue-600 rounded-tr-none' // Balão Azul (Direita)
+                                                    : 'bg-white text-slate-700 border-slate-200 rounded-tl-none' // Balão Branco (Esquerda)
                                             }`}>
                                                 <div className={`flex items-center justify-between gap-4 mb-1 text-[10px] font-bold uppercase tracking-wider ${
                                                     isMe ? 'text-blue-100' : 'text-slate-400'

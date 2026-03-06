@@ -107,7 +107,7 @@ function CheckoutContent() {
                                 </span>
                             </div>
                             <div className="text-right">
-                                <span className="text-2xl font-black text-slate-800">R$ {precoUnitario.toFixed(2)}</span>
+                                <span className="text-2xl font-black text-slate-800">{precoUnitario.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                 <span className="text-xs text-slate-400 block">/{labelCiclo.toLowerCase()}</span>
                             </div>
                         </div>
@@ -184,15 +184,14 @@ function CheckoutContent() {
                     <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 sticky top-6">
                         <h3 className="font-bold text-slate-800 mb-6 text-lg border-b pb-4">Resumo do Pedido</h3>
                         
-                        <div className="space-y-4 text-sm text-slate-600 mb-6">
-                            <div className="flex justify-between">
+                        <div className="flex justify-between">
                                 <span>{plano.name} ({qtdCiclos}x {labelCiclo})</span>
-                                <span className="font-bold">R$ {subtotalPlano.toFixed(2)}</span>
+                                <span className="font-bold">{subtotalPlano.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                             </div>
                             {qtdExtras > 0 && (
                                 <div className="flex justify-between text-indigo-600">
                                     <span>{qtdExtras}x Notas Adicionais</span>
-                                    <span className="font-bold">R$ {valorExtras.toFixed(2)}</span>
+                                    <span className="font-bold">{valorExtras.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                 </div>
                             )}
                         </div>
@@ -200,7 +199,7 @@ function CheckoutContent() {
                         <div className="border-t pt-4 mb-6">
                             <div className="flex justify-between items-end">
                                 <span className="font-bold text-slate-800">Total a Pagar</span>
-                                <span className="text-3xl font-black text-blue-600">R$ {total.toFixed(2)}</span>
+                                <span className="text-3xl font-black text-blue-600">{total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                             </div>
                         </div>
 
@@ -215,7 +214,6 @@ function CheckoutContent() {
                     </div>
                 </div>
             </div>
-        </div>
     );
 }
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { checkPlanLimits } from '@/app/services/planService'; 
 import { validateRequest } from '@/app/utils/api-security';
+import { getTributacaoPorCnae } from '@/app/utils/tributacao'; // <--- ADICIONE ESTA LINHA AQUI
 
 export const dynamic = 'force-dynamic';
 
@@ -94,6 +95,26 @@ export async function GET(request: Request) {
         prisma.notaFiscal.count({ where: whereClause })
     ]);
 
+    // === NOVA PADRONIZAÇÃO DO CÓDIGO E DESCRIÇÃO DO SERVIÇO ===
+    const notasFormatadas = notas.map(n => {
+        let codigoTribDisplay = n.cnae || '---';
+        let nomeServicoDisplay = n.descricao || '';
+
+        if (n.cnae) {
+            const info = getTributacaoPorCnae(n.cnae);
+            if (info && info.codigoTributacaoNacional) {
+                codigoTribDisplay = info.codigoTributacaoNacional;
+                nomeServicoDisplay = info.descricao;
+            }
+        }
+        
+        return {
+            ...n,
+            codigoTribNacional: codigoTribDisplay,
+            nomeServico: nomeServicoDisplay
+        };
+    });
+
     // === AQUI É SÓ O RESUMO (TOTALIZADORES) ===
     const whereClauseSummary = { ...whereClause };
     whereClauseSummary.status = 'AUTORIZADA'; 
@@ -109,7 +130,7 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({
-        data: notas,
+        data: notasFormatadas, // <--- ATENÇÃO AQUI: Enviando a variável formatada!
         meta: {
             page,
             limit,

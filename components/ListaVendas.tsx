@@ -344,13 +344,13 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
                                 </td>
                                 <td className="p-4">
                                     {nota?.codigoTribNacional ? (
-                                        <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded border border-slate-200" title={venda.descricao}>
+                                        <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-100 cursor-help" title={nota.nomeServico || venda.descricao}>
                                             {nota.codigoTribNacional}
                                         </span>
                                     ) : <span className="text-slate-300">-</span>}
                                 </td>
                                 <td className="p-4 text-right font-bold text-slate-700">
-                                    R$ {Number(venda.valor).toFixed(2)}
+                                    {Number(venda.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                 </td>
                                 <td className="p-4 text-center">
                                     {venda.status === 'ERRO_EMISSAO' ? (

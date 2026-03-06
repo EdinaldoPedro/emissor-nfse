@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Globe, Shield, Smartphone, Users, Cloud } from "lucide-react";
+import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Package, Shield, Smartphone, Users, Cloud } from "lucide-react";
 
 // Definição de Tipos e Cores
 type StatusID = 0 | 1 | 2 | 3;
@@ -62,7 +62,7 @@ export default function LandingPage() {
   // Lista de Features (Cards Vivos)
   const featuresList = [
       { title: "Emissão Rápida", desc: "Emita suas notas fiscais em poucos segundos, sem burocracia.", icon: Zap, corTexto: "text-amber-600", corFundo: "bg-amber-100" },
-      { title: "Envio Automático", desc: "Disparamos a nota diretamente para o e-mail ou WhatsApp do seu cliente.", icon: Globe, corTexto: "text-blue-600", corFundo: "bg-blue-100" },
+      { title: "Pacotes Avulsos", desc: "Aumentou o volume este mês? Compre pacotes extras de notas a qualquer momento sem precisar alterar a sua assinatura.", icon: Package, corTexto: "text-blue-600", corFundo: "bg-blue-100" },
       { title: "Gestão de Clientes", desc: "Mantenha o cadastro dos seus tomadores de serviço organizado.", icon: Users, corTexto: "text-indigo-600", corFundo: "bg-indigo-100" },
       { title: "Suporte Web e Mobile", desc: "Acesse nosso painel de qualquer dispositivo com design responsivo.", icon: Smartphone, corTexto: "text-emerald-600", corFundo: "bg-emerald-100" },
       { title: "Backup em Nuvem", desc: "Suas notas e cadastros salvos com segurança nos melhores servidores.", icon: Cloud, corTexto: "text-sky-600", corFundo: "bg-sky-100" },

@@ -29,7 +29,7 @@ export default function ConfiguracoesEmpresa() {
     nomeFantasia: '',
     cnaePrincipal: '',
     inscricaoMunicipal: '',
-    regimeTributario: 'MEI',
+    regimeTributario: '',
     cep: '',
     logradouro: '',
     numero: '',
@@ -159,6 +159,13 @@ export default function ConfiguracoesEmpresa() {
 
   const handleSalvar = async (e: React.FormEvent | null, extraData: any = {}) => {
     if (e) e.preventDefault();
+    
+    // Trava que obriga a seleção do regime
+    if (!empresa.regimeTributario) {
+        showMessage('❌ É obrigatório selecionar o Regime Tributário.', 'erro');
+        return;
+    }
+
     setLoading(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
@@ -271,8 +278,13 @@ export default function ConfiguracoesEmpresa() {
                       <input type="text" className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white font-bold text-gray-800" placeholder="Ex: 12345" value={empresa.inscricaoMunicipal || ''} onChange={e => setEmpresa({...empresa, inscricaoMunicipal: e.target.value})}/>
                   </div>
                   <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-blue-600 text-xs">(Editável)</span></label>
-                      <select className="w-full p-3 border rounded-lg bg-white text-gray-800 focus:ring-2 focus:ring-blue-500 outline-none" value={empresa.regimeTributario || 'MEI'} onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Regime Tributário <span className="text-red-500 text-xs">* Obrigatório</span></label>
+                      <select 
+                        className={`w-full p-3 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none ${!empresa.regimeTributario ? 'border-red-300 text-gray-500' : 'text-gray-800'}`} 
+                        value={empresa.regimeTributario || ''} 
+                        onChange={e => setEmpresa({...empresa, regimeTributario: e.target.value})}
+                      >
+                          <option value="" disabled>Selecione um regime...</option>
                           <option value="MEI">Microempreendedor Individual (MEI)</option>
                           <option value="SIMPLES">Simples Nacional</option>
                           <option value="LUCRO_PRESUMIDO">Lucro Presumido</option>

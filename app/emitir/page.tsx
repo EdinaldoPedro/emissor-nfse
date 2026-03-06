@@ -375,6 +375,7 @@ function EmitirNotaContent() {
                         clienteId: venda.clienteId, 
                         clienteNome: venda.cliente?.razaoSocial || venda.cliente?.nome || "Cliente", 
                         valor: String(venda.valor), // Garante que é lido como string
+                        valorMoedaEstrangeira: venda.valorMoedaEstrangeira ? String(venda.valorMoedaEstrangeira) : "", // <--- RECUPERANDO A MOEDA ESTRANGEIRA AQUI
                         servicoDescricao: venda.descricao,
                         codigoCnae: cnaeParaUsar || prev.codigoCnae
                     }));
@@ -718,14 +719,13 @@ function EmitirNotaContent() {
                   <span className="font-medium text-slate-700 text-sm text-right whitespace-pre-wrap">
                       {nfData.servicoDescricao || "Sem descrição informada."}
                   </span>
-              </div>
-              
+              </div>              
+
               <div className="flex justify-between pt-2 items-center">
                   <span className="text-slate-500 text-sm">Valor Bruto:</span>
-                  <span className="font-bold text-slate-900 text-lg">R$ {valorNumerico.toFixed(2)}</span>
+                  <span className="font-bold text-slate-900 text-lg">{valorNumerico.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
               </div>
               
-
               {/* === DEDUÇÕES DINÂMICAS === */}
               {isPJ && !isPF && !isExterior && totalDeducoes > 0 && (
                   <div className="bg-red-50 p-3 rounded border border-red-100 mt-2">
@@ -734,7 +734,7 @@ function EmitirNotaContent() {
                       {nfData.issRetido && (
                           <div className="flex justify-between text-sm text-red-600 mb-1">
                               <span>ISS ({nfData.aliquota}%):</span>
-                              <span>- R$ {valorIss.toFixed(2)}</span>
+                              <span>- {valorIss.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                           </div>
                       )}
                       
@@ -742,7 +742,7 @@ function EmitirNotaContent() {
                       {nfData.inssRetido && (
                           <div className="flex justify-between text-sm text-red-600 mb-1">
                               <span>INSS ({retencoes.inss.aliquota}%):</span>
-                              <span>- R$ {valorInss.toFixed(2)}</span>
+                              <span>- {valorInss.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                           </div>
                       )}
                       
@@ -752,7 +752,7 @@ function EmitirNotaContent() {
                               return (
                                   <div key={key} className="flex justify-between text-sm text-red-600 mb-1">
                                       <span className="uppercase">{key} ({data.aliquota}%):</span>
-                                      <span>- R$ {data.valor}</span>
+                                      <span>- {parseFloat(data.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                   </div>
                               );
                           }
@@ -761,7 +761,7 @@ function EmitirNotaContent() {
                       
                       <div className="flex justify-between pt-2 border-t border-red-200 mt-2 text-sm font-bold text-slate-800">
                           <span>Valor Líquido a Receber:</span>
-                          <span className="text-green-700">R$ {valorLiquido.toFixed(2)}</span>
+                          <span className="text-green-700">{valorLiquido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                       </div>
                   </div>
               )}
