@@ -5,46 +5,159 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('🌱 Semeando banco de dados...')
 
-  // 1. PLANO DE ENTRADA (TRIAL - Público)
-  const trial = await prisma.plan.upsert({
-    where: { slug: 'TRIAL' }, 
-    update: {}, // Não altera se já existir
-    create: {
+  const planos = [
+    // === 1. PLANOS DE SISTEMA (OCULTOS/TRIAL) ===
+    {
       name: 'Período de Teste',
       slug: 'TRIAL',
       description: '7 dias grátis para novos usuários',
       priceMonthly: 0,
       priceYearly: 0,
-      features: 'Emissão de Notas, Cadastro de Clientes, Suporte Básico',
-      maxNotasMensal: 10,
+      features: JSON.stringify(['Emissão de Notas', 'Cadastro de Clientes', 'Suporte Básico']),
+      maxNotasMensal: 5,
+      maxClientes: 5,
       diasTeste: 7,
       active: true,
-      recommended: true,
-      privado: false // <--- Aparece na tela de cadastro/planos
+      recommended: false,
+      privado: false 
     },
-  })
-  console.log(`✅ Plano criado: ${trial.name}`)
-
-  // 2. PLANO PARCEIRO (CONTADOR - Oculto/Privado)
-  // Esse é fundamental para a lógica de "Promover a Contador" funcionar
-  const parceiro = await prisma.plan.upsert({
-    where: { slug: 'PARCEIRO' }, 
-    update: {},
-    create: {
+    {
       name: 'Parceiro Contábil',
-      slug: 'PARCEIRO', // <--- A API busca exatamente essa string
+      slug: 'PARCEIRO',
       description: 'Acesso irrestrito para gestão de carteira',
-      priceMonthly: 0,   // Gratuito para o parceiro
+      priceMonthly: 0,
       priceYearly: 0,
-      features: 'Painel do Contador, Múltiplas Empresas, Suporte Prioritário',
-      maxNotasMensal: 9999, // Limite alto virtualmente infinito
+      features: JSON.stringify(['Painel do Contador', 'Múltiplas Empresas', 'Suporte Prioritário']),
+      maxNotasMensal: 999999,
+      maxClientes: 999999,
       diasTeste: 0,
       active: true,
       recommended: false,
-      privado: true // <--- IMPORTANTE: true para não aparecer na lista de compras
+      privado: true // Não aparece na lista de compras
     },
-  })
-  console.log(`✅ Plano criado: ${parceiro.name}`)
+
+    // === 2. NOVOS PLANOS COMERCIAIS ===
+    
+    // BASIC
+    {
+      name: 'Plano Basic',
+      slug: 'BASIC',
+      description: 'Ideal para profissionais autônomos começando agora.',
+      priceMonthly: 19.90,
+      priceYearly: 0, // Como os pacotes anuais têm limites e slugs diferentes, o yearly fica zero aqui
+      features: JSON.stringify(['Até 5 Emissões/mês', 'Até 5 Clientes', 'Suporte via Ticket']),
+      maxNotasMensal: 5,
+      maxClientes: 5,
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: false
+    },
+    {
+      name: 'Plano Basic+',
+      slug: 'BASIC_PLUS',
+      description: 'Ideal para profissionais autônomos (Plano Anual).',
+      priceMonthly: 0,
+      priceYearly: 238.80,
+      features: JSON.stringify(['Até 7 Emissões/mês', 'Até 15 Clientes', 'Suporte via Ticket', 'Economia Anual']),
+      maxNotasMensal: 7, 
+      maxClientes: 15, 
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: false
+    },
+
+    // STANDARD
+    {
+      name: 'Plano Standard',
+      slug: 'STANDARD',
+      description: 'Para pequenas empresas em crescimento.',
+      priceMonthly: 44.90,
+      priceYearly: 0,
+      features: JSON.stringify(['Até 10 Emissões/mês', 'Até 10 Clientes', 'Suporte Prioritário']),
+      maxNotasMensal: 10,
+      maxClientes: 10,
+      diasTeste: 0,
+      active: true,
+      recommended: true, // Marcado como recomendado!
+      privado: false
+    },
+    {
+      name: 'Plano Standard+',
+      slug: 'STANDARD_PLUS',
+      description: 'Para pequenas empresas em crescimento (Plano Anual).',
+      priceMonthly: 0,
+      priceYearly: 538.80,
+      features: JSON.stringify(['Até 15 Emissões/mês', 'Até 20 Clientes', 'Suporte Prioritário', 'Economia Anual']),
+      maxNotasMensal: 15,
+      maxClientes: 20,
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: false
+    },
+
+    // PREMIUM
+    {
+      name: 'Plano Premium',
+      slug: 'PREMIUM',
+      description: 'Para empresas com volume consistente de notas.',
+      priceMonthly: 89.90,
+      priceYearly: 0,
+      features: JSON.stringify(['Até 30 Emissões/mês', 'Até 50 Clientes', 'Suporte VIP 24/7']),
+      maxNotasMensal: 30,
+      maxClientes: 50,
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: false
+    },
+    {
+      name: 'Plano Premium+',
+      slug: 'PREMIUM_PLUS',
+      description: 'Para empresas com volume consistente de notas (Plano Anual).',
+      priceMonthly: 0,
+      priceYearly: 1078.80,
+      features: JSON.stringify(['Até 100 Emissões/mês', 'Até 100 Clientes', 'Suporte VIP 24/7']),
+      maxNotasMensal: 100,
+      maxClientes: 100,
+      diasTeste: 0,
+      active: true,
+      recommended: false,
+      privado: false
+    },
+    // PACOTES AVULSOS
+    {
+      name: 'Pacote +5 Clientes', slug: 'PACOTE_CLIENTE_5',
+      description: 'Adicione mais 5 clientes ao seu limite.',
+      priceMonthly: 5.90, priceYearly: 0,
+      features: JSON.stringify(['+5 Clientes na Carteira', 'Não Expira', 'Pagamento Único']),
+      maxNotasMensal: 0, maxClientes: 5, diasTeste: 0,
+      active: true, recommended: false, privado: false,
+      tipo: 'PACOTE_CLIENTES' // <-- Define que é um pacote
+    },
+    {
+      name: 'Pacote +3 Notas', slug: 'PACOTE_NOTA_3',
+      description: 'Saldo extra de 3 notas avulsas.',
+      priceMonthly: 5.90, priceYearly: 0,
+      features: JSON.stringify(['+3 Notas Fiscais', 'Saldo Acumulativo', 'Não Expira']),
+      maxNotasMensal: 3, maxClientes: 0, diasTeste: 0,
+      active: true, recommended: false, privado: false,
+      tipo: 'PACOTE_NOTAS' // <-- Define que é um pacote
+    }
+  ];
+
+  for (const p of planos) {
+    await prisma.plan.upsert({
+      where: { slug: p.slug },
+      update: p,
+      create: p,
+    });
+    console.log(`✅ Plano verificado/criado: ${p.name}`);
+  }
+
+  console.log('🎉 Seed finalizado com sucesso!');
 }
 
 main()

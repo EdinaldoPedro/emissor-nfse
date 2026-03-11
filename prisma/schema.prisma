@@ -82,10 +82,11 @@ model User {
   // Relacionamento com Histórico
   historicoPlanos   PlanHistory[]
 
-  // === CONTROLE DE CONSUMO ===
+ // === CONTROLE DE CONSUMO ===
   creditosPlano       Int       @default(0) 
-  creditosExtras      Int       @default(0) 
-  dataRenovacaoCiclo DateTime?
+  creditosExtras      Int       @default(0) // Já existe! Vamos usar para o Saldo de Notas (+3, +5)
+  clientesAdicionais  Int       @default(0) // <--- NOVO: Saldo de clientes comprados (+5, +10)
+  dataRenovacaoCiclo  DateTime?
 
   // Relacionamento com Pedidos
   pedidos             Pedido[]
@@ -351,23 +352,27 @@ model TributacaoMunicipal {
 }
 
 model Plan {
-  id             String   @id @default(uuid())
-  name           String   
-  slug           String   @unique
-  description    String?
-  priceMonthly   Decimal  @db.Decimal(10, 2)
-  priceYearly    Decimal  @db.Decimal(10, 2)
-  features       String   
-  active         Boolean  @default(true)
-  recommended    Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String   @id @default(uuid())
+  name             String   
+  slug             String   @unique
+  description      String?
+  priceMonthly     Decimal  @db.Decimal(10, 2)
+  priceYearly      Decimal  @db.Decimal(10, 2)
+  features         String   
+  active           Boolean  @default(true)
+  recommended      Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  maxNotasMensal    Int       @default(0) 
-  diasTeste         Int       @default(0) 
-  privado           Boolean   @default(false) 
+  maxNotasMensal   Int      @default(0) 
+  diasTeste        Int      @default(0) 
+  privado          Boolean  @default(false) 
+  
+  maxClientes      Int      @default(0) // <--- NOVO: Limite de clientes base do plano
 
-  historico         PlanHistory[]
+  tipo             String   @default("PLANO") // <--- NOVO: "PLANO", "PACOTE_NOTAS" ou "PACOTE_CLIENTES"
+
+  historico        PlanHistory[]
 }
 
 model PlanHistory {
@@ -489,6 +494,7 @@ model Pedido {
   planoSlug       String   
   ciclo           String   
   notasAdicionais Int      @default(0) 
+  clientesAdicionais Int      @default(0) // <--- NOVO: Quantos clientes comprou neste pedido
   
   valorPlano      Decimal  @db.Decimal(10, 2)
   valorAdicionais Decimal  @db.Decimal(10, 2)
@@ -497,7 +503,24 @@ model Pedido {
   status          String   @default("PENDENTE") 
   formaPagamento  String?
   gatewayId       String?  
+
+  cupomUsado      String?  // <--- NOVO: Qual cupom de desconto foi usado
   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// === TABELA DE CUPONS DE DESCONTO ===
+model Cupom {
+  id              String    @id @default(uuid())
+  codigo          String    @unique // Ex: BEMVINDO50
+  descontoPct     Decimal?  @db.Decimal(5, 2) // Desconto em % (Ex: 50.0 para 50%)
+  descontoFixo    Decimal?  @db.Decimal(10, 2) // Desconto em R$ (Ex: 10.0 para R$ 10,00)
+  quantidade      Int?      // Limite de usos (null = ilimitado)
+  usos            Int       @default(0)
+  validade        DateTime? // Data limite para usar
+  ativo           Boolean   @default(true)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }

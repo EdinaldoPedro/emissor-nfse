@@ -31,7 +31,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     
     // Gestão do Negócio
     { icon: Users, label: 'Clientes (Usuários)', href: '/admin/usuarios' },
-    { icon: CreditCard, label: 'Planos', href: '/admin/planos' },
+    { icon: CreditCard, label: 'Planos e Pacotes', href: '/admin/planos' },
     { icon: Activity, label: 'Central de Emissões', href: '/admin/emissoes' }, 
     
     // Cadastros Técnicos
