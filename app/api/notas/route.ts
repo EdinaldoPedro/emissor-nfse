@@ -12,14 +12,35 @@ const prisma = new PrismaClient();
 
 async function getEmpresaContexto(user: any, contextId: string | null) {
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+    
     if (contextId && contextId !== 'null' && contextId !== 'undefined') {
+        // 1. Admin/Staff
         if (isStaff) return contextId;
+        
+        // 2. Própria empresa do usuário
+        if (contextId === user.empresaId) return contextId;
+        
+        // 3. Colaborador/Convidado (UserCliente)
+        const colaborador = await prisma.userCliente.findUnique({
+            where: { userId_empresaId: { userId: user.id, empresaId: contextId } }
+        });
+        if (colaborador) return contextId;
+        
+        // 4. Contador aprovado
         const vinculo = await prisma.contadorVinculo.findUnique({
             where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
         });
         if (vinculo && vinculo.status === 'APROVADO') return contextId;
+        
+        // 5. Dono do faturamento (Guarda-chuva)
+        const empresaAdicional = await prisma.empresa.findFirst({
+            where: { id: contextId, donoFaturamentoId: user.id }
+        });
+        if (empresaAdicional) return contextId;
+
         return null; 
     }
+    
     return user.empresaId;
 }
 

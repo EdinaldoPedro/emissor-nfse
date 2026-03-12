@@ -96,6 +96,37 @@ export default function BaseEmpresas() {
       }
   };
 
+  const handleUnbindClient = async (empresaId: string, clienteId: string, nomeCliente: string) => {
+    const confirm = await dialog.showPrompt({
+        type: 'danger',
+        title: 'Desvincular Cliente',
+        description: `Deseja remover ${nomeCliente} da carteira desta empresa?`,
+        validationText: 'DESVINCULAR',
+        placeholder: "Digite 'DESVINCULAR' para confirmar"
+    });
+
+    if (confirm !== 'DESVINCULAR') return;
+
+    const token = localStorage.getItem('token');
+    try {
+        const res = await fetch(`/api/admin/empresas?id=${empresaId}&clienteId=${clienteId}&action=UNBIND`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+            // Atualiza o modal localmente removendo o cliente da lista
+            setEditingItem({
+                ...editingItem,
+                clientesVinculados: editingItem.clientesVinculados.filter((c: any) => c.id !== clienteId)
+            });
+            dialog.showAlert({ type: 'success', description: "Cliente desvinculado com sucesso." });
+        }
+    } catch (e) {
+        dialog.showAlert("Erro ao desvincular.");
+    }
+};
+
   return (
     <div className="p-6">
       <div className="flex flex-col md:flex-row justify-between items-end md:items-center mb-6 gap-4">
@@ -155,11 +186,33 @@ export default function BaseEmpresas() {
                         <input className="w-full p-2 border rounded" value={editingItem.razaoSocial || editingItem.nome} onChange={e => setEditingItem({...editingItem, razaoSocial: e.target.value})} />
                     </div>
                     
-                    {viewType === 'PRESTADOR' && (
-                        <div className="md:col-span-2">
-                            <label className="block font-bold text-slate-500 mb-1">Nome Fantasia</label>
-                            
-                            <input className="w-full p-2 border rounded" value={editingItem.nomeFantasia || ''} onChange={e => setEditingItem({...editingItem, nomeFantasia: e.target.value})} />
+                    {/* SEÇÃO DE CLIENTES VINCULADOS (Apenas para Prestadores) */}
+                    {viewType === 'PRESTADOR' && editingItem.clientesVinculados && (
+                        <div className="md:col-span-2 mt-6 pt-4 border-t">
+                            <h4 className="font-bold text-green-600 mb-3 flex items-center gap-2">
+                                <Users size={16}/> Carteira de Clientes ({editingItem.clientesVinculados.length})
+                            </h4>
+                            <div className="bg-slate-50 rounded-lg border divide-y overflow-hidden">
+                                {editingItem.clientesVinculados.length === 0 ? (
+                                    <p className="p-4 text-xs text-slate-400 italic">Nenhum cliente vinculado.</p>
+                                ) : (
+                                    editingItem.clientesVinculados.map((c: any) => (
+                                        <div key={c.id} className="p-3 flex justify-between items-center hover:bg-white transition">
+                                            <div>
+                                                <p className="font-bold text-slate-700">{c.nome}</p>
+                                                <p className="text-[10px] font-mono text-slate-500">{c.documento}</p>
+                                            </div>
+                                            <button 
+                                                onClick={() => handleUnbindClient(editingItem.id, c.id, c.nome)}
+                                                className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-md transition"
+                                                title="Desvincular Cliente"
+                                            >
+                                                <X size={16}/>
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     )}
                     

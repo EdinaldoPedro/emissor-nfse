@@ -87,7 +87,11 @@ export default function MeusClientes() {
       });
       const dados = await res.json();
       
-      if (Array.isArray(dados)) {
+      // Ajuste para ler 'data' por causa da paginação
+      if (dados && dados.data && Array.isArray(dados.data)) {
+          setClientes(dados.data);
+          setFilteredClientes(dados.data);
+      } else if (Array.isArray(dados)) {
           setClientes(dados);
           setFilteredClientes(dados);
       }
@@ -325,16 +329,8 @@ export default function MeusClientes() {
     e.preventDefault();
     if (!clienteAtual.nome) return dialog.showAlert("Nome é obrigatório.");
     
-    // Validações específicas para Brasil
-    if (clienteAtual.tipo !== 'EXT') {
-        const docLimpo = clienteAtual.documento.replace(/\D/g, '');
-        if (clienteAtual.tipo === 'PJ' && docLimpo.length !== 14) return dialog.showAlert("CNPJ incompleto.");
-        if (clienteAtual.tipo === 'PF' && docLimpo.length !== 11) return dialog.showAlert("CPF incompleto.");
-    } else {
-        if (!clienteAtual.pais) return dialog.showAlert("Selecione o País.");
-    }
-
     setSalvando(true);
+    // GARANTIR QUE AS VARIÁVEIS SÃO DEFINIDAS AQUI DENTRO:
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
     const token = localStorage.getItem('token');
@@ -362,7 +358,7 @@ export default function MeusClientes() {
       }
     } catch (error) { dialog.showAlert("Erro de conexão."); } 
     finally { setSalvando(false); }
-  };
+ };
 
   const handleExcluir = async (id: string) => {
     if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir?', description: 'Confirmar exclusão?' })) return;
@@ -695,7 +691,6 @@ export default function MeusClientes() {
                                     </td>
                                     <td className="px-6 py-4 text-right flex justify-end gap-2">
                                         <button onClick={() => abrirEdicao(cliente)} className="text-blue-600 hover:bg-blue-50 p-2 rounded"><Edit size={18}/></button>
-                                        <button onClick={() => handleExcluir(cliente.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded"><Trash2 size={18}/></button>
                                     </td>
                                 </tr>
                             ))

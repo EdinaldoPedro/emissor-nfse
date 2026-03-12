@@ -81,17 +81,23 @@ export async function GET(request: Request) {
                 skip,
                 take: limit,
                 include: { 
-                    donoUser: { select: { nome: true, email: true } }
+                    donoUser: { select: { nome: true, email: true } },
+                    // ADICIONE ESTA PARTE:
+                    minhaCarteira: {
+                        include: { cliente: { select: { id: true, nome: true, documento: true } } }
+                    }
                 },
                 orderBy: { updatedAt: 'desc' }
             }),
-            prisma.empresa.count({ where: whereClause })
+            prisma.cliente.count({ where: whereClause }) // Corrija aqui para contar empresas se necessário
         ]);
 
         data = empresas.map(emp => ({
             ...emp,
             origem: 'PRESTADOR',
-            donos: emp.donoUser ? [emp.donoUser] : [] 
+            donos: emp.donoUser ? [emp.donoUser] : [],
+            // FORMATE OS CLIENTES PARA O FRONT:
+            clientesVinculados: emp.minhaCarteira.map(v => v.cliente)
         }));
         total = count;
     }
@@ -161,24 +167,36 @@ export async function DELETE(request: Request) {
     if (!user || !['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
 
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
+    const id = searchParams.get('id'); // ID da Empresa ou do Cliente
     const type = searchParams.get('type') || 'PRESTADOR'; 
+    const clienteId = searchParams.get('clienteId'); // ID do cliente para desvincular
+    const action = searchParams.get('action'); // 'UNBIND'
 
     if (!id) return NextResponse.json({ error: 'ID necessário' }, { status: 400 });
 
     try {
+        // === CASO 1: APENAS DESVINCULAR UM CLIENTE DE UMA EMPRESA ===
+        if (action === 'UNBIND' && clienteId) {
+            await prisma.vinculoCarteira.delete({
+                where: {
+                    empresaId_clienteId: {
+                        empresaId: id,
+                        clienteId: clienteId
+                    }
+                }
+            });
+            return NextResponse.json({ success: true, message: 'Vínculo removido com sucesso.' });
+        }
+
+        // === CASO 2: EXCLUSÃO TOTAL (TOMADOR OU PRESTADOR) ===
         if (type === 'TOMADOR') {
-            // Apaga Cliente Global e seus Vínculos
-            // Atenção: Apagar cliente apaga notas vinculadas se o banco não tiver cascade.
+            // Apaga Cliente Global e todos os seus vínculos/históricos
             await prisma.notaFiscal.deleteMany({ where: { clienteId: id } });
             await prisma.venda.deleteMany({ where: { clienteId: id } });
-            
-            // Apaga vínculos da carteira primeiro (embora o cascade do banco deva cuidar disso)
             await prisma.vinculoCarteira.deleteMany({ where: { clienteId: id } });
-            
             await prisma.cliente.delete({ where: { id } });
         } else {
-            // Apaga Prestador (Empresa Assinante)
+            // Apaga Prestador (Empresa Assinante) e limpa relações
             await prisma.user.updateMany({ where: { empresaId: id }, data: { empresaId: null } });
             await prisma.userCliente.deleteMany({ where: { empresaId: id } });
             await prisma.contadorVinculo.deleteMany({ where: { empresaId: id } });
@@ -186,13 +204,17 @@ export async function DELETE(request: Request) {
             await prisma.cnae.deleteMany({ where: { empresaId: id } });
             await prisma.notaFiscal.deleteMany({ where: { empresaId: id } });
             await prisma.venda.deleteMany({ where: { empresaId: id } });
-            await prisma.vinculoCarteira.deleteMany({ where: { empresaId: id } }); // Limpa carteira dele
+            await prisma.vinculoCarteira.deleteMany({ where: { empresaId: id } });
             
             await prisma.empresa.delete({ where: { id } });
         }
+
         return NextResponse.json({ success: true });
+
     } catch (e: any) {
-        console.error(e);
-        return NextResponse.json({ error: 'Erro ao excluir.' }, { status: 500 });
+        console.error("Erro na exclusão/desvínculo Admin:", e);
+        return NextResponse.json({ 
+            error: 'Erro ao processar a ação: ' + (e.message || 'Erro interno') 
+        }, { status: 500 });
     }
 }

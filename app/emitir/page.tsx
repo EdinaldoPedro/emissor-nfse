@@ -307,63 +307,88 @@ function EmitirNotaContent() {
   }, [nfData.valor, wasAboveThreshold]);
 
 
-  // === CARREGAMENTO INICIAL ===
+// === CARREGAMENTO INICIAL ===
   useEffect(() => {
     const userId = localStorage.getItem('userId');
     const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId');
-    if(!userId || !token) { router.push('/login'); return; }
+    
+    if(!userId || !token) { 
+        router.push('/login'); 
+        return; 
+    }
 
-    fetch('/api/perfil', { headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' } })
+    // 1. Carrega Perfil e Configurações de Impostos
+    fetch('/api/perfil', { 
+        headers: { 
+            'x-user-id': userId, 
+            'Authorization': `Bearer ${token}`, 
+            'x-empresa-id': contextId || '' 
+        } 
+    })
       .then(res => res.json())
       .then(data => {
-         if(data && !data.error) {
-             setPerfilEmpresa(data);
-             if (data.atividades && Array.isArray(data.atividades)) {
-                 setMeusCnaes(data.atividades);
-                 setNfData(prev => {
-                     const updates: any = {};
-                     let cnaePrincipalObj = null;
+          if(data && !data.error) {
+              setPerfilEmpresa(data);
+              if (data.atividades && Array.isArray(data.atividades)) {
+                  setMeusCnaes(data.atividades);
+                  setNfData(prev => {
+                      const updates: any = {};
+                      let cnaePrincipalObj = null;
 
-                     if (!prev.codigoCnae && data.atividades.length > 0) {
-                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.principal) || data.atividades[0];
-                         updates.codigoCnae = cnaePrincipalObj.codigo;
-                     } else {
-                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.codigo === prev.codigoCnae);
-                     }
+                      if (!prev.codigoCnae && data.atividades.length > 0) {
+                          cnaePrincipalObj = data.atividades.find((c: any) => c.principal) || data.atividades[0];
+                          updates.codigoCnae = cnaePrincipalObj.codigo;
+                      } else {
+                          cnaePrincipalObj = data.atividades.find((c: any) => c.codigo === prev.codigoCnae);
+                      }
 
-                     let aliquotaSugerida = '0.00';
-                     if (data.regimeTributario !== 'MEI') {
-                         // 1. Tenta pegar a alíquota específica do CNAE no Município
-                         if (cnaePrincipalObj && cnaePrincipalObj.aliquotaIss !== null && cnaePrincipalObj.aliquotaIss !== undefined) {
-                             aliquotaSugerida = Number(cnaePrincipalObj.aliquotaIss).toFixed(2);
-                         // 2. Fallback para a alíquota padrão da Empresa
-                         } else if (data.aliquotaPadrao !== null && data.aliquotaPadrao !== undefined) {
-                             aliquotaSugerida = Number(data.aliquotaPadrao).toFixed(2);
-                         } else {
-                             aliquotaSugerida = '3.00'; // Fallback final
-                         }
-                     }
+                      let aliquotaSugerida = '0.00';
+                      if (data.regimeTributario !== 'MEI') {
+                          if (cnaePrincipalObj && cnaePrincipalObj.aliquotaIss !== null && cnaePrincipalObj.aliquotaIss !== undefined) {
+                              aliquotaSugerida = Number(cnaePrincipalObj.aliquotaIss).toFixed(2);
+                          } else if (data.aliquotaPadrao !== null && data.aliquotaPadrao !== undefined) {
+                              aliquotaSugerida = Number(data.aliquotaPadrao).toFixed(2);
+                          } else {
+                              aliquotaSugerida = '3.00';
+                          }
+                      }
 
-                     updates.aliquota = aliquotaSugerida;
-                     updates.issRetido = data.issRetidoPadrao || false;
-                     return { ...prev, ...updates };
-                 });
-             }
-         }
+                      updates.aliquota = aliquotaSugerida;
+                      updates.issRetido = data.issRetidoPadrao || false;
+                      return { ...prev, ...updates };
+                  });
+              }
+          }
       }).catch(console.error);
 
-    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '', 'Authorization': `Bearer ${token}` } })
+    // 2. Carrega Lista de Clientes (Ajustado para Paginação)
+    fetch('/api/clientes', { 
+        headers: { 
+            'x-user-id': userId, 
+            'x-empresa-id': contextId || '', 
+            'Authorization': `Bearer ${token}` 
+        } 
+    })
       .then(res => res.json())
-      .then(data => { if (Array.isArray(data)) setClientes(data); }).catch(() => setClientes([]));
+      .then(data => { 
+        if (data && data.data && Array.isArray(data.data)) {
+            setClientes(data.data);
+        } else if (Array.isArray(data)) {
+            setClientes(data);
+        } else {
+            setClientes([]);
+        }
+      }).catch(() => setClientes([]));
 
+    // 3. Recuperação de Venda para Reprocessamento (Retry)
     if (retryId) {
         setLoadingRetry(true);
         fetch(`/api/vendas/${retryId}`, { 
             headers: { 
                 'x-user-id': userId, 
                 'Authorization': `Bearer ${token}`,
-                'x-empresa-id': contextId || '' // <--- A CORREÇÃO PRINCIPAL ESTÁ AQUI
+                'x-empresa-id': contextId || '' 
             } 
         })
             .then(async res => {
@@ -374,15 +399,13 @@ function EmitirNotaContent() {
                         ...prev,
                         clienteId: venda.clienteId, 
                         clienteNome: venda.cliente?.razaoSocial || venda.cliente?.nome || "Cliente", 
-                        valor: String(venda.valor), // Garante que é lido como string
-                        valorMoedaEstrangeira: venda.valorMoedaEstrangeira ? String(venda.valorMoedaEstrangeira) : "", // <--- RECUPERANDO A MOEDA ESTRANGEIRA AQUI
+                        valor: String(venda.valor),
+                        valorMoedaEstrangeira: venda.valorMoedaEstrangeira ? String(venda.valorMoedaEstrangeira) : "",
                         servicoDescricao: venda.descricao,
                         codigoCnae: cnaeParaUsar || prev.codigoCnae
                     }));
                     setTimeout(() => setStep(3), 500);
-                    setStep(3); // Avança para o Passo 2 automaticamente!
                 } else {
-                    // Impede de falhar silenciosamente se der erro de permissão
                     const erro = await res.json();
                     dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao recuperar dados da venda." });
                 }
@@ -392,6 +415,7 @@ function EmitirNotaContent() {
     }
   }, [router, retryId]);
 
+  // === NAVEGAÇÃO ENTRE PASSOS ===
   const handleNext = async () => {
     if (step === 1) {
         if (!nfData.clienteId) return dialog.showAlert("Selecione um cliente para continuar.");
@@ -403,6 +427,7 @@ function EmitirNotaContent() {
 
   const handleBack = () => setStep(step - 1);
 
+  // === EMISSÃO FINAL DA NOTA ===
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     
@@ -415,7 +440,6 @@ function EmitirNotaContent() {
     const contextId = localStorage.getItem('empresaContextId'); 
     
     try {
-      // Monta as retenções dinamicamente. Se o valor for > 0, manda "retido: true".
       const payloadRetencoes = {
           inss: nfData.inssRetido && parseFloat(retencoes.inss.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.inss.valor), aliquota: parseFloat(retencoes.inss.aliquota) } : null,
           pis: parseFloat(retencoes.pis.valor) > 0 ? { retido: true, valor: parseFloat(retencoes.pis.valor), aliquota: parseFloat(retencoes.pis.aliquota) } : null,
@@ -429,9 +453,14 @@ function EmitirNotaContent() {
 
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' },
+        headers: { 
+            'Content-Type': 'application/json', 
+            'x-user-id': userId || '', 
+            'Authorization': `Bearer ${token}`, 
+            'x-empresa-id': contextId || '' 
+        },
         body: JSON.stringify({
-          vendaId: retryId, // <--- A CORREÇÃO ESTÁ AQUI (Avisa o backend para ATUALIZAR)
+          vendaId: retryId || null, 
           clienteId: nfData.clienteId,
           valor: nfData.valor,
           valorMoedaEstrangeira: nfData.valorMoedaEstrangeira,
@@ -451,7 +480,13 @@ function EmitirNotaContent() {
         setProgressStatus("Concluído!");
 
         if (resposta.isHomologation) {
-            const irConfig = await dialog.showConfirm({ type: 'success', title: 'Tudo certo em Homologação!', description: 'As configurações da sua nota estão perfeitas. Mude para PRODUÇÃO nas configurações.', confirmText: 'Mudar para Produção', cancelText: 'Voltar ao Início' });
+            const irConfig = await dialog.showConfirm({ 
+                type: 'success', 
+                title: 'Tudo certo em Homologação!', 
+                description: 'As configurações da sua nota estão perfeitas. Mude para PRODUÇÃO nas configurações.', 
+                confirmText: 'Mudar para Produção', 
+                cancelText: 'Voltar ao Início' 
+            });
             if (irConfig) router.push('/configuracoes');
             else router.push('/cliente/dashboard');
         } else {
@@ -463,7 +498,6 @@ function EmitirNotaContent() {
       }
     } catch (error) { 
         dialog.showAlert("Erro de Conexão. Verifique sua internet."); 
-        router.push('/cliente/dashboard');
     } 
     finally { setLoading(false); }
   };
