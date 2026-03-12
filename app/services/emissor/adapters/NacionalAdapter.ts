@@ -244,9 +244,14 @@ export class NacionalAdapter {
 
             if (hasInss) tribXml += `<vRetCP>${Number(r.inss.valor).toFixed(2)}</vRetCP>`;
             if (hasIr) tribXml += `<vRetIRRF>${Number(r.ir.valor).toFixed(2)}</vRetIRRF>`;
-            if (hasCsll) tribXml += `<vRetCSLL>${Number(r.csll.valor).toFixed(2)}</vRetCSLL>`;
             
-            tribXml += `</tribFed>`;
+            // === NOVO CÁLCULO PCC (PIS + COFINS + CSLL) NA TAG vRetCSLL ===
+            if (hasPis || hasCofins || hasCsll) {
+                const totalPcc = (hasPis ? Number(r.pis.valor) : 0) + 
+                                 (hasCofins ? Number(r.cofins.valor) : 0) + 
+                                 (hasCsll ? Number(r.csll.valor) : 0);
+                tribXml += `<vRetCSLL>${totalPcc.toFixed(2)}</vRetCSLL>`;
+            }
         }
 
         // === TOTAIS DE TRIBUTOS (Transparência / IBPT) ===
