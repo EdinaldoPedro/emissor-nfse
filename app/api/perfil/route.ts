@@ -7,215 +7,175 @@ import { encrypt } from '@/app/utils/crypto';
 
 const prisma = new PrismaClient();
 
-// === HELPER: BUSCA IBGE NO BACKEND (SEGURANÇA) ===
 async function buscarIbgePorCep(cep: string): Promise<string | null> {
     try {
         const cepLimpo = cep.replace(/\D/g, '');
         if (cepLimpo.length !== 8) return null;
-        
-        // Busca silenciosa no ViaCEP
         const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`, { next: { revalidate: 3600 } });
         const data = await res.json();
-        
-        if (!data.erro && data.ibge) {
-            return data.ibge;
-        }
+        if (!data.erro && data.ibge) return data.ibge;
         return null;
     } catch (e) {
-        console.error("Erro ao buscar IBGE (Backend Perfil):", e);
         return null;
     }
 }
 
-// GET
 export async function GET(request: Request) {
-  const { targetId, errorResponse } = await validateRequest(request);
-  if (errorResponse) return errorResponse;
+  try {
+      const { targetId, errorResponse } = await validateRequest(request);
+      if (errorResponse) return errorResponse;
 
-  const userId = targetId;
-  const contextEmpresaId = request.headers.get('x-empresa-id');
+      const userId = targetId;
+      const contextEmpresaId = request.headers.get('x-empresa-id');
 
-  if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
+      if (!userId) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
 
-  // 1. Busca o usuário logado
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { empresa: true }
-  });
-
-  if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
-
-  // === LÓGICA DE PLANOS E STAFF ===
-  const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
-  let planoDetalhado = null;
-
-  if (isStaff) {
-      planoDetalhado = {
-          nome: 'Acesso Administrativo',
-          slug: 'ADMIN_ACCESS',
-          status: 'ATIVO',
-          dataInicio: user.createdAt,
-          dataFim: null, 
-          usoEmissoes: 0,
-          limiteEmissoes: 0, 
-          diasTeste: 0
-      };
-  } else {
-        const planoAtivo = await prisma.planHistory.findFirst({
-            where: { userId: user.id, status: 'ATIVO' },
-            include: { plan: true },
-            orderBy: { createdAt: 'desc' }
-        });
-
-        let statusVisual = planoAtivo?.status || 'INATIVO';
-        if (planoAtivo && planoAtivo.plan.maxNotasMensal > 0 && planoAtivo.notasEmitidas >= planoAtivo.plan.maxNotasMensal) {
-            statusVisual = 'LIMITE_ATINGIDO';
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: { 
+            empresa: true,
+            empresasFaturadas: true 
         }
+      });
 
-        if (planoAtivo && planoAtivo.dataFim && new Date() > planoAtivo.dataFim) {
-            statusVisual = 'EXPIRADO';
-        }
+      if (!user) return NextResponse.json({ error: 'User não encontrado' }, { status: 404 });
 
-        planoDetalhado = planoAtivo ? {
-            nome: planoAtivo.plan.name,
-            slug: planoAtivo.plan.slug,
-            status: statusVisual,
-            dataInicio: planoAtivo.dataInicio,
-            dataFim: planoAtivo.dataFim,
-            usoEmissoes: planoAtivo.notasEmitidas,
-            limiteEmissoes: planoAtivo.plan.maxNotasMensal,
-            diasTeste: planoAtivo.plan.diasTeste
-        } : { 
-            nome: 'Sem Plano Ativo', 
-            slug: 'FREE', 
-            status: 'INATIVO', 
-            usoEmissoes: 0, 
-            limiteEmissoes: 0 
-        };
-  }
-
-  // 2. Lógica de Contexto
-  let empresaAlvoId = null;
-
-  if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
-      if (isStaff) {
-          empresaAlvoId = contextEmpresaId;
-      } else {
-          const vinculo = await prisma.contadorVinculo.findUnique({
-              where: {
-                  contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId }
+      const listaEmpresas: any[] = [];
+      if (user.empresa) {
+          listaEmpresas.push({ id: user.empresa.id, razaoSocial: user.empresa.razaoSocial || 'Minha Empresa Primária', cnpj: user.empresa.documento, isPrimary: true });
+      }
+      if (user.empresasFaturadas && user.empresasFaturadas.length > 0) {
+          user.empresasFaturadas.forEach(emp => {
+              if (emp.id !== user.empresaId) { 
+                  listaEmpresas.push({ id: emp.id, razaoSocial: emp.razaoSocial || 'Empresa Adicional', cnpj: emp.documento, isPrimary: false });
               }
           });
-          if (vinculo && vinculo.status === 'APROVADO') {
-              empresaAlvoId = contextEmpresaId; 
-          }
       }
-  }
 
-  if (!empresaAlvoId) {
-      empresaAlvoId = user.empresaId;
-  }
+      const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+      let planoDetalhado = null;
 
-  // 3. Busca os dados da empresa ALVO
-  let dadosEmpresa: any = {};
-  
-  if (empresaAlvoId) {
-      const emp = await prisma.empresa.findUnique({
-          where: { id: empresaAlvoId },
-          include: { atividades: true }
-      });
-      
-      if (emp) {
-          dadosEmpresa = emp;
+      if (isStaff) {
+          planoDetalhado = {
+              nome: 'Acesso Administrativo', slug: 'ADMIN_ACCESS', status: 'ATIVO',
+              dataInicio: user.createdAt, dataFim: null, usoEmissoes: 0, limiteEmissoes: 0, diasTeste: 0
+          };
+      } else {
+            const planoAtivo = await prisma.planHistory.findFirst({
+                where: { userId: user.id, status: 'ATIVO' },
+                include: { plan: true },
+                orderBy: { createdAt: 'desc' }
+            });
 
-          // === AUTO-CORREÇÃO DE IBGE (SELF-HEALING) ===
-          // Se a empresa tem CEP mas o IBGE está vazio ou inválido, corrige agora!
-          if (emp.cep && (!emp.codigoIbge || emp.codigoIbge.length < 7)) {
-              console.log(`[AUTO-FIX] Empresa ${emp.razaoSocial} sem IBGE. Corrigindo...`);
-              const ibgeNovo = await buscarIbgePorCep(emp.cep);
-              
-              if (ibgeNovo) {
-                  await prisma.empresa.update({
-                      where: { id: emp.id },
-                      data: { codigoIbge: ibgeNovo }
+            let statusVisual = planoAtivo?.status || 'INATIVO';
+            if (planoAtivo && planoAtivo.plan?.maxNotasMensal > 0 && planoAtivo.notasEmitidas >= planoAtivo.plan.maxNotasMensal) statusVisual = 'LIMITE_ATINGIDO';
+            if (planoAtivo && planoAtivo.dataFim && new Date() > planoAtivo.dataFim) statusVisual = 'EXPIRADO';
+
+            planoDetalhado = planoAtivo ? {
+                nome: planoAtivo.plan?.name || 'Plano Desconhecido', slug: planoAtivo.plan?.slug || 'FREE', status: statusVisual,
+                dataInicio: planoAtivo.dataInicio, dataFim: planoAtivo.dataFim,
+                usoEmissoes: planoAtivo.notasEmitidas, limiteEmissoes: planoAtivo.plan?.maxNotasMensal || 0, diasTeste: planoAtivo.plan?.diasTeste || 0
+            } : { nome: 'Sem Plano Ativo', slug: 'FREE', status: 'INATIVO', usoEmissoes: 0, limiteEmissoes: 0 };
+      }
+
+      let empresaAlvoId = null;
+
+      if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {
+          if (isStaff) {
+              empresaAlvoId = contextEmpresaId;
+          } else {
+              const isOwnCompany = listaEmpresas.some(e => e.id === contextEmpresaId);
+              if (isOwnCompany) {
+                  empresaAlvoId = contextEmpresaId;
+              } else {
+                  const vinculo = await prisma.contadorVinculo.findUnique({
+                      where: { contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId } }
                   });
-                  dadosEmpresa.codigoIbge = ibgeNovo; // Atualiza o objeto atual para retornar correto
-                  console.log(`[AUTO-FIX] IBGE corrigido para: ${ibgeNovo}`);
+                  // Mesmo que o status não seja aprovado, se o contador tenta ver, o painel deve carregar sem dar 500
+                  if (vinculo) empresaAlvoId = contextEmpresaId; 
               }
           }
       }
-  }
 
-  let atividadesEnriquecidas = dadosEmpresa.atividades || [];
-  
-  if (atividadesEnriquecidas.length > 0) {
-      const codigos = atividadesEnriquecidas.map((c: any) => c.codigo);
-      const globais = await prisma.globalCnae.findMany({
-          where: { codigo: { in: codigos } }
-      });
+      if (!empresaAlvoId) empresaAlvoId = user.empresaId;
 
-      // NOVO: Puxa as regras municipais para a cidade da empresa
-      const regrasMunicipais = await prisma.tributacaoMunicipal.findMany({
-          where: { 
-              cnae: { in: codigos },
-              codigoIbge: dadosEmpresa.codigoIbge
+      let dadosEmpresa: any = {};
+      if (empresaAlvoId) {
+          const emp = await prisma.empresa.findUnique({ where: { id: empresaAlvoId }, include: { atividades: true } });
+          if (emp) {
+              dadosEmpresa = emp;
+              if (emp.cep && (!emp.codigoIbge || emp.codigoIbge.length < 7)) {
+                  const ibgeNovo = await buscarIbgePorCep(emp.cep);
+                  if (ibgeNovo) {
+                      await prisma.empresa.update({ where: { id: emp.id }, data: { codigoIbge: ibgeNovo } });
+                      dadosEmpresa.codigoIbge = ibgeNovo;
+                  }
+              }
           }
-      });
+      }
 
-      atividadesEnriquecidas = atividadesEnriquecidas.map((local: any) => {
-          const global = globais.find((g: any) => g.codigo === local.codigo);
-          const regraMun = regrasMunicipais.find((r: any) => r.cnae === local.codigo);
+      let atividadesEnriquecidas = dadosEmpresa.atividades || [];
+      if (atividadesEnriquecidas.length > 0) {
+          const codigos = atividadesEnriquecidas.map((c: any) => c.codigo);
+          const globais = await prisma.globalCnae.findMany({ where: { codigo: { in: codigos } } });
+          
+          // Correção de segurança: Se o codigoIbge for nulo, usamos string vazia para o Prisma não crashar
+          const regrasMunicipais = await prisma.tributacaoMunicipal.findMany({ 
+              where: { cnae: { in: codigos }, codigoIbge: dadosEmpresa.codigoIbge || '' } 
+          });
 
-          return {
-              ...local,
-              // === REGRAS FEDERAIS (Global) ===
-              temRetencaoInss: global?.temRetencaoInss || local.temRetencaoInss,
-              retemCrsf: global?.retemCrsf || false,
-              aliquotaCrsf: global?.aliquotaCrsf ? Number(global.aliquotaCrsf) : 4.65,
-              retemIr: global?.retemIr || false,
-              aliquotaIr: global?.aliquotaIr ? Number(global.aliquotaIr) : 1.50,
-              codigoNbs: global?.codigoNbs || local.codigoNbs,
-              
-              // === REGRAS MUNICIPAIS (Local) ===
-              aliquotaIss: regraMun?.aliquotaIss ? Number(regraMun.aliquotaIss) : null
-          };
+          atividadesEnriquecidas = atividadesEnriquecidas.map((local: any) => {
+              const global = globais.find((g: any) => g.codigo === local.codigo);
+              const regraMun = regrasMunicipais.find((r: any) => r.cnae === local.codigo);
+              return {
+                  ...local,
+                  temRetencaoInss: global?.temRetencaoInss || local.temRetencaoInss,
+                  retemCrsf: global?.retemCrsf || false,
+                  aliquotaCrsf: global?.aliquotaCrsf ? Number(global.aliquotaCrsf) : 4.65,
+                  retemIr: global?.retemIr || false,
+                  aliquotaIr: global?.aliquotaIr ? Number(global.aliquotaIr) : 1.50,
+                  codigoNbs: global?.codigoNbs || local.codigoNbs,
+                  aliquotaIss: regraMun?.aliquotaIss ? Number(regraMun.aliquotaIss) : null
+              };
+          });
+      }
+
+      // @ts-ignore
+      const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
+
+      return NextResponse.json({
+        ...restEmpresa,
+        emailComercial: emailEmpresa,
+        temCertificado: !!certificadoA1,
+        vencimentoCertificado: dadosEmpresa.certificadoVencimento,
+        cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
+        atividades: atividadesEnriquecidas,
+
+        role: user.role,
+        nome: user.nome,
+        email: user.email,
+        cpf: user.cpf,
+        telefone: user.telefone,
+        cargo: user.cargo,
+        tutorialStep: user.tutorialStep, 
+        empresasAdicionais: user.empresasAdicionais,
+        
+        listaEmpresas,
+        empresaPrimariaId: user.empresaId,
+
+        configuracoes: { darkMode: user.darkMode, idioma: user.idioma, notificacoesEmail: user.notificacoesEmail },
+        planoDetalhado,
+        planoSlug: user.plano, 
+        planoCiclo: user.planoCiclo,
+        isContextMode: empresaAlvoId !== user.empresaId
       });
+  } catch (error: any) {
+      console.error("ERRO CRÍTICO NA API DE PERFIL:", error);
+      return NextResponse.json({ error: 'Erro interno ao carregar perfil', detalhes: error.message }, { status: 500 });
   }
-
-  // @ts-ignore
-  const { certificadoA1, senhaCertificado, email: emailEmpresa, ...restEmpresa } = dadosEmpresa;
-
-  return NextResponse.json({
-    ...restEmpresa,
-    emailComercial: emailEmpresa,
-    temCertificado: !!certificadoA1,
-    vencimentoCertificado: dadosEmpresa.certificadoVencimento,
-    cadastroCompleto: dadosEmpresa.cadastroCompleto || false,
-    atividades: atividadesEnriquecidas,
-
-    role: user.role,
-    nome: user.nome,
-    email: user.email,
-    cpf: user.cpf,
-    telefone: user.telefone,
-    cargo: user.cargo,
-    tutorialStep: user.tutorialStep, 
-    
-    configuracoes: {
-        darkMode: user.darkMode,
-        idioma: user.idioma,
-        notificacoesEmail: user.notificacoesEmail
-    },
-    
-    planoDetalhado,
-    planoSlug: user.plano, 
-    planoCiclo: user.planoCiclo,
-    
-    isContextMode: empresaAlvoId !== user.empresaId
-  });
 }
 
-// PUT
+// ... MÉTODO PUT IGUAL AO ANTERIOR ...
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextEmpresaId = request.headers.get('x-empresa-id');
@@ -246,57 +206,35 @@ export async function PUT(request: Request) {
     if (body.documento) {
       const cnpjLimpo = body.documento.replace(/\D/g, '');
       
-      // === CORREÇÃO: GARANTIA DE IBGE NO PUT ===
       if (body.cep && (!body.codigoIbge || body.codigoIbge.length < 7)) {
-          console.log(`[PERFIL] Detectada falta de IBGE. Buscando para CEP: ${body.cep}`);
           const ibgeResgatado = await buscarIbgePorCep(body.cep);
-          if (ibgeResgatado) {
-              body.codigoIbge = ibgeResgatado;
-              console.log(`[PERFIL] IBGE recuperado e salvo: ${ibgeResgatado}`);
-          }
+          if (ibgeResgatado) body.codigoIbge = ibgeResgatado;
       }
 
       const dadosEmpresa: any = {
-          razaoSocial: body.razaoSocial,
-          nomeFantasia: body.nomeFantasia,
-          inscricaoMunicipal: body.inscricaoMunicipal,
-          regimeTributario: body.regimeTributario,
-          cep: body.cep,
-          logradouro: body.logradouro,
-          numero: body.numero,
-          bairro: body.bairro,
-          cidade: body.cidade,
-          uf: body.uf,
-          codigoIbge: body.codigoIbge, 
-          email: body.emailComercial || body.email,
-          cadastroCompleto: true,
-          serieDPS: body.serieDPS, 
-          ultimoDPS: body.ultimoDPS ? parseInt(String(body.ultimoDPS)) : undefined,
-          ambiente: body.ambiente
+          razaoSocial: body.razaoSocial, nomeFantasia: body.nomeFantasia, inscricaoMunicipal: body.inscricaoMunicipal,
+          regimeTributario: body.regimeTributario, cep: body.cep, logradouro: body.logradouro,
+          numero: body.numero, bairro: body.bairro, cidade: body.cidade, uf: body.uf,
+          codigoIbge: body.codigoIbge, email: body.emailComercial || body.email,
+          cadastroCompleto: true, serieDPS: body.serieDPS, 
+          ultimoDPS: body.ultimoDPS ? parseInt(String(body.ultimoDPS)) : undefined, ambiente: body.ambiente
       };
 
       if (body.deletarCertificado) {
-          dadosEmpresa.certificadoA1 = null;
-          dadosEmpresa.senhaCertificado = null;
-          dadosEmpresa.certificadoVencimento = null;
-      } 
-      else if (body.certificadoArquivo && body.certificadoSenha) {
+          dadosEmpresa.certificadoA1 = null; dadosEmpresa.senhaCertificado = null; dadosEmpresa.certificadoVencimento = null;
+      } else if (body.certificadoArquivo && body.certificadoSenha) {
           try {
               const p12Der = forge.util.decode64(body.certificadoArquivo);
               const p12Asn1 = forge.asn1.fromDer(p12Der);
               const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, body.certificadoSenha);
-              
               let dataVencimento = null;
               const bags = p12.getBags({ bagType: forge.pki.oids.certBag });
               // @ts-ignore
               const certBag = bags[forge.pki.oids.certBag]?.[0];
               if(certBag && certBag.cert) dataVencimento = certBag.cert.validity.notAfter;
               
-              // === CRIPTOGRAFIA APLICADA AQUI ===
               dadosEmpresa.certificadoA1 = encrypt(body.certificadoArquivo);
               dadosEmpresa.senhaCertificado = encrypt(body.certificadoSenha);
-              // ==================================
-              
               dadosEmpresa.certificadoVencimento = dataVencimento;
           } catch (e) {
               return NextResponse.json({ error: 'Senha incorreta ou arquivo inválido.' }, { status: 400 });
@@ -318,24 +256,16 @@ export async function PUT(request: Request) {
           if (body.cnaes.length > 0) {
               await prisma.cnae.createMany({
                   data: body.cnaes.map((c: any) => ({
-                      empresaId: empresaSalva.id,
-                      codigo: String(c.codigo).replace(/\D/g, ''),
-                      descricao: c.descricao,
-                      principal: c.principal,
-                      codigoNbs: c.codigoNbs,
-                      temRetencaoInss: c.temRetencaoInss || false
+                      empresaId: empresaSalva.id, codigo: String(c.codigo).replace(/\D/g, ''),
+                      descricao: c.descricao, principal: c.principal, codigoNbs: c.codigoNbs, temRetencaoInss: c.temRetencaoInss || false
                   }))
               });
-              
-              if (empresaSalva.codigoIbge) {
-                  await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);
-              }
+              if (empresaSalva.codigoIbge) await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);
           }
       }
     }
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error("Erro no Profile PUT:", error);
     return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
   }
 }

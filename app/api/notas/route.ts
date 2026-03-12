@@ -61,18 +61,43 @@ export async function POST(request: Request) {
     const tomador = await prisma.cliente.findUnique({ where: { id: clienteId } }); 
     if (!tomador) throw new Error("Tomador (Cliente) não encontrado.");
 
+    // === NOVO: INTELIGÊNCIA DE GUARDA-CHUVA (UMBRELLA BILLING) ===
     let planHistoryId: string | null = null;
-    const donoEmpresa = await prisma.user.findFirst({
-        where: { empresaId: empresaIdAlvo, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
-        orderBy: { createdAt: 'asc' }
-    });
+    let donoFaturamentoId = prestador.donoFaturamentoId;
+    
+    // Se não tiver donoFaturamentoId (é a empresa primária de alguém), busca o dono original
+    if (!donoFaturamentoId) {
+        const donoEmpresa = await prisma.user.findFirst({
+            where: { empresaId: empresaIdAlvo, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
+            orderBy: { createdAt: 'asc' }
+        });
+        if (donoEmpresa) donoFaturamentoId = donoEmpresa.id;
+    }
 
-    if (donoEmpresa) {
-        const planCheck = await checkPlanLimits(donoEmpresa.id, 'EMITIR');
+    // Se achou alguém para pagar a conta, verifica o limite na carteira dele
+    if (donoFaturamentoId) {
+        const planCheck = await checkPlanLimits(donoFaturamentoId, 'EMITIR');
         if (!planCheck.allowed) {
-            return NextResponse.json({ error: planCheck.reason, code: planCheck.status }, { status: 403 });
+            return NextResponse.json({ 
+                error: "Limite de emissão atingido.", 
+                userAction: "A carteira de consumo responsável por este CNPJ atingiu o limite ou o plano expirou.", 
+                code: planCheck.status 
+            }, { status: 403 });
         }
         planHistoryId = planCheck.historyId || null;
+    } else {
+        // Se a empresa é "Órfã" (criada do zero) e quem está a tentar emitir é o Contador
+        if (user.role === 'CONTADOR') {
+            const checkContador = await checkPlanLimits(user.id, 'EMITIR');
+            if (!checkContador.allowed) {
+                 return NextResponse.json({ 
+                     error: "Limite do seu plano de Contador atingido.", 
+                     userAction: "O seu limite global de emissões para empresas órfãs acabou. Renove o seu pacote.",
+                     code: checkContador.status 
+                 }, { status: 403 });
+            }
+            planHistoryId = checkContador.historyId || null;
+        }
     }
 
     const valorFloat = parseFloat(valor);
@@ -115,8 +140,8 @@ export async function POST(request: Request) {
 
     let codigoTribNacional = '000000'; 
     let itemLc = '00.00';
-    let nbsEncontrado = ''; // Armazena o NBS do CNAE, mas não injeta ainda
-    let codigoNbs = '';     // Fica VAZIO por padrão!
+    let nbsEncontrado = ''; 
+    let codigoNbs = '';     
 
     const infoEstatica = getTributacaoPorCnae(cnaeFinal);
     if (infoEstatica) {
@@ -132,7 +157,6 @@ export async function POST(request: Request) {
         if ((regraGlobal as any).codigoNbs) nbsEncontrado = (regraGlobal as any).codigoNbs;
     }
 
-    // === NOVO: BUSCA A REGRA MUNICIPAL E O CHECKBOX DO NBS ===
     const regraMunicipal = await prisma.tributacaoMunicipal.findFirst({
         where: {
             cnae: cnaeFinal,
@@ -144,7 +168,6 @@ export async function POST(request: Request) {
         codigoNbs = nbsEncontrado;
     }
 
-    // Monta o tomadorAdaptado com TODOS os campos necessários para a Strategy
     const tomadorAdaptado = { 
         ...tomador, 
         razaoSocial: tomador.nome, 
@@ -171,7 +194,7 @@ export async function POST(request: Request) {
             valor: valorFloat, 
             valorMoedaEstrangeira: valorMoedaEstrangeira ? parseFloat(valorMoedaEstrangeira) : undefined,
             codigoNbs: codigoNbs, 
-            codigoTributacaoMunicipal: regraMunicipal?.codigoTributacaoMunicipal, // REPASSA O CTM
+            codigoTributacaoMunicipal: regraMunicipal?.codigoTributacaoMunicipal,
             descricao, cnae: cnaeFinal, itemLc, codigoTribNacional,
             aliquota: aliquota ? parseFloat(aliquota) : 0, issRetido: !!issRetido, retencoes: retencoes
         },
@@ -181,16 +204,16 @@ export async function POST(request: Request) {
 
     const strategy = EmissorFactory.getStrategy(prestador);
     
-    let resultado: any; // O ": any" resolve o alerta vermelho do VS Code
+    let resultado: any; 
     for (let tentativa = 1; tentativa <= 5; tentativa++) {
         resultado = await strategy.executar(dadosParaEstrategia);
         
         const erroTexto = resultado.erros ? JSON.stringify(resultado.erros).toLowerCase() : '';
         if (!resultado.sucesso && (erroTexto.includes('e999') || erroTexto.includes('e0008')) && tentativa < 5) {
-            await new Promise(resolve => setTimeout(resolve, 4000)); // Aguarda 4 segundos
+            await new Promise(resolve => setTimeout(resolve, 4000));
             continue;
         }
-        break; // Sai do loop se der sucesso ou se for outro erro
+        break; 
     }
 
     await createLog({
@@ -203,20 +226,20 @@ export async function POST(request: Request) {
     // --- TRATAMENTO DE ERROS INTELIGENTE ---
     if (!resultado.sucesso) {
         let customUserAction = null;
-        let apagarVenda = false; // NOVO: Controle de deleção
+        let apagarVenda = false; 
         const errorStr = JSON.stringify(resultado.erros).toLowerCase();
 
         if (errorStr.includes('e999')) {
             customUserAction = "Instabilidade no Portal Nacional. Verifique se está no ambiente de 'Produção', se não estiver, mude e tente de novo.";
-            apagarVenda = false; // Mantém a venda para o usuário poder clicar em "Corrigir" depois!
+            apagarVenda = false; 
         }
         else if (errorStr.includes('inscrição municipal') || errorStr.includes('im ') || errorStr.includes('e0180') || errorStr.includes('e0183') || errorStr.includes('e0184')) {
             customUserAction = "Sua Inscrição Municipal está ausente ou incorreta. Por favor, acesse as Configurações da Empresa e atualize o número da sua I.M.";
-            apagarVenda = true; // Apaga a venda, pois é erro de cadastro
+            apagarVenda = true; 
         } 
         else if (errorStr.includes('já utilizado') || errorStr.includes('já existe') || errorStr.includes('duplicado') || errorStr.includes('e0171') || errorStr.includes('e0041')) {
             customUserAction = `O número de DPS ${dpsFinal} já foi utilizado. Por favor, altere o número do DPS para o próximo sequencial disponível.`;
-            apagarVenda = true; // Apaga a venda
+            apagarVenda = true; 
         }
 
         if (customUserAction && apagarVenda) {
@@ -225,7 +248,6 @@ export async function POST(request: Request) {
                 await prisma.venda.delete({ where: { id: venda.id } });
             }
         } else {
-            // Se for E999 (ou erro normal), mantém a venda salva com status de ERRO_EMISSAO
             await prisma.venda.update({ where: { id: venda.id }, data: { status: 'ERRO_EMISSAO' } });
             await createLog({ level: 'ERRO', action: 'FALHA_EMISSAO', message: resultado.motivo || 'Rejeição Sefaz', empresaId: prestador.id, vendaId: venda.id, details: resultado.erros });
         }
@@ -251,8 +273,8 @@ export async function POST(request: Request) {
         }, { status: 200 });
     }
 
-    // === FLUXO DE PRODUÇÃO NORMAL ===
-    if(planHistoryId) await incrementUsage(planHistoryId);
+    // === FLUXO DE PRODUÇÃO NORMAL (DESCONTA O LIMITE AQUI) ===
+    if(planHistoryId) await incrementUsage(planHistoryId); // <--- O DESCONTO ACONTECE AQUI!
 
     const nota = await prisma.notaFiscal.create({
         data: {
@@ -265,6 +287,8 @@ export async function POST(request: Request) {
     });
 
     await createLog({ level: 'INFO', action: 'NOTA_AUTORIZADA', message: `Nota ${nota.numero} autorizada!`, empresaId: prestador.id, vendaId: venda.id });
+    
+    // Agora sim acionamos o Processor para baixar o XML e PDF oficiais em segundo plano
     processarRetornoNota(nota.id, prestador.id, venda.id).catch(console.error);
 
     return NextResponse.json({ success: true, nota }, { status: 201 });
@@ -326,13 +350,13 @@ export async function GET(request: Request) {
   
       const dadosFinais = vendas.map(v => {
           let codigoTribDisplay = '---';
-          let nomeServicoDisplay = v.descricao || ''; // NOVO
+          let nomeServicoDisplay = v.descricao || ''; 
           
           if (v.notas.length > 0 && v.notas[0].cnae) {
              const info = getTributacaoPorCnae(v.notas[0].cnae);
              if (info && info.codigoTributacaoNacional) {
                  codigoTribDisplay = info.codigoTributacaoNacional;
-                 nomeServicoDisplay = info.descricao; // NOVO: Pega o nome oficial do CNAE/Serviço
+                 nomeServicoDisplay = info.descricao; 
              }
           }
 

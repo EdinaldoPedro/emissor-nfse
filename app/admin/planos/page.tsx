@@ -105,6 +105,7 @@ export default function AdminPlanos() {
                             <option value="PLANO">Plano de Assinatura (Mensal/Anual)</option>
                             <option value="PACOTE_CLIENTES">Pacote Adicional de Clientes (+5, +10)</option>
                             <option value="PACOTE_NOTAS">Pacote Adicional de Notas (+3, +5, +10)</option>
+                            <option value="PACOTE_PJ">Pacote de PJ Adicional (+1 CNPJ)</option>
                         </select>
                     </div>
 

@@ -1,241 +1,229 @@
-import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
-import { validateRequest } from '@/app/utils/api-security';
-import { sanitizeStringExternal } from '@/app/utils/formatters';
+import { NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
+import { createLog } from '@/app/services/logger';
+import { checkPlanLimits } from '@/app/services/planService';
+import { validateRequest } from "@/app/utils/api-security";
 
 const prisma = new PrismaClient();
 
-// === HELPER: BUSCA IBGE (SEGURANÇA) ===
-async function buscarIbgePorCep(cep: string): Promise<string | null> {
-    try {
-        const cepLimpo = cep.replace(/\D/g, '');
-        if (cepLimpo.length !== 8) return null;
-        const res = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`, { next: { revalidate: 3600 } });
-        const data = await res.json();
-        return (!data.erro && data.ibge) ? data.ibge : null;
-    } catch (e) { return null; }
+async function getEmpresaContexto(user: any, contextId: string | null) {
+    const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user.role);
+    if (contextId && contextId !== 'null' && contextId !== 'undefined') {
+        if (isStaff) return contextId;
+        const vinculo = await prisma.contadorVinculo.findUnique({
+            where: { contadorId_empresaId: { contadorId: user.id, empresaId: contextId } }
+        });
+        if (vinculo && vinculo.status === 'APROVADO') return contextId;
+        
+        const empresaAdicional = await prisma.empresa.findFirst({
+            where: { id: contextId, donoFaturamentoId: user.id }
+        });
+        if (empresaAdicional) return contextId;
+
+        return null; 
+    }
+    return user.empresaId;
 }
 
-// GET: Listar Clientes (da MINHA Carteira)
 export async function GET(request: Request) {
     const { targetId, errorResponse } = await validateRequest(request);
     if (errorResponse) return errorResponse;
+    
+    const user = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!user) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
+
+    const contextId = request.headers.get('x-empresa-id');
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || '';
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '10');
 
     try {
-        let empresaId = request.headers.get('x-empresa-id');
-        
-        // Lógica de fallback para descobrir a empresa do usuário logado
-        if (!empresaId || empresaId === 'null' || empresaId === 'undefined') {
-            const user = await prisma.user.findUnique({ where: { id: targetId } });
-            empresaId = user?.empresaId || null;
-            
-            if (!empresaId) {
-                const vinculo = await prisma.userCliente.findFirst({ where: { userId: targetId } });
-                if (vinculo) empresaId = vinculo.empresaId;
-            }
-        }
+        const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+        if (!empresaIdAlvo) return NextResponse.json({ data: [], meta: { total: 0 } });
 
-        if (!empresaId) return NextResponse.json([]);
+        const whereClause = {
+            vinculos: {
+                some: { empresaId: empresaIdAlvo }
+            },
+            ...(search && {
+                OR: [
+                    { nome: { contains: search, mode: 'insensitive' as const } },
+                    { documento: { contains: search } },
+                    { email: { contains: search, mode: 'insensitive' as const } }
+                ]
+            })
+        };
 
-        // === CORREÇÃO: Busca via Tabela de Vínculo ===
-        const vinculos = await prisma.vinculoCarteira.findMany({
-            where: { empresaId: empresaId },
-            include: { cliente: true }, // Traz os dados do cliente global
-            orderBy: { cliente: { nome: 'asc' } }
-        });
+        const skip = (page - 1) * limit;
 
-        // Mapeia para retornar apenas os dados do cliente (flat)
-        const clientes = vinculos.map(v => ({
-            ...v.cliente,
-            // Adiciona campos do vínculo se necessário (ex: apelido)
-            apelido: v.apelido,
-            idVinculo: v.id // Útil para deleção
+        const [clientes, total] = await prisma.$transaction([
+            prisma.cliente.findMany({
+                where: whereClause,
+                skip: skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' },
+                include: { _count: { select: { vendas: true } } }
+            }),
+            prisma.cliente.count({ where: whereClause })
+        ]);
+
+        const dadosFormatados = clientes.map((c: any) => ({
+            ...c,
+            vendas: c._count?.vendas || 0,
+            _count: undefined
         }));
-        
-        return NextResponse.json(clientes);
 
-    } catch (e) {
-        console.error(e);
-        return NextResponse.json({ error: 'Erro ao listar clientes.' }, { status: 500 });
+        return NextResponse.json({
+            data: dadosFormatados,
+            meta: { total, page, limit, totalPages: Math.ceil(total / limit) }
+        });
+    } catch (error: any) {
+        return NextResponse.json({ error: 'Erro ao buscar clientes' }, { status: 500 });
     }
 }
 
-// POST: Criar/Vincular Cliente
 export async function POST(request: Request) {
     const { targetId, errorResponse } = await validateRequest(request);
     if (errorResponse) return errorResponse;
 
+    const user = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!user) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
+
+    const contextId = request.headers.get('x-empresa-id');
+    const body = await request.json();
+
     try {
-        // === 1. Identifica a Empresa Prestadora ===
-        let empresaId = request.headers.get('x-empresa-id');
-        if (!empresaId || empresaId === 'null') {
-            const user = await prisma.user.findUnique({ where: { id: targetId } });
-            empresaId = user?.empresaId || null;
-            
-            if (!empresaId) {
-                const vinculo = await prisma.userCliente.findFirst({ where: { userId: targetId } });
-                if (vinculo) empresaId = vinculo.empresaId;
+        const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+        if (!empresaIdAlvo) return NextResponse.json({ error: 'Acesso negado a esta empresa' }, { status: 403 });
+
+        const prestador = await prisma.empresa.findUnique({ where: { id: empresaIdAlvo } });
+        if (!prestador) throw new Error("Empresa não encontrada.");
+
+        let donoFaturamentoId = prestador.donoFaturamentoId;
+        
+        if (!donoFaturamentoId) {
+            const donoEmpresa = await prisma.user.findFirst({
+                where: { empresaId: empresaIdAlvo, role: { notIn: ['CONTADOR', 'SUPORTE', 'SUPORTE_TI'] } },
+                orderBy: { createdAt: 'asc' }
+            });
+            if (donoEmpresa) donoFaturamentoId = donoEmpresa.id;
+        }
+
+        if (donoFaturamentoId) {
+            const planCheck = await checkPlanLimits(donoFaturamentoId, 'CADASTRAR_CLIENTE' as any);
+            if (!planCheck.allowed) {
+                return NextResponse.json({ 
+                    error: "Limite de clientes atingido.", 
+                    code: planCheck.status 
+                }, { status: 403 });
             }
         }
 
-        if (!empresaId) {
-            return NextResponse.json({ error: 'Empresa não identificada.' }, { status: 400 });
+        const docLimpo = body.documento.replace(/\D/g, '');
+
+        const clienteExiste = await prisma.cliente.findFirst({
+            where: { 
+                documento: docLimpo,
+                vinculos: { some: { empresaId: empresaIdAlvo } }
+            }
+        });
+
+        if (clienteExiste) {
+            return NextResponse.json({ error: 'Já existe um cliente com este CPF/CNPJ nesta empresa.' }, { status: 400 });
         }
 
-        const body = await request.json();
-        let { 
-            id, tipo, nome, nomeFantasia, documento, 
-            email, telefone, 
-            cep, logradouro, numero, bairro, cidade, uf, codigoIbge, pais,
-            inscricaoMunicipal, nif, moeda, complemento
-        } = body;
-
-        // === 2. Limpeza e Sanitização ===
-        if (tipo === 'EXT') {
-            // Garante que o documento (CPF/CNPJ) seja nulo para não dar conflito de Unique
-            documento = null; 
-            
-            // Limpa o NIF para deixar só números e no máximo 9 dígitos
-            if (nif) nif = nif.replace(/\D/g, '').slice(0, 9);
-
-            // Aplica a sanitização obrigatória do Padrão Nacional
-            nome = sanitizeStringExternal(nome);
-            logradouro = sanitizeStringExternal(logradouro);
-            numero = sanitizeStringExternal(numero);
-            bairro = sanitizeStringExternal(bairro);
-            cidade = sanitizeStringExternal(cidade);
-            uf = sanitizeStringExternal(uf);
-            pais = sanitizeStringExternal(pais);
-            if (complemento) complemento = sanitizeStringExternal(complemento);
-        }
-
-        // Validações Básicas
-        if (!nome) return NextResponse.json({ error: 'Nome é obrigatório.' }, { status: 400 });
-        const docLimpo = documento ? documento.replace(/\D/g, '') : null;
-        if (tipo !== 'EXT' && !docLimpo) return NextResponse.json({ error: 'Documento obrigatório.' }, { status: 400 });
-
-        // Tratamento de IBGE (Ignorar se for exterior)
-        let ibgeFinal = codigoIbge;
-        if (cep && (!ibgeFinal || ibgeFinal.length < 7) && tipo !== 'EXT') {
-            const ibgeResgatado = await buscarIbgePorCep(cep);
-            if (ibgeResgatado) ibgeFinal = ibgeResgatado;
-        }
-
-        // === 3. Verifica se o Cliente já existe no Catálogo Global ===
-        let clienteGlobal = null;
-        
-        if (id) {
-            // Edição direta
-            clienteGlobal = await prisma.cliente.findUnique({ where: { id } });
-        } else if (tipo !== 'EXT') {
-            clienteGlobal = await prisma.cliente.findUnique({ where: { documento: docLimpo } });
-        } else {
-            // Para Exterior, tentamos achar pelo Nome (já que não tem CNPJ único)
-            clienteGlobal = await prisma.cliente.findFirst({ where: { nome, tipo: 'EXT' } });
-        }
-
-        // Monta o objeto com os dados finais limpos
-        const dadosCliente = {
-            tipo: tipo || 'PJ',
-            nome,
-            nomeFantasia,
-            documento: docLimpo, // Ficará null para EXT
-            nif: nif || null,
-            moeda: moeda || 'BRL',
-            email,
-            telefone,
-            cep: tipo === 'EXT' ? cep : (cep ? cep.replace(/\D/g, '') : null), // Preserva letras no CEP do exterior se houver
-            logradouro,
-            numero,
-            complemento,
-            bairro,
-            cidade,
-            uf,
-            codigoIbge: ibgeFinal,
-            pais: pais || 'Brasil',
-            inscricaoMunicipal
-        };
-
-        // === 4. Cria ou Atualiza no Global ===
-        if (clienteGlobal) {
-            clienteGlobal = await prisma.cliente.update({
-                where: { id: clienteGlobal.id },
-                data: dadosCliente
-            });
-        } else {
-            clienteGlobal = await prisma.cliente.create({
-                data: dadosCliente
-            });
-        }
-
-        // === 5. Cria o Vínculo na Carteira (Se não existir) ===
-        const vinculoExistente = await prisma.vinculoCarteira.findUnique({
-            where: {
-                empresaId_clienteId: {
-                    empresaId: empresaId,
-                    clienteId: clienteGlobal.id
+        const novoCliente = await prisma.cliente.create({
+            data: {
+                nome: body.nome,
+                documento: docLimpo,
+                tipo: docLimpo.length === 11 ? 'F' : (docLimpo.length === 14 ? 'J' : 'E'),
+                email: body.email || null,
+                telefone: body.telefone ? body.telefone.replace(/\D/g, '') : null,
+                cep: body.cep ? body.cep.replace(/\D/g, '') : null,
+                logradouro: body.logradouro || null,
+                numero: body.numero || null,
+                complemento: body.complemento || null,
+                bairro: body.bairro || null,
+                cidade: body.cidade || null,
+                uf: body.uf || null,
+                codigoIbge: body.codigoIbge || null,
+                inscricaoMunicipal: body.inscricaoMunicipal || null,
+                inscricaoEstadual: body.inscricaoEstadual || null,
+                nif: body.nif || null,
+                pais: body.pais || 'Brasil', // Ajustado para bater com o schema
+                moeda: body.moeda || 'BRL',
+                vinculos: {
+                    create: {
+                        empresaId: empresaIdAlvo
+                    }
                 }
             }
         });
 
-        if (!vinculoExistente) {
-            await prisma.vinculoCarteira.create({
-                data: {
-                    empresaId: empresaId,
-                    clienteId: clienteGlobal.id,
-                    apelido: nomeFantasia || nome // Usa fantasia como apelido padrão
-                }
-            });
-        }
+        await createLog({
+            level: 'INFO', action: 'CLIENTE_CRIADO', message: `Cliente ${novoCliente.nome} adicionado.`,
+            empresaId: empresaIdAlvo
+        });
 
-        return NextResponse.json(clienteGlobal);
-
+        return NextResponse.json({ success: true, cliente: novoCliente }, { status: 201 });
     } catch (error: any) {
-        console.error("Erro POST Cliente:", error);
-        return NextResponse.json({ error: error.message || 'Erro interno.' }, { status: 500 });
+        return NextResponse.json({ error: error.message || 'Erro ao salvar cliente.' }, { status: 500 });
     }
 }
 
-// DELETE: Remove da Carteira
-export async function DELETE(request: Request) {
+export async function PUT(request: Request) {
     const { targetId, errorResponse } = await validateRequest(request);
     if (errorResponse) return errorResponse;
 
+    const user = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!user) return NextResponse.json({ error: 'Proibido' }, { status: 401 });
+
+    const contextId = request.headers.get('x-empresa-id');
+    const body = await request.json();
+    const { id, ...dadosAtualizacao } = body;
+
     try {
-        const { searchParams } = new URL(request.url);
-        const id = searchParams.get('id'); // ID do CLIENTE Global
-        
-        if (!id) return NextResponse.json({ error: 'ID necessário.' }, { status: 400 });
+        const empresaIdAlvo = await getEmpresaContexto(user, contextId);
+        if (!empresaIdAlvo) return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
 
-        // === CORREÇÃO: Lê a empresa do Header primeiro (Essencial para o Contador) ===
-        let empresaId = request.headers.get('x-empresa-id');
-
-        if (!empresaId || empresaId === 'null' || empresaId === 'undefined') {
-            const user = await prisma.user.findUnique({ where: { id: targetId } });
-            empresaId = user?.empresaId || null;
-            
-            if (!empresaId) {
-                const vinculo = await prisma.userCliente.findFirst({ where: { userId: targetId } });
-                if (vinculo) empresaId = vinculo.empresaId;
-            }
-        }
-
-        if (!empresaId) return NextResponse.json({ error: 'Empresa não identificada.' }, { status: 400 });
-
-        // Remove o VÍNCULO (Não apaga o cliente global)
-        await prisma.vinculoCarteira.deleteMany({
-            where: {
-                empresaId: empresaId,
-                clienteId: id
+        const clienteAtual = await prisma.cliente.findFirst({
+            where: { 
+                id: id, 
+                vinculos: { some: { empresaId: empresaIdAlvo } } 
             }
         });
 
-        return NextResponse.json({ success: true });
-    } catch (e) {
-        return NextResponse.json({ error: 'Erro ao desvincular.' }, { status: 500 });
+        if (!clienteAtual) {
+            return NextResponse.json({ error: 'Cliente não encontrado.' }, { status: 404 });
+        }
+
+        if (dadosAtualizacao.documento) dadosAtualizacao.documento = dadosAtualizacao.documento.replace(/\D/g, '');
+        if (dadosAtualizacao.telefone) dadosAtualizacao.telefone = dadosAtualizacao.telefone.replace(/\D/g, '');
+        if (dadosAtualizacao.cep) dadosAtualizacao.cep = dadosAtualizacao.cep.replace(/\D/g, '');
+        
+        // Remove a propriedade 'exterior' se ela vier no body da atualização também, para evitar o mesmo erro
+        if ('exterior' in dadosAtualizacao) {
+            delete dadosAtualizacao.exterior;
+        }
+
+        if (dadosAtualizacao.documento && dadosAtualizacao.documento !== clienteAtual.documento) {
+             const clienteExiste = await prisma.cliente.findFirst({
+                where: { 
+                    documento: dadosAtualizacao.documento,
+                    vinculos: { some: { empresaId: empresaIdAlvo } }
+                }
+            });
+            if (clienteExiste) return NextResponse.json({ error: 'Já existe outro cliente com este CPF/CNPJ nesta empresa.' }, { status: 400 });
+        }
+
+        const clienteAtualizado = await prisma.cliente.update({
+            where: { id: id },
+            data: dadosAtualizacao
+        });
+
+        return NextResponse.json({ success: true, cliente: clienteAtualizado });
+    } catch (error: any) {
+        return NextResponse.json({ error: error.message || 'Erro ao atualizar.' }, { status: 500 });
     }
-}
-// PUT: Atualizar Cliente (compatibilidade com edição no SaaS)
-export async function PUT(request: Request) {
-    return POST(request);
 }

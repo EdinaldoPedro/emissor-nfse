@@ -145,6 +145,16 @@ async function main() {
       maxNotasMensal: 3, maxClientes: 0, diasTeste: 0,
       active: true, recommended: false, privado: false,
       tipo: 'PACOTE_NOTAS' // <-- Define que é um pacote
+    },
+    // <--- NOVO PACOTE: PJ ADICIONAL --->
+    {
+      name: 'Pacote PJ Adicional', slug: 'PACOTE_PJ_1',
+      description: 'Vincule mais um CNPJ à sua conta usando o mesmo saldo.',
+      priceMonthly: 50.00, priceYearly: 0,
+      features: JSON.stringify(['+1 Empresa Vinculada', 'Saldo de Notas Compartilhado', 'Acesso Centralizado']),
+      maxNotasMensal: 0, maxClientes: 0, diasTeste: 0,
+      active: true, recommended: false, privado: false,
+      tipo: 'PACOTE_PJ' // <-- Define o tipo como Pacote de Empresa
     }
   ];
 

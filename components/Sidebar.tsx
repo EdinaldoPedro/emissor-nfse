@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft } from 'lucide-react';
+import { Menu, X, User, Briefcase, FileText, Settings, LogOut, Phone, Shield, ArrowLeft, Building2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -13,22 +13,18 @@ export default function Sidebar() {
   const [userRole, setUserRole] = useState('');
   const [isContador, setIsContador] = useState(false);
   const [notificacoes, setNotificacoes] = useState(0);
-  
-  // State for UI only
   const [isSupportMode, setIsSupportMode] = useState(false);
 
   const { t } = useAppConfig();
   const router = useRouter();
   const pathname = usePathname();
 
-  // === 1. SAFETY FUNCTION: Recover Admin ID from Token ===
   const getAdminIdFromToken = () => {
       try {
           const token = localStorage.getItem('token');
           if (!token) return null;
-          // Decode JWT payload (middle part)
           const payload = JSON.parse(atob(token.split('.')[1]));
-          return payload.sub || payload.id; // The ID in the token is ALWAYS the real user (Admin)
+          return payload.sub || payload.id; 
       } catch (e) {
           return null;
       }
@@ -39,7 +35,6 @@ export default function Sidebar() {
     const token = localStorage.getItem('token');
     const role = localStorage.getItem('userRole');
     
-    // Update visual state directly from storage
     const supportActive = localStorage.getItem("isSupportMode") === 'true';
     setIsSupportMode(supportActive);
 
@@ -61,12 +56,9 @@ export default function Sidebar() {
                     }
                 });
                 
-                // === CRITICAL FIX: Ignore 401 in Support Mode ===
-                if (res.status === 401) {
-                    if (localStorage.getItem("isSupportMode") === 'true') {
-                        console.warn("Sidebar: 401 ignored in Support Mode.");
-                        return; // Do NOT logout
-                    }
+                if (res.status === 401 && localStorage.getItem("isSupportMode") === 'true') {
+                    console.warn("Sidebar: 401 ignored in Support Mode.");
+                    return; 
                 }
 
                 if(res.ok) {
@@ -75,10 +67,7 @@ export default function Sidebar() {
 
                 if (!checkIsStaff(role || '')) {
                     const resNotif = await fetch('/api/clientes/notificacoes', {
-                        headers: { 
-                            'x-user-id': userId,
-                            'Authorization': `Bearer ${token}`
-                        }
+                        headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}` }
                     });
                     if (resNotif.ok) {
                         const dataNotif = await resNotif.json();
@@ -93,44 +82,28 @@ export default function Sidebar() {
 
     if (isOpen) fetchData(); 
 
-    // Listener to update button if localStorage changes in another tab/component
     const handleStorage = () => setIsSupportMode(localStorage.getItem("isSupportMode") === 'true');
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
 
   }, [isOpen, pathname]); 
 
-  // === 2. BULLETPROOF RETURN LOGIC ===
   const handleLogoutOrReturn = () => {
-    // Read current state directly from storage (more reliable than React state here)
     const isSupportActive = localStorage.getItem('isSupportMode') === 'true';
     let adminBackUpId = localStorage.getItem('adminBackUpId');
     const adminBackUpRole = localStorage.getItem('adminBackUpRole');
 
-    // Fail-safe: If in support mode but lost backup ID, recover from Token
-    if (isSupportActive && !adminBackUpId) {
-        console.log("⚠️ Backup ID missing. Recovering from Token...");
-        adminBackUpId = getAdminIdFromToken();
-    }
+    if (isSupportActive && !adminBackUpId) adminBackUpId = getAdminIdFromToken();
 
     if (isSupportActive && adminBackUpId) {
-        console.log("🔄 Returning to Admin session:", adminBackUpId);
-        
-        // 1. Restore Admin credentials
         localStorage.setItem('userId', adminBackUpId);
-        localStorage.setItem('userRole', adminBackUpRole || 'MASTER'); // Safe fallback
-        
-        // 2. Clean up client session flags
+        localStorage.setItem('userRole', adminBackUpRole || 'MASTER'); 
         localStorage.removeItem('isSupportMode');
         localStorage.removeItem('adminBackUpId');
         localStorage.removeItem('adminBackUpRole');
         localStorage.removeItem('empresaContextId');
-
-        // 3. FORCE RELOAD to clear memory states
         window.location.href = '/admin/usuarios';
     } else {
-        // Real Logout
-        console.log("🚪 Logging out...");
         localStorage.clear();
         router.push('/login');
     }
@@ -138,9 +111,18 @@ export default function Sidebar() {
 
   const abrirMenu = () => {
       setIsOpen(true);
-      if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('tour:menu-opened'));
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('tour:menu-opened'));
+  };
+
+  // === NOVO: FUNÇÃO PARA TROCAR DE EMPRESA ===
+  const handleEmpresaChange = (newEmpresaId: string) => {
+      if (newEmpresaId === userData.empresaPrimariaId) {
+          localStorage.removeItem('empresaContextId'); // Volta para a principal
+      } else {
+          localStorage.setItem('empresaContextId', newEmpresaId); // Define a nova como contexto
       }
+      // O reload garante que TODO o sistema (dashboard, notas, configs) puxe os dados do novo CNPJ
+      window.location.reload(); 
   };
 
   const getStatusCertificado = () => {
@@ -148,41 +130,26 @@ export default function Sidebar() {
     if (!userData.vencimentoCertificado) return { label: 'Ativo', classes: 'text-green-600' };
     const hoje = new Date();
     const vencimento = new Date(userData.vencimentoCertificado);
-    const diffTime = vencimento.getTime() - hoje.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const diffDays = Math.ceil((vencimento.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24));
     if (diffDays < 0) return { label: 'Vencido', classes: 'text-red-600 font-bold' };
     if (diffDays <= 30) return { label: 'A Vencer', classes: 'text-amber-600 font-bold' };
     return { label: 'Válido', classes: 'text-green-600' };
   };
 
   const statusCert = getStatusCertificado();
-  
-  // Admin link only shows if real Staff AND NOT impersonating
   const showAdminPanel = checkIsStaff(userRole) && userRole !== 'CONTADOR' && !isSupportMode;
 
   return (
     <>
-      <button 
-        onClick={abrirMenu} 
-        className="tour-menu-btn p-2 hover:bg-gray-100 rounded-lg transition relative dark:hover:bg-slate-800"
-      >
+      <button onClick={abrirMenu} className="tour-menu-btn p-2 hover:bg-gray-100 rounded-lg transition relative dark:hover:bg-slate-800">
         <Menu size={28} className="text-gray-700 dark:text-gray-200" />
-        
-        {notificacoes > 0 && (
-            <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
-        )}
+        {notificacoes > 0 && <span className="absolute top-1 right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>}
       </button>
 
-      {isOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 transition-opacity"
-          onClick={() => setIsOpen(false)}
-        />
-      )}
+      {isOpen && <div className="fixed inset-0 bg-black/50 z-40 transition-opacity" onClick={() => setIsOpen(false)} />}
 
       <div className={`fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col dark:bg-slate-900`}>
         
-        {/* HEADER - Changes color in Support Mode */}
         <div className={`p-6 border-b flex justify-between items-center text-white shrink-0 border-gray-100 dark:border-slate-800 ${isSupportMode ? 'bg-orange-500' : 'bg-blue-600'}`}>
           <h2 className="font-bold text-lg flex items-center gap-2">
               {isSupportMode ? <><Shield size={20}/> Modo Suporte</> : 'Menu'}
@@ -218,6 +185,25 @@ export default function Sidebar() {
             <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
               <Briefcase size={14} /> Minha Empresa
             </h3>
+            
+            {/* === NOVO: SELETOR DE MÚLTIPLAS EMPRESAS === */}
+            {userData?.listaEmpresas && userData.listaEmpresas.length > 1 && (
+                <div className="mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100 dark:bg-slate-800 dark:border-slate-700">
+                    <label className="text-xs font-bold text-blue-700 dark:text-blue-400 mb-1 flex items-center gap-1"><Building2 size={12}/> Alternar CNPJ:</label>
+                    <select 
+                        className="w-full p-2 text-sm font-bold border-none rounded bg-white text-slate-700 shadow-sm cursor-pointer outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:text-white"
+                        value={localStorage.getItem('empresaContextId') || userData.empresaPrimariaId}
+                        onChange={(e) => handleEmpresaChange(e.target.value)}
+                    >
+                        {userData.listaEmpresas.map((emp: any) => (
+                            <option key={emp.id} value={emp.id}>
+                                {emp.razaoSocial.length > 20 ? emp.razaoSocial.substring(0,20)+'...' : emp.razaoSocial}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            )}
+
             <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
               <p>
                   <span className="font-medium block mb-1">Razão Social:</span> 
@@ -232,7 +218,7 @@ export default function Sidebar() {
                   <span className={statusCert.classes}>{statusCert.label}</span>
               </p>
               <Link href="/configuracoes" onClick={() => setIsOpen(false)} className="text-blue-600 hover:underline text-xs block mt-2">
-                Completar Cadastro PJ
+                Configurações da Empresa
               </Link>
             </div>
           </section>
