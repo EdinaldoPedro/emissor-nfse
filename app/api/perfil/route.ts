@@ -91,7 +91,6 @@ export async function GET(request: Request) {
                   const vinculo = await prisma.contadorVinculo.findUnique({
                       where: { contadorId_empresaId: { contadorId: userId, empresaId: contextEmpresaId } }
                   });
-                  // Mesmo que o status não seja aprovado, se o contador tenta ver, o painel deve carregar sem dar 500
                   if (vinculo) empresaAlvoId = contextEmpresaId; 
               }
           }
@@ -116,17 +115,20 @@ export async function GET(request: Request) {
 
       let atividadesEnriquecidas = dadosEmpresa.atividades || [];
       if (atividadesEnriquecidas.length > 0) {
-          const codigos = atividadesEnriquecidas.map((c: any) => c.codigo);
-          const globais = await prisma.globalCnae.findMany({ where: { codigo: { in: codigos } } });
-          
-          // Correção de segurança: Se o codigoIbge for nulo, usamos string vazia para o Prisma não crashar
+          // CORREÇÃO CRÍTICA DO CNAE: Traz todos para fazer o match na memória ignorando pontos e traços
+          const globais = await prisma.globalCnae.findMany();
           const regrasMunicipais = await prisma.tributacaoMunicipal.findMany({ 
-              where: { cnae: { in: codigos }, codigoIbge: dadosEmpresa.codigoIbge || '' } 
+              where: { codigoIbge: dadosEmpresa.codigoIbge || '' } 
           });
 
           atividadesEnriquecidas = atividadesEnriquecidas.map((local: any) => {
-              const global = globais.find((g: any) => g.codigo === local.codigo);
-              const regraMun = regrasMunicipais.find((r: any) => r.cnae === local.codigo);
+              // Limpa o CNAE local para a comparação
+              const localClean = String(local.codigo).replace(/\D/g, '');
+              
+              // Procura no Admin cruzando apenas os números (Resolve empresas velhas e novas de uma vez)
+              const global = globais.find((g: any) => String(g.codigo).replace(/\D/g, '') === localClean);
+              const regraMun = regrasMunicipais.find((r: any) => String(r.cnae).replace(/\D/g, '') === localClean);
+
               return {
                   ...local,
                   temRetencaoInss: global?.temRetencaoInss || local.temRetencaoInss,
@@ -175,7 +177,6 @@ export async function GET(request: Request) {
   }
 }
 
-// ... MÉTODO PUT IGUAL AO ANTERIOR ...
 export async function PUT(request: Request) {
   const userId = request.headers.get('x-user-id');
   const contextEmpresaId = request.headers.get('x-empresa-id');
@@ -256,8 +257,13 @@ export async function PUT(request: Request) {
           if (body.cnaes.length > 0) {
               await prisma.cnae.createMany({
                   data: body.cnaes.map((c: any) => ({
-                      empresaId: empresaSalva.id, codigo: String(c.codigo).replace(/\D/g, ''),
-                      descricao: c.descricao, principal: c.principal, codigoNbs: c.codigoNbs, temRetencaoInss: c.temRetencaoInss || false
+                      empresaId: empresaSalva.id, 
+                      // CORREÇÃO CRÍTICA: Mantém a formatação do CNAE igual ao Painel Admin
+                      codigo: String(c.codigo).trim(), 
+                      descricao: c.descricao, 
+                      principal: c.principal, 
+                      codigoNbs: c.codigoNbs, 
+                      temRetencaoInss: c.temRetencaoInss || false
                   }))
               });
               if (empresaSalva.codigoIbge) await syncCnaesGlobalmente(body.cnaes, empresaSalva.codigoIbge);
