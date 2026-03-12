@@ -47,8 +47,8 @@ model User {
   mensagensTicket     TicketMensagem[]
   empresa             Empresa?          @relation("DonoEmpresa", fields: [empresaId], references: [id])
   clientes            UserCliente[]
-  empresasAdicionais  Int       @default(0) // Saldo de pacotes "PJ Adicional"
-  empresasFaturadas   Empresa[] @relation("FaturamentoEmpresa") // <--- ESTA É A LINHA QUE ESTÁ FALTANDO
+  empresasAdicionais  Int       @default(0) 
+  empresasFaturadas   Empresa[] @relation("FaturamentoEmpresa") // <-- Esta é a linha que falta!
 }
 
 model Empresa {
@@ -88,8 +88,8 @@ model Empresa {
   vinculadoA               UserCliente[]
   vendasRealizadas         Venda[]           @relation("VendaPrestador")
   minhaCarteira            VinculoCarteira[]
-  donoFaturamentoId String?    
-  donoFaturamento   User?      @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
+  donoFaturamentoId String?
+  donoFaturamento   User?   @relation("FaturamentoEmpresa", fields: [donoFaturamentoId], references: [id])
 }
 
 model Cliente {
@@ -243,26 +243,23 @@ model TributacaoMunicipal {
 }
 
 model Plan {
-  id               String   @id @default(uuid())
-  name             String   
-  slug             String   @unique
-  description      String?
-  priceMonthly     Decimal  @db.Decimal(10, 2)
-  priceYearly      Decimal  @db.Decimal(10, 2)
-  features         String   
-  active           Boolean  @default(true)
-  recommended      Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  maxNotasMensal   Int      @default(0) 
-  diasTeste        Int      @default(0) 
-  privado          Boolean  @default(false) 
-  
-  maxClientes      Int      @default(0) // <--- CONFIRME SE ESTA LINHA EXISTE
-  tipo             String   @default("PLANO") // <--- CONFIRME SE ESTA LINHA EXISTE
-
-  historico        PlanHistory[]
+  id             String        @id @default(uuid())
+  name           String
+  slug           String        @unique
+  description    String?
+  priceMonthly   Decimal       @db.Decimal(10, 2)
+  priceYearly    Decimal       @db.Decimal(10, 2)
+  features       String
+  active         Boolean       @default(true)
+  recommended    Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  maxNotasMensal Int           @default(0)
+  diasTeste      Int           @default(0)
+  privado        Boolean       @default(false)
+  maxClientes    Int           @default(0)         // <--- ADICIONE ESTA LINHA
+  tipo           String        @default("PLANO")   // <--- ADICIONE ESTA LINHA
+  historico      PlanHistory[]
 }
 
 model PlanHistory {
