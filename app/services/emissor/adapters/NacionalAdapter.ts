@@ -232,26 +232,39 @@ export class NacionalAdapter {
         if (opSimpNac === '1' && !isExterior && (hasPis || hasCofins || hasIr || hasCsll || hasInss)) {
             tribXml += `<tribFed>`;
             
-            // Bloco PIS/COFINS
-            if (hasPis || hasCofins) {
+            // Mantém as tags PIS e COFINS intactas, apenas adiciona o tpRetPisCofins no final do bloco
+            if (hasPis || hasCofins || hasCsll) {
+                // Tabela tpRetPisCofins da NT 007
+                let tpRet = '0';
+                if (hasPis && hasCofins && hasCsll) tpRet = '3';
+                else if (hasPis && hasCofins && !hasCsll) tpRet = '1';
+                else if (hasPis && !hasCofins && !hasCsll) tpRet = '5';
+                else if (!hasPis && hasCofins && !hasCsll) tpRet = '6';
+                else if (!hasPis && !hasCofins && hasCsll) tpRet = '8';
+                
                 tribXml += `<piscofins><CST>01</CST><vBCPisCofins>${s.valor.toFixed(2)}</vBCPisCofins>`;
-                if (hasPis) tribXml += `<pAliqPis>${Number(r.pis.aliquota || 0.65).toFixed(2)}</pAliqPis>`;
-                if (hasCofins) tribXml += `<pAliqCofins>${Number(r.cofins.aliquota || 3.00).toFixed(2)}</pAliqCofins>`;
+                
+                // DE VOLTA: Tags de alíquota e valor do PIS e COFINS
+                if (hasPis) tribXml += `<pAliqPis>${Number(r.pis.aliquota).toFixed(2)}</pAliqPis>`;
+                if (hasCofins) tribXml += `<pAliqCofins>${Number(r.cofins.aliquota).toFixed(2)}</pAliqCofins>`;
                 if (hasPis) tribXml += `<vPis>${Number(r.pis.valor).toFixed(2)}</vPis>`;
                 if (hasCofins) tribXml += `<vCofins>${Number(r.cofins.valor).toFixed(2)}</vCofins>`;
-                tribXml += `<tpRetPisCofins>3</tpRetPisCofins></piscofins>`; // 3 = Retido por PJ Privada
+                
+                tribXml += `<tpRetPisCofins>${tpRet}</tpRetPisCofins></piscofins>`;
             }
 
             if (hasInss) tribXml += `<vRetCP>${Number(r.inss.valor).toFixed(2)}</vRetCP>`;
             if (hasIr) tribXml += `<vRetIRRF>${Number(r.ir.valor).toFixed(2)}</vRetIRRF>`;
             
-            // === NOVO CÁLCULO PCC (PIS + COFINS + CSLL) NA TAG vRetCSLL ===
+            // AQUI ESTÁ A MÁGICA: A tag vRetCSLL recebe a soma (PIS + COFINS + CSLL)
             if (hasPis || hasCofins || hasCsll) {
                 const totalPcc = (hasPis ? Number(r.pis.valor) : 0) + 
                                  (hasCofins ? Number(r.cofins.valor) : 0) + 
                                  (hasCsll ? Number(r.csll.valor) : 0);
                 tribXml += `<vRetCSLL>${totalPcc.toFixed(2)}</vRetCSLL>`;
             }
+            
+            tribXml += `</tribFed>`;
         }
 
         // === TOTAIS DE TRIBUTOS (Transparência / IBPT) ===
@@ -268,14 +281,13 @@ export class NacionalAdapter {
             if (hasCofins) pFed += Number(r.cofins.aliquota || 0);
             if (hasCsll) pFed += Number(r.csll.aliquota || 0);
 
-            // A tag pTotTribMun pega a alíquota da Tabela Municipal SEMPRE, retido ou não
-            const pMun = s.aliquotaAplicada ? Number(s.aliquotaAplicada) : 0;
+            // CORREÇÃO: Prioriza a alíquota vinda da Tabela Municipal (regra do SaaS). Se não achar, usa a alíquota genérica.
+            const pMun = s.aliquotaMunicipio ? Number(s.aliquotaMunicipio) : (s.aliquota ? Number(s.aliquota) : 0);
 
             tribXml += `<totTrib><pTotTrib><pTotTribFed>${pFed.toFixed(2)}</pTotTribFed><pTotTribEst>0.00</pTotTribEst><pTotTribMun>${pMun.toFixed(2)}</pTotTribMun></pTotTrib></totTrib>`;
             
         } else {
-            // 3. REGRA DO MEI (opSimpNac === '2' ou outros)
-            // MEI é isento dessa cadeia de transparência no padrão nacional
+            // 3. REGRA DO MEI
             tribXml += `<totTrib><indTotTrib>0</indTotTrib></totTrib>`;
         }
 

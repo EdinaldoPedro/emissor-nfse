@@ -216,6 +216,10 @@ export async function POST(request: Request) {
             valorMoedaEstrangeira: valorMoedaEstrangeira ? parseFloat(valorMoedaEstrangeira) : undefined,
             codigoNbs: codigoNbs, 
             codigoTributacaoMunicipal: regraMunicipal?.codigoTributacaoMunicipal,
+            
+            // ---> ADICIONE ESTA LINHA ABAIXO <---
+            aliquotaMunicipio: regraMunicipal?.aliquotaIss ? Number(regraMunicipal.aliquotaIss) : null, 
+            
             descricao, cnae: cnaeFinal, itemLc, codigoTribNacional,
             aliquota: aliquota ? parseFloat(aliquota) : 0, issRetido: !!issRetido, retencoes: retencoes
         },

@@ -93,7 +93,6 @@ function EmitirNotaContent() {
               return;
           }
 
-          // === CORREÇÃO: Fallback que captura o erro E999 (Instabilidade) ===
           await dialog.showAlert({ type: 'warning', title: 'Atenção', description: actionText });
           router.push('/cliente/dashboard');
           return;
@@ -149,15 +148,12 @@ function EmitirNotaContent() {
 
   // --- MÁSCARAS E LIMITES (DA DIREITA PARA ESQUERDA) ---
   const formatarPorcentagemDirEsq = (valor: string) => {
-      // Remove tudo que não for número
       const numeros = valor.replace(/\D/g, '');
       if (!numeros) return '0.00';
-      // Converte para decimal (ex: digitou 1100 -> vira 11.00)
       return (parseInt(numeros, 10) / 100).toFixed(2);
   };
 
   const handleBlurLimites = (tipo: 'iss' | 'inss') => {
-      // Aplica a trava de limites apenas quando o utilizador sai do campo (blur)
       if (tipo === 'iss') {
           let val = parseFloat(nfData.aliquota || '0');
           if (val < 2.00) val = 2.00;
@@ -200,7 +196,6 @@ function EmitirNotaContent() {
 
   // === INTELIGÊNCIA CEREBRAL (Cálculo Automático) ===
   
-
   // 1. Dispara ao selecionar o Cliente ou o CNAE (Define o Padrão Inicial)
   useEffect(() => {
       const cliente = clientes.find(c => c.id === nfData.clienteId);
@@ -306,70 +301,52 @@ function EmitirNotaContent() {
       }
   }, [nfData.valor, wasAboveThreshold]);
 
-
-// === CARREGAMENTO INICIAL ===
+  // === CARREGAMENTO INICIAL ===
   useEffect(() => {
     const userId = localStorage.getItem('userId');
     const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId');
-    
-    if(!userId || !token) { 
-        router.push('/login'); 
-        return; 
-    }
+    if(!userId || !token) { router.push('/login'); return; }
 
-    // 1. Carrega Perfil e Configurações de Impostos
-    fetch('/api/perfil', { 
-        headers: { 
-            'x-user-id': userId, 
-            'Authorization': `Bearer ${token}`, 
-            'x-empresa-id': contextId || '' 
-        } 
-    })
+    fetch('/api/perfil', { headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' } })
       .then(res => res.json())
       .then(data => {
-          if(data && !data.error) {
-              setPerfilEmpresa(data);
-              if (data.atividades && Array.isArray(data.atividades)) {
-                  setMeusCnaes(data.atividades);
-                  setNfData(prev => {
-                      const updates: any = {};
-                      let cnaePrincipalObj = null;
+         if(data && !data.error) {
+             setPerfilEmpresa(data);
+             if (data.atividades && Array.isArray(data.atividades)) {
+                 setMeusCnaes(data.atividades);
+                 setNfData(prev => {
+                     const updates: any = {};
+                     let cnaePrincipalObj = null;
 
-                      if (!prev.codigoCnae && data.atividades.length > 0) {
-                          cnaePrincipalObj = data.atividades.find((c: any) => c.principal) || data.atividades[0];
-                          updates.codigoCnae = cnaePrincipalObj.codigo;
-                      } else {
-                          cnaePrincipalObj = data.atividades.find((c: any) => c.codigo === prev.codigoCnae);
-                      }
+                     if (!prev.codigoCnae && data.atividades.length > 0) {
+                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.principal) || data.atividades[0];
+                         updates.codigoCnae = cnaePrincipalObj.codigo;
+                     } else {
+                         cnaePrincipalObj = data.atividades.find((c: CnaeDB) => c.codigo === prev.codigoCnae);
+                     }
 
-                      let aliquotaSugerida = '0.00';
-                      if (data.regimeTributario !== 'MEI') {
-                          if (cnaePrincipalObj && cnaePrincipalObj.aliquotaIss !== null && cnaePrincipalObj.aliquotaIss !== undefined) {
-                              aliquotaSugerida = Number(cnaePrincipalObj.aliquotaIss).toFixed(2);
-                          } else if (data.aliquotaPadrao !== null && data.aliquotaPadrao !== undefined) {
-                              aliquotaSugerida = Number(data.aliquotaPadrao).toFixed(2);
-                          } else {
-                              aliquotaSugerida = '3.00';
-                          }
-                      }
+                     let aliquotaSugerida = '0.00';
+                     if (data.regimeTributario !== 'MEI') {
+                         if (cnaePrincipalObj && cnaePrincipalObj.aliquotaIss !== null && cnaePrincipalObj.aliquotaIss !== undefined) {
+                             aliquotaSugerida = Number(cnaePrincipalObj.aliquotaIss).toFixed(2);
+                         } else if (data.aliquotaPadrao !== null && data.aliquotaPadrao !== undefined) {
+                             aliquotaSugerida = Number(data.aliquotaPadrao).toFixed(2);
+                         } else {
+                             aliquotaSugerida = '3.00'; 
+                         }
+                     }
 
-                      updates.aliquota = aliquotaSugerida;
-                      updates.issRetido = data.issRetidoPadrao || false;
-                      return { ...prev, ...updates };
-                  });
-              }
-          }
+                     updates.aliquota = aliquotaSugerida;
+                     updates.issRetido = data.issRetidoPadrao || false;
+                     return { ...prev, ...updates };
+                 });
+             }
+         }
       }).catch(console.error);
 
-    // 2. Carrega Lista de Clientes (Ajustado para Paginação)
-    fetch('/api/clientes', { 
-        headers: { 
-            'x-user-id': userId, 
-            'x-empresa-id': contextId || '', 
-            'Authorization': `Bearer ${token}` 
-        } 
-    })
+    // === CORREÇÃO DA LISTA DE CLIENTES (PAGINAÇÃO) ===
+    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '', 'Authorization': `Bearer ${token}` } })
       .then(res => res.json())
       .then(data => { 
         if (data && data.data && Array.isArray(data.data)) {
@@ -381,14 +358,13 @@ function EmitirNotaContent() {
         }
       }).catch(() => setClientes([]));
 
-    // 3. Recuperação de Venda para Reprocessamento (Retry)
     if (retryId) {
         setLoadingRetry(true);
         fetch(`/api/vendas/${retryId}`, { 
             headers: { 
                 'x-user-id': userId, 
                 'Authorization': `Bearer ${token}`,
-                'x-empresa-id': contextId || '' 
+                'x-empresa-id': contextId || ''
             } 
         })
             .then(async res => {
@@ -405,6 +381,7 @@ function EmitirNotaContent() {
                         codigoCnae: cnaeParaUsar || prev.codigoCnae
                     }));
                     setTimeout(() => setStep(3), 500);
+                    setStep(3); 
                 } else {
                     const erro = await res.json();
                     dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao recuperar dados da venda." });
@@ -415,7 +392,6 @@ function EmitirNotaContent() {
     }
   }, [router, retryId]);
 
-  // === NAVEGAÇÃO ENTRE PASSOS ===
   const handleNext = async () => {
     if (step === 1) {
         if (!nfData.clienteId) return dialog.showAlert("Selecione um cliente para continuar.");
@@ -427,7 +403,6 @@ function EmitirNotaContent() {
 
   const handleBack = () => setStep(step - 1);
 
-  // === EMISSÃO FINAL DA NOTA ===
   const handleEmitir = async () => {
     if (!nfData.codigoCnae) { dialog.showAlert("Selecione uma Atividade (CNAE)."); return; }
     
@@ -453,12 +428,7 @@ function EmitirNotaContent() {
 
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json', 
-            'x-user-id': userId || '', 
-            'Authorization': `Bearer ${token}`, 
-            'x-empresa-id': contextId || '' 
-        },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' },
         body: JSON.stringify({
           vendaId: retryId || null, 
           clienteId: nfData.clienteId,
@@ -480,13 +450,7 @@ function EmitirNotaContent() {
         setProgressStatus("Concluído!");
 
         if (resposta.isHomologation) {
-            const irConfig = await dialog.showConfirm({ 
-                type: 'success', 
-                title: 'Tudo certo em Homologação!', 
-                description: 'As configurações da sua nota estão perfeitas. Mude para PRODUÇÃO nas configurações.', 
-                confirmText: 'Mudar para Produção', 
-                cancelText: 'Voltar ao Início' 
-            });
+            const irConfig = await dialog.showConfirm({ type: 'success', title: 'Tudo certo em Homologação!', description: 'As configurações da sua nota estão perfeitas. Mude para PRODUÇÃO nas configurações.', confirmText: 'Mudar para Produção', cancelText: 'Voltar ao Início' });
             if (irConfig) router.push('/configuracoes');
             else router.push('/cliente/dashboard');
         } else {
@@ -498,6 +462,7 @@ function EmitirNotaContent() {
       }
     } catch (error) { 
         dialog.showAlert("Erro de Conexão. Verifique sua internet."); 
+        router.push('/cliente/dashboard');
     } 
     finally { setLoading(false); }
   };
@@ -507,7 +472,6 @@ function EmitirNotaContent() {
   const isPF = clienteSel?.tipo === 'PF';
   const isPJ = clienteSel?.tipo === 'PJ';
   
-  // Oculta completamente a tabela de impostos federais se for PF ou Exterior
   const mostraRetencoesFederais = isPJ && !isPF && !isExterior && ['LUCRO_PRESUMIDO', 'LUCRO_REAL'].includes(perfilEmpresa?.regimeTributario);
   
   const cnaeSelecionadoObj = meusCnaes.find(c => c.codigo === nfData.codigoCnae);
