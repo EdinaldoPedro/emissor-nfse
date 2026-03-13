@@ -477,7 +477,6 @@ export default function MeusClientes() {
                                         <label className={labelClass}>Email</label>
                                         <input type="email" placeholder="email@cliente.com" className={inputClass}
                                             value={clienteAtual.email || ''} onChange={e => setClienteAtual({...clienteAtual, email: e.target.value})}
-                                            disabled={isEdicaoPJ}
                                         />
                                     </div>
                                 </div>
@@ -497,13 +496,22 @@ export default function MeusClientes() {
                                     </div>
                                     
                                     {isPJ && (
-                                        <div>
-                                            <label className={labelClass}>Nome Fantasia</label>
-                                            <input className={inputClass}
-                                                value={clienteAtual.nomeFantasia || ''} onChange={e => setClienteAtual({...clienteAtual, nomeFantasia: e.target.value})}
-                                                disabled={isEdicaoPJ}
-                                            />
-                                        </div>
+                                        <>
+                                            <div>
+                                                <label className={labelClass}>Nome Fantasia</label>
+                                                <input className={inputClass}
+                                                    value={clienteAtual.nomeFantasia || ''} onChange={e => setClienteAtual({...clienteAtual, nomeFantasia: e.target.value})}
+                                                    disabled={isEdicaoPJ}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className={labelClass}>Inscrição Municipal</label>
+                                                <input className={inputClass}
+                                                    value={clienteAtual.inscricaoMunicipal || ''} onChange={e => setClienteAtual({...clienteAtual, inscricaoMunicipal: e.target.value})}
+                                                    placeholder="Apenas números"
+                                                />
+                                            </div>
+                                        </>
                                     )}
                                 </div>
 

@@ -244,7 +244,12 @@ export async function PUT(request: Request) {
             }
         }
         
+        // === LIMPEZA DE CAMPOS INVÁLIDOS PARA O BANCO ===
         if ('exterior' in dadosAtualizacao) delete dadosAtualizacao.exterior;
+        if ('vendas' in dadosAtualizacao) delete dadosAtualizacao.vendas;
+        if ('createdAt' in dadosAtualizacao) delete dadosAtualizacao.createdAt;
+        if ('updatedAt' in dadosAtualizacao) delete dadosAtualizacao.updatedAt;
+        if ('_count' in dadosAtualizacao) delete dadosAtualizacao._count;
 
         if (dadosAtualizacao.documento && dadosAtualizacao.documento !== clienteAtual.documento) {
              const clienteGlobalExistente = await prisma.cliente.findUnique({ where: { documento: dadosAtualizacao.documento } });
