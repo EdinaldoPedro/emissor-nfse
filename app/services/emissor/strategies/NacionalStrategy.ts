@@ -72,6 +72,7 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
                 },
                 tomador: {
                     documento: tomador.documento,
+                    inscricaoMunicipal: tomador.inscricaoMunicipal,
                     razaoSocial: tomador.razaoSocial,
                     email: tomador.email,
                     telefone: tomador.telefone,
