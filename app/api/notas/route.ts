@@ -193,6 +193,7 @@ export async function POST(request: Request) {
         ...tomador, 
         razaoSocial: tomador.nome, 
         documento: tomador.documento || '', 
+        inscricaoMunicipal: tomador.inscricaoMunicipal ? String(tomador.inscricaoMunicipal) : undefined,
         codigoIbge: tomador.codigoIbge || '9999999',
         tipo: tomador.tipo,
         nif: tomador.nif,

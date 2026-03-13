@@ -19,6 +19,7 @@ export interface ICanonicalRps {
     };
     tomador: {
         documento: string;
+        inscricaoMunicipal?: string;
         razaoSocial: string;
         email?: string;
         telefone?: string;

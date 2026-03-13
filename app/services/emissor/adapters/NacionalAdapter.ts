@@ -133,6 +133,7 @@ export class NacionalAdapter {
         prestXml += `<regEspTrib>${p.configuracoes?.regimeEspecial || '0'}</regEspTrib></regTrib></prest>`;
 
         // --- TOMADOR ---
+
         let tomaXml = `<toma>`;
         if (isExterior) {
             if (t.nif) tomaXml += `<NIF>${this.escapeXml(t.nif)}</NIF>`;
@@ -140,6 +141,13 @@ export class NacionalAdapter {
         } else {
             tomaXml += tagDocTomador;
         }
+
+        // <--- ADICIONE ESTAS 3 LINHAS AQUI --->
+        if (t.inscricaoMunicipal) {
+            tomaXml += `<IM>${this.clean(t.inscricaoMunicipal)}</IM>`;
+        }
+        // <------------------------------------>
+
         tomaXml += `<xNome>${razaoSocialTomador}</xNome><end>`;
         
         if (isExterior) {
@@ -217,7 +225,6 @@ export class NacionalAdapter {
             // Lucro Presumido (1) NÃO leva essas tags aqui.
             if (opSimpNac === '3') {
                 if (s.aliquotaAplicada && s.aliquotaAplicada > 0) tribXml += `<pAliq>${s.aliquotaAplicada.toFixed(2)}</pAliq>`;
-                if (s.valorIss && s.valorIss > 0) tribXml += `<vISSQN>${s.valorIss.toFixed(2)}</vISSQN>`;
             }
         }
         tribXml += `</tribMun>`;
@@ -269,9 +276,8 @@ export class NacionalAdapter {
 
         // === TOTAIS DE TRIBUTOS (Transparência / IBPT) ===
         if (opSimpNac === '3') {
-            // 1. REGRA DO SIMPLES NACIONAL
-            const aliquotaSN = (s.aliquotaAplicada && s.aliquotaAplicada > 0) ? s.aliquotaAplicada.toFixed(2) : '6.00';
-            tribXml += `<totTrib><pTotTribSN>${aliquotaSN}</pTotTribSN></totTrib>`;
+            // 1. REGRA DO SIMPLES NACIONAL (Fixo em 6.00%)
+            tribXml += `<totTrib><pTotTribSN>6.00</pTotTribSN></totTrib>`;
             
         } else if (opSimpNac === '1') {
             // 2. REGRA DO LUCRO PRESUMIDO / LUCRO REAL
