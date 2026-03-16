@@ -20,7 +20,9 @@ export default function GestaoColaboradores() {
 
   // Estado para Edição
   const [selectedUserFull, setSelectedUserFull] = useState<any>(null); 
-  const [editLimit, setEditLimit] = useState(5);
+  const [editLimit, setEditLimit] = useState(5); // Limite Empresas
+  const [editLimiteNotas, setEditLimiteNotas] = useState<number | ''>(''); // NOVO: Limite Notas
+  const [editLimiteClientes, setEditLimiteClientes] = useState<number | ''>(''); // NOVO: Limite Clientes
   const [loadingEdit, setLoadingEdit] = useState(false);
 
   const carregarDados = () => {
@@ -50,6 +52,17 @@ export default function GestaoColaboradores() {
           setSelectedUserFull(data);
           setRoleInput(data.role);
           setEditLimit(data.limiteEmpresas || 5);
+
+          // Procura o plano ativo do Parceiro para preencher os inputs de notas e clientes
+          const activePlanHistory = data.planHistories?.find((h: any) => h.status === 'ATIVO');
+          if (activePlanHistory && activePlanHistory.plan) {
+              setEditLimiteNotas(activePlanHistory.plan.maxNotasMensal);
+              setEditLimiteClientes(activePlanHistory.plan.maxClientes);
+          } else {
+              setEditLimiteNotas('');
+              setEditLimiteClientes('');
+          }
+
       } catch (e) {
           dialog.showAlert("Erro ao carregar detalhes.");
           setModalEditOpen(false);
@@ -86,15 +99,22 @@ export default function GestaoColaboradores() {
       if(!selectedUserFull) return;
       const token = localStorage.getItem('token');
 
+      // Monta o payload de envio com os novos limites se for contador
+      const payload: any = { role: roleInput, limiteEmpresas: editLimit };
+      if (roleInput === 'CONTADOR') {
+          if (editLimiteNotas !== '') payload.limiteNotas = editLimiteNotas;
+          if (editLimiteClientes !== '') payload.limiteClientes = editLimiteClientes;
+      }
+
       try {
-          // 1. Atualiza Limite e Role (PATCH)
+          // 1. Atualiza Limites e Role (PATCH)
           const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ role: roleInput, limiteEmpresas: editLimit })
+              body: JSON.stringify(payload)
           });
 
-          // 2. Se mudou para Contador, garante o plano (PUT)
+          // 2. Se mudou para Contador do zero (legado), garante o put secundário
           if(roleInput === 'CONTADOR' && selectedUserFull.role !== 'CONTADOR') {
                await fetch('/api/admin/users', {
                    method: 'PUT',
@@ -104,14 +124,14 @@ export default function GestaoColaboradores() {
           }
 
           if(res.ok) {
-              dialog.showAlert({ type: 'success', description: "Dados atualizados!" });
+              dialog.showAlert({ type: 'success', description: "Dados e limites atualizados!" });
               setModalEditOpen(false);
               carregarDados();
           }
       } catch(e) { dialog.showAlert("Erro ao salvar."); }
   };
 
-  // --- DESVINCULAR EMPRESA (Ação na lista do modal) ---
+  // --- DESVINCULAR EMPRESA ---
   const handleUnlinkCompany = async (vinculoId: string) => {
       if(!await dialog.showConfirm({ 
           title: 'Desvincular?', 
@@ -122,7 +142,6 @@ export default function GestaoColaboradores() {
       const token = localStorage.getItem('token');
       await fetch(`/api/contador/vinculo?id=${vinculoId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
       
-      // Atualiza lista localmente no modal
       setSelectedUserFull((prev: any) => ({
           ...prev,
           empresasContabeis: prev.empresasContabeis.filter((v: any) => v.id !== vinculoId)
@@ -148,7 +167,7 @@ export default function GestaoColaboradores() {
       <div className="flex justify-between items-center mb-6">
         <div>
             <h1 className="text-2xl font-bold text-slate-800">Time Interno & Parceiros</h1>
-            <p className="text-sm text-slate-500">Gerencie acessos e carteiras de contadores.</p>
+            <p className="text-sm text-slate-500">Gerencie acessos e limites de contadores.</p>
         </div>
         <button onClick={() => { setSearchUser(''); setModalNewOpen(true); }} className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-blue-700 font-bold shadow-sm">
             <UserPlus size={18} /> Novo Colaborador
@@ -196,40 +215,55 @@ export default function GestaoColaboradores() {
       {/* MODAL EDIÇÃO */}
       {modalEditOpen && selectedUserFull && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white p-0 rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-white p-0 rounded-lg shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
                     <h3 className="font-bold text-lg flex items-center gap-2"><UserCog size={20}/> Editar Colaborador</h3>
                     <button onClick={() => setModalEditOpen(false)}><X size={20} className="text-slate-400 hover:text-red-500"/></button>
                 </div>
 
                 <div className="p-6 overflow-y-auto flex-1 space-y-6">
-                    <div className="bg-blue-50 p-3 rounded border border-blue-100">
-                        <p className="font-bold text-blue-900">{selectedUserFull.nome}</p>
-                        <p className="text-sm text-blue-700">{selectedUserFull.email}</p>
+                    <div className="bg-blue-50 p-3 rounded border border-blue-100 flex justify-between items-center">
+                        <div>
+                            <p className="font-bold text-blue-900">{selectedUserFull.nome}</p>
+                            <p className="text-sm text-blue-700">{selectedUserFull.email}</p>
+                        </div>
+                        <span className="bg-blue-200 text-blue-800 text-xs px-2 py-1 rounded font-bold uppercase">{roleInput}</span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    {/* DADOS E LIMITES DO PARCEIRO */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white">
                         <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cargo</label>
-                            <select className="w-full p-2 border rounded bg-white" value={roleInput} onChange={e => setRoleInput(e.target.value)}>
+                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cargo do Usuário</label>
+                            <select className="w-full p-2 border rounded bg-white font-semibold" value={roleInput} onChange={e => setRoleInput(e.target.value)}>
                                 <option value="SUPORTE">Suporte</option>
                                 <option value="SUPORTE_TI">Suporte T.I</option>
-                                <option value="CONTADOR">Contador</option>
+                                <option value="CONTADOR">Contador Parceiro</option>
                                 <option value="ADMIN">Admin</option>
                             </select>
                         </div>
+                        
                         {roleInput === 'CONTADOR' && (
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Limite Empresas</label>
-                                <input type="number" className="w-full p-2 border rounded" value={editLimit} onChange={e => setEditLimit(Number(e.target.value))}/>
-                            </div>
+                            <>
+                                <div>
+                                    <label className="block text-xs font-bold text-purple-600 uppercase mb-1">Limite Empresas (CNPJs)</label>
+                                    <input type="number" placeholder="Ex: 5" className="w-full p-2 border border-purple-200 focus:border-purple-500 rounded bg-purple-50/50" value={editLimit} onChange={e => setEditLimit(Number(e.target.value))}/>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-green-600 uppercase mb-1">Limite Notas (Global/Mês)</label>
+                                    <input type="number" placeholder="Ex: 5000" className="w-full p-2 border border-green-200 focus:border-green-500 rounded bg-green-50/50" value={editLimiteNotas} onChange={e => setEditLimiteNotas(e.target.value !== '' ? Number(e.target.value) : '')}/>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-blue-600 uppercase mb-1">Limite Clientes (Carteira)</label>
+                                    <input type="number" placeholder="Ex: 100" className="w-full p-2 border border-blue-200 focus:border-blue-500 rounded bg-blue-50/50" value={editLimiteClientes} onChange={e => setEditLimiteClientes(e.target.value !== '' ? Number(e.target.value) : '')}/>
+                                </div>
+                            </>
                         )}
                     </div>
 
                     {/* LISTA DE EMPRESAS VINCULADAS */}
                     {roleInput === 'CONTADOR' && (
                         <div className="border-t pt-4">
-                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Carteira de Empresas ({selectedUserFull.empresasContabeis?.length || 0})</h4>
+                            <h4 className="font-bold text-sm text-slate-700 mb-3 flex items-center gap-2"><Building2 size={16}/> Carteira de Empresas Ativas ({selectedUserFull.empresasContabeis?.length || 0})</h4>
                             <div className="bg-slate-50 rounded border max-h-40 overflow-y-auto">
                                 {selectedUserFull.empresasContabeis?.length === 0 ? (
                                     <p className="p-4 text-xs text-center text-slate-400">Nenhuma empresa vinculada.</p>
@@ -240,7 +274,7 @@ export default function GestaoColaboradores() {
                                                 <p className="font-bold text-slate-700">{v.empresa.razaoSocial}</p>
                                                 <p className="text-[10px] text-slate-500">CNPJ: {v.empresa.documento}</p>
                                             </div>
-                                            <button onClick={() => handleUnlinkCompany(v.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded" title="Desvincular">
+                                            <button onClick={() => handleUnlinkCompany(v.id)} className="text-red-500 hover:bg-red-50 p-1.5 rounded border border-transparent hover:border-red-200 transition" title="Desvincular do Contador">
                                                 <Ban size={14}/>
                                             </button>
                                         </div>
@@ -253,15 +287,15 @@ export default function GestaoColaboradores() {
 
                 <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
                     <button onClick={() => setModalEditOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-white border border-transparent hover:border-slate-200 rounded transition font-bold text-sm">Cancelar</button>
-                    <button onClick={handleSaveEdit} className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-bold text-sm flex items-center gap-2">
-                        <Save size={16}/> Salvar
+                    <button onClick={handleSaveEdit} className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition font-bold text-sm flex items-center gap-2 shadow-md">
+                        <Save size={16}/> Salvar Configurações
                     </button>
                 </div>
             </div>
         </div>
       )}
 
-      {/* LISTA */}
+      {/* LISTA DE COLABORADORES */}
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 border-b">
@@ -288,7 +322,7 @@ export default function GestaoColaboradores() {
                             </span>
                         </td>
                         <td className="p-4 text-right flex justify-end gap-2">
-                            <button onClick={() => handleOpenEdit(user.id)} className="text-blue-600 hover:bg-blue-50 p-2 rounded transition" title="Editar">
+                            <button onClick={() => handleOpenEdit(user.id)} className="text-blue-600 hover:bg-blue-50 p-2 border border-transparent hover:border-blue-200 rounded transition" title="Editar Limites / Cargo">
                                 <Edit size={16} />
                             </button>
                             {user.role !== 'MASTER' && (

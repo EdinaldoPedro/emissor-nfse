@@ -26,7 +26,6 @@ async function fetchSafe(url: string) {
     } catch (e) { return null; }
 }
 
-// Adicionado userRole para controlar a posse da empresa
 export async function upsertEmpresaAndLinkUser(documento: string, userId: string, dadosManuais?: any, userRole: string = 'COMUM') {
   const docLimpo = documento.replace(/\D/g, '');
   
@@ -35,8 +34,6 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
   if (docLimpo.length !== 14 && docLimpo.length !== 11) throw new Error("Documento inválido.");
   if (docLimpo.length === 11 && !validarCPF(docLimpo)) throw new Error("CPF Inválido.");
 
-  // === 1. CONSULTA API ===
-  // CORREÇÃO AQUI: Adicionado tipagem explícita ': any'
   let dadosApi: any = null;
   
   if (docLimpo.length === 14) {
@@ -44,7 +41,6 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       const res = await fetchSafe(`https://brasilapi.com.br/api/cnpj/v1/${docLimpo}`);
       
       if (!res || !res.ok) {
-          // SE O CNPJ FOR INVÁLIDO OU A RECEITA CAIR, BLOQUEIA A CRIAÇÃO DE EMPRESA "FANTASMA"
           throw new Error("CNPJ inválido ou não encontrado na base da Receita Federal.");
       }
 
@@ -73,7 +69,6 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       }
   }
 
-  // === MERGE ===
   const fontePrincipal = dadosApi || dadosManuais || {};
   const fonteSecundaria = dadosManuais || {};
   
@@ -96,7 +91,6 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       cadastroCompleto: !!(dadosApi || dadosManuais?.razaoSocial)
   };
 
-  // Fallback ViaCEP
   if (!dadosFinais.codigoIbge && dadosFinais.cep && dadosFinais.cep.length >= 8) {
       const cepOnly = dadosFinais.cep.replace(/\D/g, '');
       const resCep = await fetchSafe(`https://viacep.com.br/ws/${cepOnly}/json/`);
@@ -121,16 +115,14 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
       cnaesUnicos = Array.from(mapUnicos.values());
   }
 
-  // === TRANSAÇÃO ===
   const empresaProcessada = await prisma.$transaction(async (tx) => {
       const empresaExistente = await tx.empresa.findUnique({
           where: { documento: docLimpo },
           include: { donoUser: true }
       });
 
-      // >> CONTADOR <<
+      // >> CONTADOR CADASTRANDO <<
       if (userRole === 'CONTADOR') {
-          // Verifica vinculo anterior
           if (empresaExistente) {
              const vinculo = await tx.contadorVinculo.findUnique({
                   where: { contadorId_empresaId: { contadorId: userId, empresaId: empresaExistente.id } }
@@ -138,13 +130,20 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
               if (vinculo) throw new Error("Empresa já vinculada ou solicitação pendente.");
           }
 
-          // Define Status: Se tem dono = PENDENTE, Senão = APROVADO
           const statusVinculo = (empresaExistente && empresaExistente.donoUser) ? 'PENDENTE' : 'APROVADO';
+
+          // ATENÇÃO: Se não existe, o CONTADOR vira o donoFaturamentoId
+          const dadosCriacao = { 
+              documento: docLimpo, 
+              ...dadosFinais, 
+              lastApiCheck: new Date(),
+              ...(!empresaExistente ? { donoFaturamentoId: userId } : {})
+          };
 
           const empresa = await tx.empresa.upsert({
               where: { documento: docLimpo },
               update: { ...dadosFinais, lastApiCheck: new Date() },
-              create: { documento: docLimpo, ...dadosFinais, lastApiCheck: new Date() }
+              create: dadosCriacao
           });
 
           if (cnaesUnicos.length > 0 && (!empresaExistente || !empresaExistente.cadastroCompleto)) {
@@ -159,19 +158,40 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
           return { ...empresa, _statusVinculo: statusVinculo };
       } 
       
-      // >> CLIENTE <<
+      // >> CLIENTE COMUM CADASTRANDO (RESOLUÇÃO DA FALHA 1) <<
       else {
-          if (empresaExistente && empresaExistente.donoUser && empresaExistente.donoUser.id !== userId) {
-              throw new Error("Esta empresa já pertence a outro usuário.");
-          }
-          if (empresaExistente && !empresaExistente.donoUser) {
-              await tx.contadorVinculo.updateMany({ where: { empresaId: empresaExistente.id, status: 'APROVADO' }, data: { status: 'PENDENTE' } });
+          if (empresaExistente) {
+              // Se já tem dono e NÃO É um contador
+              if (empresaExistente.donoUser && empresaExistente.donoUser.role !== 'CONTADOR' && empresaExistente.donoUser.id !== userId) {
+                  throw new Error("Esta empresa já pertence a outro usuário.");
+              }
+              
+              // === SOLUÇÃO FALHA 1: REIVINDICAÇÃO (CLAIM) ===
+              // Se a empresa era orfã OU pertencia a um Contador
+              if (!empresaExistente.donoUser || (empresaExistente.donoUser && empresaExistente.donoUser.role === 'CONTADOR')) {
+                  // O contador que geria a empresa tem o vínculo suspenso para 'PENDENTE'
+                  await tx.contadorVinculo.updateMany({ 
+                      where: { empresaId: empresaExistente.id }, 
+                      data: { status: 'PENDENTE' } 
+                  });
+              }
           }
 
           const empresa = await tx.empresa.upsert({
               where: { documento: docLimpo },
-              update: { ...dadosFinais, lastApiCheck: new Date(), donoUser: { connect: { id: userId } } },
-              create: { documento: docLimpo, ...dadosFinais, lastApiCheck: new Date(), donoUser: { connect: { id: userId } } }
+              update: { 
+                  ...dadosFinais, 
+                  lastApiCheck: new Date(), 
+                  donoUser: { connect: { id: userId } },
+                  donoFaturamentoId: userId // O Cliente comum assume a posse e o faturamento
+              },
+              create: { 
+                  documento: docLimpo, 
+                  ...dadosFinais, 
+                  lastApiCheck: new Date(), 
+                  donoUser: { connect: { id: userId } },
+                  donoFaturamentoId: userId
+              }
           });
 
           if (cnaesUnicos.length > 0) {
@@ -184,6 +204,7 @@ export async function upsertEmpresaAndLinkUser(documento: string, userId: string
               create: { userId, empresaId: empresa.id, apelido: dadosFinais.nomeFantasia },
               update: {}
           });
+          
           await tx.user.update({ where: { id: userId }, data: { empresaId: empresa.id } });
 
           return empresa;

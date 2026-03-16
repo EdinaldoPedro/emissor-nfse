@@ -58,26 +58,59 @@ export async function GET(request: Request) {
       if (isStaff) {
           planoDetalhado = {
               nome: 'Acesso Administrativo', slug: 'ADMIN_ACCESS', status: 'ATIVO',
-              dataInicio: user.createdAt, dataFim: null, usoEmissoes: 0, limiteEmissoes: 0, diasTeste: 0
+              dataInicio: user.createdAt, dataFim: null, usoEmissoes: 0, limiteEmissoes: 0, diasTeste: 0,
+              usoClientes: 0, limiteClientes: 0
           };
       } else {
-            const planoAtivo = await prisma.planHistory.findFirst({
+            // === NOVO CÉREBRO NA API DE PERFIL ===
+            const historicosAtivos = await prisma.planHistory.findMany({
                 where: { userId: user.id, status: 'ATIVO' },
                 include: { plan: true },
-                orderBy: { createdAt: 'desc' }
+                orderBy: { createdAt: 'asc' }
             });
 
-            let statusVisual = planoAtivo?.status || 'INATIVO';
-            if (planoAtivo && planoAtivo.plan?.maxNotasMensal > 0 && planoAtivo.notasEmitidas >= planoAtivo.plan.maxNotasMensal) statusVisual = 'LIMITE_ATINGIDO';
-            if (planoAtivo && planoAtivo.dataFim && new Date() > planoAtivo.dataFim) statusVisual = 'EXPIRADO';
+            let limiteEmissoes = 0;
+            let usoEmissoes = 0;
+            let limiteClientes = 0;
+            
+            historicosAtivos.forEach((h: any) => {
+                limiteEmissoes += h.plan.maxNotasMensal;
+                usoEmissoes += h.notasEmitidas;
+                limiteClientes += (h.plan.maxClientes || 0);
+            });
 
-            planoDetalhado = planoAtivo ? {
-                nome: planoAtivo.plan?.name || 'Plano Desconhecido', slug: planoAtivo.plan?.slug || 'FREE', status: statusVisual,
-                dataInicio: planoAtivo.dataInicio, dataFim: planoAtivo.dataFim,
-                usoEmissoes: planoAtivo.notasEmitidas, limiteEmissoes: planoAtivo.plan?.maxNotasMensal || 0, diasTeste: planoAtivo.plan?.diasTeste || 0
-            } : { nome: 'Sem Plano Ativo', slug: 'FREE', status: 'INATIVO', usoEmissoes: 0, limiteEmissoes: 0 };
+            // Conta os clientes reais na carteira
+            const usoClientes = await prisma.vinculoCarteira.count({
+                where: {
+                    empresa: {
+                        OR: [
+                            { donoFaturamentoId: user.id },
+                            { id: user.empresaId || '' }
+                        ]
+                    }
+                }
+            });
+
+            const basePlan = historicosAtivos.find((h: any) => h.plan.tipo === 'PLANO') || historicosAtivos[0];
+
+            let statusVisual = basePlan?.status || 'INATIVO';
+            if (basePlan && limiteEmissoes > 0 && usoEmissoes >= limiteEmissoes) statusVisual = 'LIMITE_ATINGIDO';
+            if (basePlan && basePlan.dataFim && new Date() > basePlan.dataFim) statusVisual = 'EXPIRADO';
+
+            planoDetalhado = basePlan ? {
+                nome: basePlan.plan?.name || 'Pacote Avulso', 
+                slug: basePlan.plan?.slug || 'CUSTOM', 
+                status: statusVisual,
+                dataInicio: basePlan.dataInicio, 
+                dataFim: basePlan.dataFim,
+                usoEmissoes: usoEmissoes, 
+                limiteEmissoes: limiteEmissoes, 
+                diasTeste: basePlan.plan?.diasTeste || 0,
+                usoClientes: usoClientes,
+                limiteClientes: limiteClientes
+            } : { nome: 'Sem Plano Ativo', slug: 'FREE', status: 'INATIVO', usoEmissoes: 0, limiteEmissoes: 0, usoClientes: 0, limiteClientes: 0 };
       }
-
+      
       let empresaAlvoId = null;
 
       if (contextEmpresaId && contextEmpresaId !== 'null' && contextEmpresaId !== 'undefined') {

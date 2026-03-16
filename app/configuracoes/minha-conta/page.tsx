@@ -28,6 +28,7 @@ export default function MinhaContaPage() {
     planoDetalhado: { 
         nome: '', slug: '', status: '', 
         usoEmissoes: 0, limiteEmissoes: 0, 
+        usoClientes: 0, limiteClientes: 0, 
         dataInicio: '', dataFim: '' 
     },
     planoCiclo: 'MENSAL',
@@ -249,10 +250,12 @@ export default function MinhaContaPage() {
                     <p className="text-2xl font-black text-slate-800 dark:text-white">{p.nome}</p>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{data.planoCiclo}</p>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-sm space-y-3 dark:bg-slate-900 dark:border-slate-700">
+               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-sm space-y-4 dark:bg-slate-900 dark:border-slate-700">
+                    
+                    {/* BARRA 1: EMISSÕES DE NOTAS */}
                     <div>
                         <div className="flex justify-between items-center mb-1">
-                            <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><TrendingUp size={12}/> Emissões</span>
+                            <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><TrendingUp size={12}/> Emissões de Notas</span>
                             <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoEmissoes} / {isIlimitado ? '∞' : p.limiteEmissoes}</span>
                         </div>
                         {!isIlimitado && (
@@ -261,7 +264,21 @@ export default function MinhaContaPage() {
                             </div>
                         )}
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+
+                    {/* BARRA 2: LIMITE DE CLIENTES */}
+                    <div>
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs font-bold text-slate-500 flex items-center gap-1"><User size={12}/> Limite de Clientes</span>
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{p.usoClientes} / {p.limiteClientes === 0 ? '∞' : p.limiteClientes}</span>
+                        </div>
+                        {p.limiteClientes > 0 && (
+                            <div className="w-full bg-slate-200 rounded-full h-2 dark:bg-slate-700">
+                                <div className={`h-2 rounded-full transition-all duration-500 ${Math.min(100, (p.usoClientes / p.limiteClientes) * 100) > 80 ? 'bg-red-500' : 'bg-purple-500'}`} style={{width: `${Math.min(100, (p.usoClientes / p.limiteClientes) * 100)}%`}}></div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700 pt-2">
                         <Calendar size={14} className="text-slate-400"/>
                         <span>Expira em: <strong>{dataFimFormatada}</strong></span>
                     </div>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useRef, ReactNode } from "react";
-import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Package, Shield, Smartphone, Users, Cloud, ChevronLeft, ChevronRight } from "lucide-react";
+import { CheckCircle, ArrowRight, MapPin, Info, Loader2, Zap, Package, Shield, Smartphone, Users, Cloud, ChevronLeft, ChevronRight,ChevronDown, Briefcase, Calculator, Handshake } from "lucide-react";
 
 // === COMPONENTE DE ANIMAÇÃO DE ROLAGEM (SCROLL REVEAL) ===
 function Reveal({ children, delay = 0, className = "" }: { children: ReactNode, delay?: number, className?: string }) {
@@ -154,10 +154,48 @@ export default function LandingPage() {
                 </div>
                 NFSe Goo
             </Link>
-            <nav className="space-x-4 hidden md:flex items-center">
+            <nav className="space-x-2 hidden md:flex items-center">
+                
+                {/* MENU DROPDOWN: SOLUÇÕES */}
+                <div className="relative group">
+                    <button className="text-slate-500 hover:text-blue-600 font-bold px-4 py-2 transition-colors flex items-center gap-1 cursor-default">
+                        Soluções <ChevronDown size={16} className="group-hover:rotate-180 transition-transform duration-200" />
+                    </button>
+                    
+                    {/* Caixinha Flutuante (Aparece no Hover) */}
+                    <div className="absolute top-full left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform translate-y-2 group-hover:translate-y-0 flex flex-col p-2 z-50">
+                        
+                        <Link href="/cadastro" className="p-3 hover:bg-blue-50 rounded-xl flex items-center gap-3 transition-colors group/item">
+                            <div className="bg-blue-100 text-blue-600 p-2.5 rounded-lg group-hover/item:scale-110 transition-transform"><Briefcase size={18}/></div>
+                            <div className="text-left">
+                                <p className="text-sm font-bold text-slate-800">Ei, PJ!</p>
+                                <p className="text-[11px] text-slate-500 font-medium leading-tight mt-0.5">Empresas e Prestadores</p>
+                            </div>
+                        </Link>
+                        
+                        <Link href="/cadastro?tipo=contador" className="p-3 hover:bg-emerald-50 rounded-xl flex items-center gap-3 transition-colors group/item mt-1">
+                            <div className="bg-emerald-100 text-emerald-600 p-2.5 rounded-lg group-hover/item:scale-110 transition-transform"><Calculator size={18}/></div>
+                            <div className="text-left">
+                                <p className="text-sm font-bold text-slate-800">Ei, Contador!</p>
+                                <p className="text-[11px] text-slate-500 font-medium leading-tight mt-0.5">Gestão de BPO Financeiro</p>
+                            </div>
+                        </Link>
+                        
+                        <a href="https://wa.me/seu-numero" target="_blank" rel="noreferrer" className="p-3 hover:bg-purple-50 rounded-xl flex items-center gap-3 transition-colors group/item mt-1">
+                            <div className="bg-purple-100 text-purple-600 p-2.5 rounded-lg group-hover/item:scale-110 transition-transform"><Handshake size={18}/></div>
+                            <div className="text-left">
+                                <p className="text-sm font-bold text-slate-800">Seja Parceiro</p>
+                                <p className="text-[11px] text-slate-500 font-medium leading-tight mt-0.5">Altos volumes e Contratos</p>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+
                 <a href="#planos" onClick={(e) => scrollToSection(e, 'planos')} className="text-slate-500 hover:text-blue-600 font-bold px-4 py-2 transition-colors cursor-pointer">Planos</a>
                 <a href="#cobertura" onClick={(e) => scrollToSection(e, 'cobertura')} className="text-slate-500 hover:text-blue-600 font-bold px-4 py-2 transition-colors cursor-pointer">Cidades</a>
+                
                 <div className="h-6 w-px bg-slate-300 mx-2"></div>
+                
                 <Link href="/login" className="text-blue-600 hover:text-blue-800 font-bold px-4 py-2 transition-colors active:scale-95">Login</Link>
                 <Link href="/cadastro" className="bg-blue-600 text-white px-6 py-2.5 rounded-xl hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 hover:shadow-blue-400 hover:-translate-y-0.5 active:scale-95 active:translate-y-0 transition-all">
                     Começar Grátis
@@ -179,7 +217,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 pb-20 pt-10 text-center relative z-10">
             <Reveal delay={100}>
                 <span className="bg-white text-blue-700 px-5 py-2 rounded-full text-xs font-bold uppercase tracking-wider mb-8 inline-block border border-blue-100 shadow-md shadow-blue-100/50 hover:scale-105 transition-transform cursor-default">
-                    🚀 Versão 1.1 Beta Lançada
+                    🚀 Versão 1.2 Beta Lançada
                 </span>
             </Reveal>
             
@@ -206,6 +244,7 @@ export default function LandingPage() {
                 </div>
             </Reveal>
         </div>
+       
 
         {/* === FEATURES === */}
         <div className="max-w-7xl mx-auto px-6 py-12 mb-10 relative z-10">
@@ -232,6 +271,8 @@ export default function LandingPage() {
             )})}
             </div>
         </div>
+
+         <SecaoPublicoAlvo />
 
         {/* === SEÇÃO DE COBERTURA === */}
         <div id="cobertura" className="bg-white py-24 border-t border-slate-200 relative z-10">
@@ -481,4 +522,98 @@ function StatusBadge({ status, mini = false }: { status: StatusID, mini?: boolea
 function LegendItem({ status }: { status: StatusID }) {
     const config = getStatusConfig(status);
     return <div className="flex items-center gap-2 hover:scale-105 transition-transform cursor-default"><span className={`w-3 h-3 rounded-full shadow-sm ${config.dotColor}`}></span><span className="text-xs font-bold text-slate-600 uppercase tracking-wide">{config.label}</span></div>;
+}
+
+// === SEÇÃO DE PÚBLICO ALVO ===
+function SecaoPublicoAlvo() {
+  return (
+    <div className="max-w-7xl mx-auto px-6 py-12 relative z-10">
+        <Reveal>
+            <div className="text-center max-w-3xl mx-auto mb-16">
+              <h2 className="text-3xl md:text-4xl font-bold text-slate-800">
+                A solução perfeita para o seu perfil
+              </h2>
+              <p className="mt-4 text-lg text-slate-500">
+                Escolha como você quer usar a plataforma e descubra recursos feitos sob medida.
+              </p>
+            </div>
+        </Reveal>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          
+          {/* CARD 1: EI PJ */}
+          <Reveal delay={100}>
+              <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-8 hover:shadow-xl hover:border-blue-300 hover:-translate-y-2 transition-all duration-300 relative overflow-hidden group h-full flex flex-col cursor-default">
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <Briefcase size={120} className="text-blue-600" />
+                </div>
+                <div className="w-14 h-14 bg-blue-100 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:rotate-6 transition-transform">
+                  <Briefcase className="text-blue-600" size={28} />
+                </div>
+                <h3 className="text-2xl font-black text-slate-800 mb-3">Ei, PJ!</h3>
+                <p className="text-slate-600 mb-6 flex-1 text-sm leading-relaxed">
+                  Ideal para prestadores de serviço, MEIs e pequenas empresas. Emita suas notas de forma 100% automática e sem burocracia.
+                </p>
+                <ul className="space-y-3 mb-8 text-sm text-slate-600 font-medium">
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Emissão rápida</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Controle de limites</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-blue-500"/> Planos self-service</li>
+                </ul>
+                <Link href="/cadastro" className="inline-flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 font-bold py-3 rounded-xl hover:bg-blue-600 hover:text-white transition-colors">
+                  Criar minha conta <ArrowRight size={18} />
+                </Link>
+              </div>
+          </Reveal>
+
+          {/* CARD 2: EI CONTADOR */}
+          <Reveal delay={200}>
+              <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-8 hover:shadow-xl hover:border-emerald-300 hover:-translate-y-2 transition-all duration-300 relative overflow-hidden group h-full flex flex-col cursor-default">
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <Calculator size={120} className="text-emerald-600" />
+                </div>
+                <div className="w-14 h-14 bg-emerald-100 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:-rotate-6 transition-transform">
+                  <Calculator className="text-emerald-600" size={28} />
+                </div>
+                <h3 className="text-2xl font-black text-slate-800 mb-3">Ei, Contador!</h3>
+                <p className="text-slate-600 mb-6 flex-1 text-sm leading-relaxed">
+                  O paraíso do BPO Financeiro. Gerencie múltiplos CNPJs num dashboard unificado, emita notas e tenha controle da carteira.
+                </p>
+                <ul className="space-y-3 mb-8 text-sm text-slate-600 font-medium">
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Multi-empresas</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Vínculo de CNPJ</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-emerald-500"/> Gestão centralizada</li>
+                </ul>
+                <Link href="/cadastro?tipo=contador" className="inline-flex items-center justify-center gap-2 w-full bg-emerald-50 text-emerald-700 font-bold py-3 rounded-xl hover:bg-emerald-600 hover:text-white transition-colors">
+                  Cadastrar escritório <ArrowRight size={18} />
+                </Link>
+              </div>
+          </Reveal>
+
+          {/* CARD 3: SEJA PARCEIRO */}
+          <Reveal delay={300}>
+              <div className="bg-slate-900 rounded-3xl shadow-md border border-slate-800 p-8 hover:shadow-xl hover:border-purple-500 hover:-translate-y-2 transition-all duration-300 relative overflow-hidden group h-full flex flex-col cursor-default">
+                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                  <Handshake size={120} className="text-purple-400" />
+                </div>
+                <div className="w-14 h-14 bg-purple-900/50 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:rotate-6 transition-transform">
+                  <Handshake className="text-purple-400" size={28} />
+                </div>
+                <h3 className="text-2xl font-black text-white mb-3">Seja Parceiro</h3>
+                <p className="text-slate-400 mb-6 flex-1 text-sm leading-relaxed">
+                  Volume alto? Temos contratos customizados. Limites massivos e negociação direta com nossa diretoria para grandes operações.
+                </p>
+                <ul className="space-y-3 mb-8 text-sm text-slate-300 font-medium">
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Limites customizados</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Faturamento sob medida</li>
+                  <li className="flex items-center gap-2"><CheckCircle size={16} className="text-purple-400"/> Atendimento VIP</li>
+                </ul>
+                <a href="https://wa.me/seu-numero" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 w-full bg-purple-900/40 text-purple-300 font-bold py-3 rounded-xl hover:bg-purple-600 hover:text-white transition-colors border border-purple-800/50 hover:border-transparent">
+                  Falar com Comercial <ArrowRight size={18} />
+                </a>
+              </div>
+          </Reveal>
+
+        </div>
+    </div>
+  );
 }
