@@ -45,7 +45,7 @@ export class SimplesNacionalHandler implements IRegimeHandler {
             valorLiquido: valor - totalRetido,
             descricao: venda.descricao,
             cnae: venda.cnae || empresa.cnaePrincipal,
-            itemListaServico: venda.itemLc || '01.01',
+            itemListaServico: venda.itemLc || '00.00',
             codigoTributacaoNacional: venda.codigoTribNacional, // Ex: 010601
 
             // Dados Fiscais

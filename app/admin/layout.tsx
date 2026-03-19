@@ -91,7 +91,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </Link>
 
                 <button 
-                    onClick={() => { localStorage.clear(); router.push('/login'); }}
+                    onClick={() => { localStorage.clear(); router.push('/'); }} // <--- ALTERADO AQUI
                     className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-900/20 rounded-lg w-full transition-colors"
                 >
                     <LogOut size={20} /> Sair

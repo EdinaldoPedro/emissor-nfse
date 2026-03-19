@@ -147,7 +147,7 @@ export default function ContadorDashboard() {
                 <h1 className="text-2xl font-bold text-slate-800">Painel do Contador</h1>
                 <p className="text-slate-500">Gerencie sua carteira de clientes.</p>
             </div>
-            <button onClick={() => { localStorage.clear(); router.push('/login'); }} className="text-red-500 flex items-center gap-2 hover:bg-red-50 px-4 py-2 rounded transition">
+            <button onClick={() => { localStorage.clear(); router.push('/'); }} className="text-red-500 flex items-center gap-2 hover:bg-red-50 px-4 py-2 rounded transition">
                 <LogOut size={18}/> Sair
             </button>
         </header>

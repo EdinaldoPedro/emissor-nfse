@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation'; 
 import { validarCPF } from '@/app/utils/cpf'; 
-import { CheckCircle, AlertTriangle, Loader2, User, Mail, Lock, FileText, ArrowRight, KeyRound } from 'lucide-react';
+import { CheckCircle, AlertTriangle, Loader2, User, Mail, Lock, FileText, ArrowRight, KeyRound, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 
 export default function Cadastro() {
@@ -11,15 +11,25 @@ export default function Cadastro() {
   
   const [step, setStep] = useState(1); // 1 = Form, 2 = Validação
   
-  const [form, setForm] = useState({ nome: '', email: '', senha: '', cpf: '' });
+  // Adicionados os campos de confirmação
+  const [form, setForm] = useState({ 
+      nome: '', 
+      email: '', 
+      confirmEmail: '', 
+      senha: '', 
+      confirmSenha: '', 
+      cpf: '' 
+  });
   const [code, setCode] = useState('');
   
   const [errors, setErrors] = useState<any>({});
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState('');
+  const [showSenha, setShowSenha] = useState(false);
+  const [showConfirmSenha, setShowConfirmSenha] = useState(false);
 
   // === VALIDAÇÕES EM TEMPO REAL ===
-  const validateField = (name: string, value: string) => {
+  const validateField = (name: string, value: string, currentForm: any) => {
     let error = '';
     
     if (name === 'nome') {
@@ -29,17 +39,48 @@ export default function Cadastro() {
     }
 
     if (name === 'senha') {
+        // Agora aceita símbolos, desde que tenha letra, número e tamanho entre 6 e 20
         const regexSenha = /^(?=.*[A-Za-z])(?=.*\d).{6,20}$/;
-        if (value.length > 0 && !regexSenha.test(value)) error = '6-20 chars, letras e números obrigatórios.';
+        if (value.length > 0 && !regexSenha.test(value)) error = 'Mín. 6 caracteres (letras e números).';
     }
     
-    setErrors((prev: any) => ({ ...prev, [name]: error }));
+    // Validação cruzada: E-mail e Confirmação de E-mail
+    if (name === 'email' || name === 'confirmEmail') {
+        const emailToCompare = name === 'email' ? value : currentForm.email;
+        const confirmToCompare = name === 'confirmEmail' ? value : currentForm.confirmEmail;
+        
+        if (confirmToCompare.length > 0 && emailToCompare !== confirmToCompare) {
+            setErrors((prev: any) => ({ ...prev, confirmEmail: 'Os e-mails não coincidem.' }));
+        } else {
+            setErrors((prev: any) => ({ ...prev, confirmEmail: '' }));
+        }
+    }
+
+    // Validação cruzada: Senha e Confirmação de Senha
+    if (name === 'senha' || name === 'confirmSenha') {
+        const senhaToCompare = name === 'senha' ? value : currentForm.senha;
+        const confirmToCompare = name === 'confirmSenha' ? value : currentForm.confirmSenha;
+        
+        if (confirmToCompare.length > 0 && senhaToCompare !== confirmToCompare) {
+            setErrors((prev: any) => ({ ...prev, confirmSenha: 'As senhas não coincidem.' }));
+        } else {
+            setErrors((prev: any) => ({ ...prev, confirmSenha: '' }));
+        }
+    }
+
+    if (error) {
+        setErrors((prev: any) => ({ ...prev, [name]: error }));
+    } else if (name !== 'email' && name !== 'confirmEmail' && name !== 'senha' && name !== 'confirmSenha') {
+        setErrors((prev: any) => ({ ...prev, [name]: '' }));
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setForm({ ...form, [name]: value });
-    validateField(name, value);
+    const updatedForm = { ...form, [name]: value };
+    setForm(updatedForm);
+    // Passamos o formulário atualizado para garantir que a comparação da validação funciona
+    validateField(name, value, updatedForm);
     setServerError('');
   };
 
@@ -74,17 +115,30 @@ export default function Cadastro() {
     e.preventDefault();
     
     // Validação Final antes de enviar
-    if (errors.nome || errors.senha || errors.cpf) return;
+    if (errors.nome || errors.senha || errors.cpf || errors.confirmEmail || errors.confirmSenha) return;
     if (form.nome.length < 15) { setErrors((p:any) => ({...p, nome: 'Mínimo 15 caracteres.'})); return; }
+    
+    // Dupla verificação de segurança no submit
+    if (form.email !== form.confirmEmail) { 
+        setErrors((p:any) => ({...p, confirmEmail: 'Os e-mails não coincidem.'})); 
+        return; 
+    }
+    if (form.senha !== form.confirmSenha) { 
+        setErrors((p:any) => ({...p, confirmSenha: 'As senhas não coincidem.'})); 
+        return; 
+    }
     
     setLoading(true);
     setServerError('');
+
+    // Removemos os campos de confirmação antes de enviar para a API (o backend não precisa deles)
+    const { confirmEmail, confirmSenha, ...dadosParaEnviar } = form;
 
     try {
       const res = await fetch('/api/auth/cadastro', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(dadosParaEnviar),
       });
 
       const data = await res.json();
@@ -126,7 +180,7 @@ export default function Cadastro() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4 py-10">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
         
         {/* HEADER */}
@@ -153,7 +207,7 @@ export default function Cadastro() {
                         <div className="relative">
                             <User className="absolute left-3 top-3 text-slate-400" size={20}/>
                             <input 
-                                type="text" name="nome" 
+                                type="text" name="nome" required
                                 className={`w-full pl-10 p-3 border rounded-lg outline-none focus:ring-2 transition ${errors.nome ? 'border-red-500 focus:ring-red-200' : 'border-slate-200 focus:ring-blue-200'}`}
                                 placeholder="Seu nome completo"
                                 value={form.nome} onChange={handleChange}
@@ -167,7 +221,7 @@ export default function Cadastro() {
                         <div className="relative">
                             <FileText className="absolute left-3 top-3 text-slate-400" size={20}/>
                             <input 
-                                type="text" name="cpf" 
+                                type="text" name="cpf" required
                                 className={`w-full pl-10 p-3 border rounded-lg outline-none focus:ring-2 transition ${errors.cpf ? 'border-red-500 focus:ring-red-200' : 'border-slate-200 focus:ring-blue-200'}`}
                                 placeholder="000.000.000-00"
                                 value={form.cpf} onChange={handleCpfChange} onBlur={checkCpfExist}
@@ -176,35 +230,85 @@ export default function Cadastro() {
                         {errors.cpf && <p className="text-xs text-red-500 mt-1">{errors.cpf}</p>}
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">E-mail</label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-3 text-slate-400" size={20}/>
-                            <input 
-                                type="email" name="email" 
-                                className="w-full pl-10 p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-200 transition"
-                                placeholder="seu@email.com"
-                                value={form.email} onChange={handleChange}
-                            />
+                    {/* GRUPO DE E-MAIL */}
+                    <div className="grid grid-cols-1 gap-5 bg-slate-50/50 p-4 rounded-xl border border-slate-100">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">E-mail</label>
+                            <div className="relative">
+                                <Mail className="absolute left-3 top-3 text-slate-400" size={20}/>
+                                <input 
+                                    type="email" name="email" required
+                                    className="w-full pl-10 p-3 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-200 transition"
+                                    placeholder="seu@email.com"
+                                    value={form.email} onChange={handleChange}
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Confirme seu E-mail</label>
+                            <div className="relative">
+                                <Mail className="absolute left-3 top-3 text-slate-400" size={20}/>
+                                <input 
+                                    type="email" name="confirmEmail" required
+                                    className={`w-full pl-10 p-3 border rounded-lg outline-none focus:ring-2 transition ${errors.confirmEmail ? 'border-red-500 focus:ring-red-200' : 'border-slate-200 focus:ring-blue-200'}`}
+                                    placeholder="Repita seu e-mail"
+                                    value={form.confirmEmail} onChange={handleChange}
+                                />
+                            </div>
+                            {errors.confirmEmail && <p className="text-xs text-red-500 mt-1">{errors.confirmEmail}</p>}
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Senha</label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-3 text-slate-400" size={20}/>
-                            <input 
-                                type="password" name="senha" 
-                                className={`w-full pl-10 p-3 border rounded-lg outline-none focus:ring-2 transition ${errors.senha ? 'border-red-500 focus:ring-red-200' : 'border-slate-200 focus:ring-blue-200'}`}
-                                placeholder="••••••••"
-                                value={form.senha} onChange={handleChange}
-                            />
+                    {/* GRUPO DE SENHA */}
+                    <div className="grid grid-cols-1 gap-5 bg-slate-50/50 p-4 rounded-xl border border-slate-100">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Senha</label>
+                            <div className="relative">
+                                <Lock className="absolute left-3 top-3 text-slate-400" size={20}/>
+                                <input 
+                                    type={showSenha ? "text" : "password"} 
+                                    name="senha" required
+                                    className={`w-full pl-10 pr-10 p-3 border rounded-lg outline-none focus:ring-2 transition ${errors.senha ? 'border-red-500 focus:ring-red-200' : 'border-slate-200 focus:ring-blue-200'}`}
+                                    placeholder="••••••••"
+                                    value={form.senha} onChange={handleChange}
+                                />
+                                <button 
+                                    type="button" 
+                                    onClick={() => setShowSenha(!showSenha)}
+                                    className="absolute right-3 top-3 text-slate-400 hover:text-blue-600 transition"
+                                >
+                                    {showSenha ? <EyeOff size={20}/> : <Eye size={20}/>}
+                                </button>
+                            </div>
+                            {errors.senha && <p className="text-xs text-red-500 mt-1">{errors.senha}</p>}
+                            <p className="text-[10px] text-slate-400 mt-1">Mín. 6 caracteres (Letras e Números).</p>
                         </div>
-                        {errors.senha && <p className="text-xs text-red-500 mt-1">{errors.senha}</p>}
-                        <p className="text-[10px] text-slate-400 mt-1">Min. 6 caracteres (Letras e Números).</p>
+
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Confirme sua Senha</label>
+                            <div className="relative">
+                                <Lock className="absolute left-3 top-3 text-slate-400" size={20}/>
+                                <input 
+                                    type={showConfirmSenha ? "text" : "password"} 
+                                    name="confirmSenha" required
+                                    className={`w-full pl-10 pr-10 p-3 border rounded-lg outline-none focus:ring-2 transition ${errors.confirmSenha ? 'border-red-500 focus:ring-red-200' : 'border-slate-200 focus:ring-blue-200'}`}
+                                    placeholder="Repita sua senha"
+                                    value={form.confirmSenha} onChange={handleChange}
+                                />
+                                <button 
+                                    type="button" 
+                                    onClick={() => setShowConfirmSenha(!showConfirmSenha)}
+                                    className="absolute right-3 top-3 text-slate-400 hover:text-blue-600 transition"
+                                >
+                                    {showConfirmSenha ? <EyeOff size={20}/> : <Eye size={20}/>}
+                                </button>
+                            </div>
+                            {errors.confirmSenha && <p className="text-xs text-red-500 mt-1">{errors.confirmSenha}</p>}
+                        </div>
                     </div>
 
-                    <button disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg flex items-center justify-center gap-2">
+                    <button disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg flex items-center justify-center gap-2 mt-4">
                         {loading ? <Loader2 className="animate-spin"/> : 'Continuar'} <ArrowRight size={20}/>
                     </button>
                 </form>

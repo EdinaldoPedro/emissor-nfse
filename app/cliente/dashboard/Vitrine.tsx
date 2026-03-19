@@ -17,7 +17,6 @@ export default function Vitrine() {
         const token = localStorage.getItem('token');
 
         if (userId && token) {
-            // CORREÇÃO: URL alterada de 'cliente' para 'clientes' e adição do bypass de cache
             fetch(`/api/saas/stats?t=${Date.now()}`, { 
                 cache: 'no-store',
                 headers: { 
@@ -41,7 +40,7 @@ export default function Vitrine() {
         {
             id: 'dashboard', 
             titulo: "O Poder da Nossa Rede",
-            descricao: "Milhares de notas são emitidas diariamente. Confie na robustez do NFSe Goo para escalar o seu negócio de forma segura.",
+            descricao: "Milhares de notas são emitidas diariamente. Confie na robustez do sistema para escalar o seu negócio de forma segura.",
             badge: "NÚMEROS DA PLATAFORMA",
             btnTexto: "Ver Nossos Planos",
             btnLink: "/configuracoes/minha-conta",
@@ -62,7 +61,7 @@ export default function Vitrine() {
         {
             id: 2,
             titulo: "Fature para o Exterior",
-            descricao: "Sabia que o NFSe Goo permite emitir faturas em Dólar e Euro de forma nativa e automática?",
+            descricao: "Sabia que o nosso sistema permite emitir faturas em Dólar e Euro de forma nativa e automática?",
             badge: "DICA",
             btnTexto: "Saber Mais",
             btnLink: "/cliente/suporte",
@@ -94,7 +93,7 @@ export default function Vitrine() {
 
     return (
         <div 
-            className="relative w-full h-full min-h-[400px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 group"
+            className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 group"
             onMouseEnter={() => setIsPaused(true)}
             onMouseLeave={() => setIsPaused(false)}
         >
@@ -122,24 +121,33 @@ export default function Vitrine() {
                                     <p className="text-slate-300 text-xs font-medium mb-4">{card.descricao}</p>
                                 </div>
                                 
-                                {/* A Grelha de Números do Cliente */}
-                                <div className="grid grid-cols-2 gap-3 mb-4 flex-1">
-                                    <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
-                                        <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total NFS-e</span>
-                                        <span className="text-xl font-black text-white">{stats.totalNotas}</span>
+                                {/* === NOVO LAYOUT DE CAIXAS (TOTALMENTE VISÍVEL) === */}
+                                <div className="flex flex-col gap-3 mb-4 mt-auto w-full">
+                                    
+                                    {/* Linha Superior: 3 Contadores Menores */}
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
+                                            <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">NFS-e</span>
+                                            <span className="text-xl font-black text-white">{stats.totalNotas}</span>
+                                        </div>
+                                        <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
+                                            <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Clientes</span>
+                                            <span className="text-xl font-black text-white">{stats.totalClientes}</span>
+                                        </div>
+                                        <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
+                                            <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Cidades</span>
+                                            <span className="text-xl font-black text-white">{stats.municipios}</span>
+                                        </div>
                                     </div>
-                                    <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
-                                        <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Clientes</span>
-                                        <span className="text-xl font-black text-white">{stats.totalClientes}</span>
+
+                                    {/* Linha Inferior: Faturamento (Largura Total) */}
+                                    <div className="bg-blue-500/20 rounded-xl p-4 border border-blue-400/30 backdrop-blur-sm flex flex-col justify-center transition hover:bg-blue-500/30 w-full">
+                                        <span className="text-[10px] text-blue-200 font-bold uppercase mb-1">Faturamento do Mês</span>
+                                        <span className="text-2xl font-black text-blue-100 whitespace-nowrap">
+                                            {Number(stats.valorMes).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </span>
                                     </div>
-                                    <div className="bg-white/10 rounded-xl p-3 border border-white/10 backdrop-blur-sm flex flex-col justify-center transition hover:bg-white/20">
-                                        <span className="text-[10px] text-slate-400 font-bold uppercase mb-1">Municípios</span>
-                                        <span className="text-xl font-black text-white">{stats.municipios}</span>
-                                    </div>
-                                    <div className="bg-blue-500/20 rounded-xl p-3 border border-blue-400/30 backdrop-blur-sm flex flex-col justify-center transition hover:bg-blue-500/30">
-                                        <span className="text-[10px] text-blue-200 font-bold uppercase mb-1">Valor do Mês</span>
-                                        <span className="text-lg font-black text-blue-100">{Number(stats.valorMes).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                    </div>
+
                                 </div>
                                 
                                 <div className="mt-auto">

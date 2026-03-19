@@ -105,7 +105,7 @@ export default function Sidebar() {
         window.location.href = '/admin/usuarios';
     } else {
         localStorage.clear();
-        router.push('/login');
+        router.push('/');
     }
   };
 

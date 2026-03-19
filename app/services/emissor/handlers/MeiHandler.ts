@@ -10,7 +10,7 @@ export class MeiHandler implements IRegimeHandler {
             valorLiquido: valor, // MEI não tem retenção por padrão
             descricao: venda.descricao,
             cnae: venda.cnae || empresa.cnaePrincipal,
-            itemListaServico: venda.itemLc || '01.01',
+            itemListaServico: venda.itemLc || '00.00',
             codigoTributacaoNacional: venda.codigoTribNacional,
             
             // Regras MEI
