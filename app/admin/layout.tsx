@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, Users, Building, Shield, Activity, 
-  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map // <--- 1. Importado ícone Map
+  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map, Briefcase // <--- 1. Importado Briefcase para o CRM
 } from 'lucide-react'; 
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
@@ -29,17 +29,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
     
+    // === NOVO: MÓDULO DE CRM E NEGÓCIOS ===
+    { icon: Briefcase, label: 'CRM / Clientes', href: '/admin/crm' }, 
+    
     // Gestão do Negócio
-    { icon: Users, label: 'Clientes (Usuários)', href: '/admin/usuarios' },
     { icon: CreditCard, label: 'Planos e Pacotes', href: '/admin/planos' },
     { icon: Activity, label: 'Central de Emissões', href: '/admin/emissoes' }, 
+    
+    // Sistema (Antigo "Usuários")
+    { icon: Users, label: 'Configurar Contas', href: '/admin/usuarios' },
     
     // Cadastros Técnicos
     { icon: Building, label: 'Base de Empresas', href: '/admin/empresas' }, 
     { icon: List, label: 'Tabela CNAEs', href: '/admin/cnaes' },
     { icon: MapPin, label: 'Trib. Municipal', href: '/admin/tributacao-municipal' },
-    
-    // === 2. NOVO ITEM ADICIONADO AQUI ===
     { icon: Map, label: 'Mapa de Cobertura', href: '/admin/cobertura' },
     
     // Suporte
@@ -70,7 +73,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     <Link 
                     key={item.href} 
                     href={item.href}
-                    className="flex items-center gap-3 px-4 py-3 text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-all font-medium"
+                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${
+                        item.href === '/admin/crm' 
+                            ? 'bg-purple-900/50 text-purple-300 border border-purple-800/50 hover:bg-purple-800/50' // Destaque visual para o CRM
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
                     >
                     <item.icon size={20} />
                     {item.label}

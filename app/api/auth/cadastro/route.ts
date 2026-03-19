@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { validarCPF } from '@/app/utils/cpf';
 import { EmailService } from '@/app/services/EmailService';
+import { registrarEventoCrm } from '@/app/services/crmService'; // <--- 1. IMPORTAÇÃO DO CRM
 
 const prisma = new PrismaClient();
 
@@ -51,8 +52,8 @@ export async function POST(request: Request) {
     const totalUsers = await prisma.user.count();
     const role = totalUsers === 0 ? 'ADMIN' : 'COMUM';
 
-    // 6. Criação do Usuário (Com código de verificação)
-    await prisma.user.create({
+    // 6. Criação do Usuário (Guardamos na constante 'newUser')
+    const newUser = await prisma.user.create({
       data: {
         nome,
         email,
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
         // Cria plano TRIAL automaticamente
         historicoPlanos: {
            create: {
-               plan: { connect: { slug: 'TRIAL' } }, // Assume que o seed já rodou
+               plan: { connect: { slug: 'TRIAL' } }, 
                status: 'ATIVO',
                dataFim: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 dias
                notasEmitidas: 0
@@ -74,6 +75,14 @@ export async function POST(request: Request) {
         }
       }
     });
+
+    // === 2. NOVO: GATILHO PARA O CRM ===
+    await registrarEventoCrm(
+        newUser.id, 
+        'SISTEMA', 
+        'Conta Criada', 
+        'O cliente realizou o registo através do site e o plano TRIAL de 7 dias foi ativado.'
+    );
 
     // 7. Envio do E-mail
     const emailService = new EmailService();
@@ -84,7 +93,6 @@ export async function POST(request: Request) {
 
   } catch (error: any) {
     console.error("Erro Cadastro:", error);
-    // Tratamento para caso o plano TRIAL não exista no banco ainda
     if (error.code === 'P2025') {
         return NextResponse.json({ error: 'Erro de configuração do sistema (Plano Base).' }, { status: 500 });
     }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
+import { registrarEventoCrm } from '@/app/services/crmService'; // <--- 1. IMPORTAÇÃO DO CRM
 
 const prisma = new PrismaClient();
 
@@ -94,6 +95,14 @@ export async function POST(request: Request) {
             mensagem: descricao || 'Abertura de chamado'
         }
     });
+
+    // === 2. NOVO: GATILHO PARA O CRM ===
+    await registrarEventoCrm(
+        user.id, 
+        'SISTEMA', 
+        'Ticket de Suporte Aberto', 
+        `Assunto: ${tituloFinal} (Prioridade: ${prioridadeFinal})`
+    );
 
     return NextResponse.json(ticket, { status: 201 });
   } catch (e: any) {

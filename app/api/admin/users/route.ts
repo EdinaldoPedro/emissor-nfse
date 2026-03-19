@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
 import bcrypt from 'bcryptjs'; 
+import { registrarEventoCrm } from '@/app/services/crmService'; // <--- IMPORTAÇÃO DO CRM
 
 const prisma = new PrismaClient();
 
@@ -13,12 +14,21 @@ export async function GET(request: Request) {
   if (!isStaff) return forbidden();
 
   const users = await prisma.user.findMany({
-    include: { empresa: true },
+    include: { 
+        empresa: true,
+        // Correção aqui: O nome correto no banco é historicoPlanos
+        historicoPlanos: { where: { status: 'ATIVO' }, include: { plan: true } } 
+    },
     orderBy: { createdAt: 'desc' }
   });
   
-  // @ts-ignore
-  const safeUsers = users.map(u => { const { senha, ...rest } = u; return rest; });
+  // Removemos a senha por segurança e mapeamos historicoPlanos de volta para planHistories (que o Frontend espera)
+  const safeUsers = users.map(u => { 
+      // @ts-ignore
+      const { senha, historicoPlanos, ...rest } = u; 
+      return { ...rest, planHistories: historicoPlanos }; 
+  });
+  
   return NextResponse.json(safeUsers);
 }
 
@@ -32,31 +42,31 @@ export async function PUT(request: Request) {
   try {
     const body = await request.json();
 
-    // === 0. VALIDAÇÃO DE SEGURANÇA (Apenas se houver troca de plano MANUAL) ===
+    // === 0. VALIDAÇÃO DE SEGURANÇA ===
     if (body.plano) {
         if (!body.adminPassword || !body.justification) {
-            return NextResponse.json({ error: 'Senha de confirmação e justificativa são obrigatórios para alterar planos.' }, { status: 400 });
+            return NextResponse.json({ error: 'Senha e justificativa são obrigatórios.' }, { status: 400 });
         }
-
         const adminDb = await prisma.user.findUnique({ where: { id: userAuth.id } });
         if (!adminDb) return unauthorized();
 
         const senhaValida = await bcrypt.compare(body.adminPassword, adminDb.senha);
-        if (!senhaValida) {
-            return NextResponse.json({ error: 'Senha de confirmação incorreta.' }, { status: 403 });
-        }
+        if (!senhaValida) return NextResponse.json({ error: 'Senha incorreta.' }, { status: 403 });
     }
 
     // 1. Resetar E-mail
     if (body.resetEmail) {
         const tempPlaceholder = `reset_${Date.now()}_${body.id.substring(0,5)}@sistema.temp`;
         await prisma.user.update({ where: { id: body.id }, data: { email: tempPlaceholder } });
+        
+        await registrarEventoCrm(body.id, 'SISTEMA', 'E-mail Resetado', `O Admin resetou o e-mail de acesso.`); // <--- GATILHO CRM
         return NextResponse.json({ success: true, message: "E-mail resetado." });
     }
     
     // 2. Desvincular Empresa
     if (body.unlinkCompany) {
         await prisma.user.update({ where: { id: body.id }, data: { empresaId: null } });
+        await registrarEventoCrm(body.id, 'SISTEMA', 'Empresa Desvinculada', `A empresa foi desvinculada manualmente.`); // <--- GATILHO CRM
         return NextResponse.json({ success: true, message: "Empresa desvinculada." });
     }
 
@@ -72,6 +82,7 @@ export async function PUT(request: Request) {
                 return NextResponse.json({ error: `CNPJ pertence a ${empresaExistente.donoUser.nome}.` }, { status: 409 });
             }
             await prisma.user.update({ where: { id: body.id }, data: { empresaId: empresaExistente.id } });
+            await registrarEventoCrm(body.id, 'SISTEMA', 'Novo Vínculo PJ', `O cliente foi vinculado ao CNPJ ${cnpjLimpo}.`); // <--- GATILHO CRM
             return NextResponse.json({ success: true, message: "Usuário vinculado." });
         } else {
             if (body.empresaId) {
@@ -85,7 +96,6 @@ export async function PUT(request: Request) {
 
     // === 4. LÓGICA DE PLANOS (MANUAL) ===
     if (body.plano) {
-        // ... (Mantendo sua lógica de log e update de plano existente) ...
         const userAlvo = await prisma.user.findUnique({ where: { id: body.id } });
         await prisma.systemLog.create({
             data: {
@@ -98,48 +108,46 @@ export async function PUT(request: Request) {
         if (body.plano === 'SUSPENDED') {
             await prisma.planHistory.updateMany({ where: { userId: body.id, status: 'ATIVO' }, data: { status: 'CANCELADO_ADM', dataFim: new Date() } });
             await prisma.user.update({ where: { id: body.id }, data: { plano: 'SEM_PLANO', planoStatus: 'suspended', planoExpiresAt: new Date() } });
+            
+            await registrarEventoCrm(body.id, 'FINANCEIRO', 'Plano Suspenso', `Justificativa do Admin: ${body.justification}`); // <--- GATILHO CRM
             return NextResponse.json({ success: true, message: "Acesso suspenso." });
         }
 
         const novoPlano = await prisma.plan.findUnique({ where: { slug: body.plano } });
         if (!novoPlano) return NextResponse.json({ error: 'Plano não encontrado.' }, { status: 404 });
 
-        // Lógica de expiração e histórico...
         const dataFimFinal = body.planoCiclo === 'ANUAL' ? new Date(new Date().setFullYear(new Date().getFullYear() + 1)) : new Date(new Date().setDate(new Date().getDate() + 30));
         
         await prisma.planHistory.updateMany({ where: { userId: body.id, status: 'ATIVO' }, data: { status: 'FINALIZADO', dataFim: new Date() } });
         await prisma.planHistory.create({
-            data: { userId: body.id, planId: novoPlano.id, status: 'ATIVO', dataInicio: new Date(), dataFim: dataFimFinal }
+            data: { userId: body.id, planId: novoPlano.id, status: 'ATIVO', dataInicio: new Date(), dataFim: dataFimFinal, notasEmitidas: 0 }
         });
         await prisma.user.update({
             where: { id: body.id },
             data: { plano: novoPlano.slug, planoStatus: 'active', planoExpiresAt: dataFimFinal, planoCiclo: body.planoCiclo || 'MENSAL' }
         });
 
+        await registrarEventoCrm(body.id, 'FINANCEIRO', 'Plano Alterado', `Mudou para o plano ${novoPlano.name}. Justificativa: ${body.justification}`); // <--- GATILHO CRM
         return NextResponse.json({ success: true, message: "Plano atualizado." });
     }
 
-    // === 5. PROMOÇÃO DE CARGO (Lógica Nova) ===
+    // === 5. PROMOÇÃO DE CARGO ===
     const dataToUpdate: any = {};
     if (body.role) {
         dataToUpdate.role = body.role;
 
-        // SE VIROU CONTADOR -> ATIVA PLANO PARCEIRO AUTOMATICAMENTE
         if (body.role === 'CONTADOR') {
             const planoParceiro = await prisma.plan.findUnique({ where: { slug: 'PARCEIRO' } });
             if (planoParceiro) {
-                // Encerra planos anteriores
                 await prisma.planHistory.updateMany({ where: { userId: body.id, status: 'ATIVO' }, data: { status: 'FINALIZADO', dataFim: new Date() } });
-                
-                // Cria histórico vitalício
                 await prisma.planHistory.create({
-                    data: { userId: body.id, planId: planoParceiro.id, status: 'ATIVO', dataInicio: new Date(), dataFim: null }
+                    data: { userId: body.id, planId: planoParceiro.id, status: 'ATIVO', dataInicio: new Date(), dataFim: null, notasEmitidas: 0 }
                 });
-
                 dataToUpdate.plano = 'PARCEIRO';
                 dataToUpdate.planoStatus = 'active';
                 dataToUpdate.planoCiclo = 'ANUAL';
             }
+            await registrarEventoCrm(body.id, 'SISTEMA', 'Conta Promovida a Contador', 'O utilizador agora é um Contador Parceiro.'); // <--- GATILHO CRM
         }
     }
 

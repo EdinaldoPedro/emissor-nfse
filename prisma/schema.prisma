@@ -48,7 +48,8 @@ model User {
   empresa             Empresa?          @relation("DonoEmpresa", fields: [empresaId], references: [id])
   clientes            UserCliente[]
   empresasAdicionais  Int       @default(0) 
-  empresasFaturadas   Empresa[] @relation("FaturamentoEmpresa") // <-- Esta é a linha que falta!
+  empresasFaturadas   Empresa[] @relation("FaturamentoEmpresa") 
+  eventosCrm          UserEvent[] 
 }
 
 model Empresa {
@@ -402,4 +403,16 @@ enum StatusNota {
   AUTORIZADA
   ERRO
   CANCELADA
+}
+
+// === CRM: Linha do Tempo e Logs de Relacionamento ===
+model UserEvent {
+  id          String   @id @default(uuid())
+  userId      String
+  tipo        String   // Ex: "SISTEMA", "FINANCEIRO", "MANUAL", "EMAIL_ENVIADO"
+  titulo      String   // Ex: "Pagamento Recusado", "Anotação de Venda"
+  descricao   String?  // Ex: "O cliente informou que vai pagar amanhã."
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
