@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Loader2, Sparkles } from 'lucide-react';
+import { Check, Loader2, Sparkles, Zap, PackagePlus } from 'lucide-react';
 
 interface Plan {
   id: string;
@@ -43,12 +43,15 @@ export default function PlanSelector({ currentPlan, onSelectPlan }: PlanSelector
       .catch(() => setLoading(false));
   }, []);
 
-  const handleSelect = (slug: string) => {
-    if (onSelectPlan) {
-        onSelectPlan(slug, ciclo); // Executa a função da página (Minha Conta)
-    } else {
-        router.push(`/checkout?plan=${slug}&cycle=${ciclo}`); // Vai para o checkout (Landing Page)
-    }
+  const handleSelect = (planSlug: string) => {
+      // Redireciona para o checkout fixando em MENSAL
+      router.push(`/checkout?plan=${planSlug}&cycle=MENSAL`);
+  };
+
+  const handleComprarPacote = () => {
+    // Pega o plano atual ou manda um padrão só para não quebrar o checkout
+    const planoBase = currentPlan || 'BASIC'; 
+    router.push(`/checkout?plan=${planoBase}&cycle=MENSAL&extras=5`);
   };
 
   if (loading) return <div className="p-8 text-center"><Loader2 className="animate-spin mx-auto text-blue-600"/></div>;
@@ -156,6 +159,34 @@ export default function PlanSelector({ currentPlan, onSelectPlan }: PlanSelector
             </div>
           );
         })}
+      </div>
+
+      {/* SEÇÃO 2: PACOTES ADICIONAIS (ADD-ONS) */}
+      <div className="mt-16 relative overflow-hidden bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-900 rounded-3xl p-1 shadow-2xl">
+          <div className="bg-slate-900/90 rounded-[22px] p-8 md:p-12 backdrop-blur-sm flex flex-col md:flex-row items-center justify-between gap-8">
+              
+              <div className="flex-1 text-center md:text-left">
+                  <div className="inline-flex items-center gap-2 bg-yellow-400/20 text-yellow-400 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-4 border border-yellow-400/30">
+                      <Zap size={14} fill="currentColor"/> Turbinar Assinatura
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-black text-white mb-3">
+                      Atingiu os limites do seu plano?
+                  </h2>
+                  <p className="text-slate-300 md:text-lg max-w-xl leading-relaxed">
+                      Não se preocupe! Compre <strong>Notas Avulsas</strong>, limite de <strong>Clientes</strong> ou <strong>CNPJs Adicionais</strong> a qualquer momento. E o melhor: as notas extras não têm data de validade e acumulam na sua conta!
+                  </p>
+              </div>
+
+              <div className="shrink-0 w-full md:w-auto">
+                  <button 
+                      onClick={handleComprarPacote}
+                      className="w-full md:w-auto bg-white text-indigo-900 px-8 py-4 rounded-xl font-black text-lg hover:bg-slate-50 transition-all shadow-[0_0_30px_-5px_rgba(255,255,255,0.3)] hover:scale-105 flex items-center justify-center gap-2"
+                  >
+                      <PackagePlus size={24}/> Ver Pacotes Extras
+                  </button>
+                  <p className="text-center text-indigo-200 text-xs mt-3 font-medium">Notas avulsas a partir de R$ 1,99.</p>
+              </div>
+          </div>
       </div>
       
     </div>

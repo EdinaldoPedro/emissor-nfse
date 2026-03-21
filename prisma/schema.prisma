@@ -50,6 +50,8 @@ model User {
   empresasAdicionais  Int       @default(0) 
   empresasFaturadas   Empresa[] @relation("FaturamentoEmpresa") 
   eventosCrm          UserEvent[] 
+  faturas         Fatura[]
+  cuponsUsados    CupomLog[]
 }
 
 model Empresa {
@@ -258,9 +260,11 @@ model Plan {
   maxNotasMensal Int           @default(0)
   diasTeste      Int           @default(0)
   privado        Boolean       @default(false)
-  maxClientes    Int           @default(0)         // <--- ADICIONE ESTA LINHA
-  tipo           String        @default("PLANO")   // <--- ADICIONE ESTA LINHA
+  maxClientes    Int           @default(0)
+  tipo           String        @default("PLANO")
   historico      PlanHistory[]
+  
+  faturas        Fatura[]      // <--- ADICIONE ESTA LINHA AQUI!
 }
 
 model PlanHistory {
@@ -375,19 +379,6 @@ model Pedido {
   user            User     @relation(fields: [userId], references: [id])
 }
 
-model Cupom {
-  id           String    @id @default(uuid())
-  codigo       String    @unique
-  descontoPct  Decimal?  @db.Decimal(5, 2)
-  descontoFixo Decimal?  @db.Decimal(10, 2)
-  quantidade   Int?
-  usos         Int       @default(0)
-  validade     DateTime?
-  ativo        Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-}
-
 enum Role {
   MASTER
   ADMIN
@@ -415,4 +406,104 @@ model UserEvent {
   createdAt   DateTime @default(now())
   
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// MÓDULO FINANCEIRO & PAGAMENTOS (PIX INTER)
+// ==========================================
+
+model Fatura {
+  id              String   @id @default(uuid())
+  
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Opcional: Se a fatura for referente à assinatura de um plano principal
+  planoId         String?
+  plan            Plan?    @relation(fields: [planoId], references: [id])
+  
+  descricao       String   // Resumo do que foi comprado (Ex: "Basic (1x) + 5 Notas Extras")
+  valorTotal      Decimal  @db.Decimal(10, 2) // Valor final pago (já com descontos)
+  
+  // Controle Financeiro
+  status          String   @default("PENDENTE") // PENDENTE, PAGO, CANCELADO, VENCIDO
+  metodo          String   @default("PIX")      
+  
+  // Retorno do Gateway (Banco Inter / Asaas / Stripe)
+  txid            String?  // ID da transação no banco
+  qrCodePix       String?  @db.Text 
+  
+  pagoEm          DateTime? 
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relação 1 para N (Uma fatura pode ter registado o uso de um cupom)
+  cupomLogs       CupomLog[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([txid])
+}
+
+// ==========================================
+// MOTOR DE CUPONS E PARCERIAS
+// ==========================================
+
+model Cupom {
+  id              String   @id @default(uuid())
+  codigo          String   @unique // Ex: VIMDA_A, BEMVINDO50
+  
+  // Regras de Desconto
+  tipoDesconto    String   // 'PORCENTAGEM' ou 'VALOR_FIXO'
+  valorDesconto   Decimal  @db.Decimal(10, 2) // Ex: 50.00 (50%) ou 100.00 (R$ 100)
+  
+  // Regras de Escassez
+  validade        DateTime? // Expira em (Nulo = Nunca expira)
+  limiteUsos      Int?      // Quantos podem usar no total (Nulo = Infinito)
+  vezesUsado      Int       @default(0) // Contador automático
+  
+  // Regras de Carrinho (As nossas travas inteligentes)
+  aplicarEm       String    @default("CARRINHO_TOTAL") // 'CARRINHO_TOTAL', 'SO_ASSINATURA', 'SO_PACOTES'
+  maxCiclos       Int?      // Trava de meses (Ex: Dá desconto só em até 2 meses de plano)
+  
+  // Gestão de Parceiros (Para você pagar comissões)
+  parceiroNome    String?   // Ex: "Escritório Contábil XPTO"
+  
+  ativo           Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relação (Quem usou este cupom)
+  logs            CupomLog[]
+
+  @@index([codigo])
+  @@index([ativo])
+
+  // Novas regras avançadas
+  planosValidos        String?   // Guarda os IDs dos planos selecionados no container
+  apenasPrimeiraCompra Boolean   @default(false) // Trava para novos clientes
+}
+
+// O "Histórico" de usos (A Ponte entre Fatura, Cliente e Cupom)
+// É aqui que tiramos o relatório para pagar os parceiros no fim do mês!
+model CupomLog {
+  id              String   @id @default(uuid())
+  
+  cupomId         String
+  cupom           Cupom    @relation(fields: [cupomId], references: [id], onDelete: Cascade)
+  
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  faturaId        String
+  fatura          Fatura   @relation(fields: [faturaId], references: [id], onDelete: Cascade)
+  
+  // Fotografia do momento da compra
+  descontoAplicado Decimal @db.Decimal(10, 2) // Quantos R$ o cliente economizou nesta fatura
+  
+  createdAt       DateTime  @default(now())
+
+  @@index([cupomId])
+  @@index([userId])
+  @@index([faturaId])
 }

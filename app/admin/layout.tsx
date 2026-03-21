@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, Users, Building, Shield, Activity, 
-  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map, Briefcase // <--- 1. Importado Briefcase para o CRM
-} from 'lucide-react'; 
+  LogOut, MapPin, List, LifeBuoy, CreditCard, Settings, Map, Briefcase, Ticket // <--- Ticket adicionado aqui
+} from 'lucide-react';
 import Link from 'next/link';
 import { checkIsStaff } from '@/app/utils/permissions';
 
@@ -29,11 +29,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin/dashboard' },
     
-    // === NOVO: MÓDULO DE CRM E NEGÓCIOS ===
+    // === MÓDULO DE CRM E NEGÓCIOS ===
     { icon: Briefcase, label: 'CRM / Clientes', href: '/admin/crm' }, 
     
     // Gestão do Negócio
     { icon: CreditCard, label: 'Planos e Pacotes', href: '/admin/planos' },
+    { icon: Ticket, label: 'Cupons & Parceiros', href: '/admin/cupons' }, // <--- AQUI ESTÁ A NOVA ABA
     { icon: Activity, label: 'Central de Emissões', href: '/admin/emissoes' }, 
     
     // Sistema (Antigo "Usuários")
