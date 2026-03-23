@@ -20,8 +20,7 @@ export default function Vitrine() {
             fetch(`/api/saas/stats?t=${Date.now()}`, { 
                 cache: 'no-store',
                 headers: { 
-                    'x-user-id': userId,
-                    'Authorization': `Bearer ${token}` 
+                    'x-user-id': userId 
                 } 
             })
                 .then(res => {

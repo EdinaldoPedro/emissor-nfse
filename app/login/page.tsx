@@ -30,13 +30,14 @@ export default function Login() {
         return;
       }
 
-      // === SEGURANÇA: LIMPEZA E ARMAZENAMENTO DO TOKEN ===
+      // === SEGURANÇA: LIMPEZA E ARMAZENAMENTO ===
       localStorage.clear();
       
-      // Salva o Token JWT (Essencial para as próximas requisições)
-      localStorage.setItem('token', dados.token);
+      // NOTA DE SEGURANÇA: O Token JWT agora é gerenciado pelo backend 
+      // via Cookie HttpOnly de forma automática e invisível!
+      // Não salvamos mais NENHUM token no localStorage para evitar ataques XSS.
       
-      // Mantemos os IDs para facilitar a UI
+      // Mantemos apenas informações não-sensíveis para facilitar a UI do frontend
       localStorage.setItem('userId', dados.user.id); 
       localStorage.setItem('userRole', dados.user.role);
 

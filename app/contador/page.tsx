@@ -8,6 +8,16 @@ import { useDialog } from '@/app/contexts/DialogContext'; // <--- 1. Importa o e
 export default function ContadorDashboard() {
   const router = useRouter();
   const { showAlert } = useDialog(); // <--- 2. Inicializa o hook visual
+  const handleLogout = async () => {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        localStorage.clear(); 
+        sessionStorage.clear();
+        router.push('/login');
+    } catch (error) {
+        console.error("Erro ao terminar sessão", error);
+    }
+  };
   
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [filteredEmpresas, setFilteredEmpresas] = useState<any[]>([]);
@@ -147,7 +157,7 @@ export default function ContadorDashboard() {
                 <h1 className="text-2xl font-bold text-slate-800">Painel do Contador</h1>
                 <p className="text-slate-500">Gerencie sua carteira de clientes.</p>
             </div>
-            <button onClick={() => { localStorage.clear(); router.push('/'); }} className="text-red-500 flex items-center gap-2 hover:bg-red-50 px-4 py-2 rounded transition">
+            <button onClick={handleLogout} className="text-red-500 flex items-center gap-2 hover:bg-red-50 px-4 py-2 rounded transition">
                 <LogOut size={18}/> Sair
             </button>
         </header>

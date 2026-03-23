@@ -13,13 +13,13 @@ export default function ClienteDashboard() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
 
-    if(userId && token) {
+    // Agora só verificamos o userId! O token vai sozinho no cookie.
+    if(userId) {
         fetch('/api/perfil', { 
             headers: {
-                'x-user-id': userId,
-                'Authorization': `Bearer ${token}`
+                'x-user-id': userId
+                // Cabeçalho Authorization removido com sucesso!
             }
         })
         .then(res => {
@@ -67,20 +67,16 @@ export default function ClienteDashboard() {
         </div>
       </header>
 
-      {/* A MÁGICA ESTÁ AQUI: max-w-[1600px] destranca as margens laterais.
-        Colocamos flex-row para telas grandes: Vitrine na esquerda, Conteúdo na direita.
-      */}
       <div className="p-4 md:p-8 max-w-[1600px] mr-auto flex flex-col xl:flex-row gap-8">
         
         {/* === VITRINE (MARGEM ESQUERDA) === */}
         <div className="w-full xl:w-[320px] shrink-0">
-            {/* O "sticky" mantém a vitrine presa na tela enquanto o utilizador faz scroll na tabela */}
             <div className="xl:sticky xl:top-32 h-[450px]">
                 <Vitrine />
             </div>
         </div>
 
-        {/* === CONTEÚDO PRINCIPAL (INTACTO E COM 100% DA LARGURA DISPONÍVEL) === */}
+        {/* === CONTEÚDO PRINCIPAL === */}
         <div className="flex-1 space-y-8 min-w-0">
             
             {/* === ALERTAS DO SISTEMA (Topo) === */}

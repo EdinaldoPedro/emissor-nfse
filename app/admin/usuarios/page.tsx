@@ -35,8 +35,7 @@ export default function GestaoClientes() {
     
     // Busca planos com proteção contra erro
     fetch('/api/plans?visao=admin', { 
-        cache: 'no-store',
-        headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        cache: 'no-store'
     })
     .then(r => r.json())
     .then(data => {
@@ -48,9 +47,7 @@ export default function GestaoClientes() {
   }, []);
 
   const carregarUsuarios = () => {
-    fetch('/api/admin/users', {
-         headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-    }).then(r => r.json()).then(data => {
+    fetch('/api/admin/users').then(r => r.json()).then(data => {
         if(Array.isArray(data)) {
             const listaClientes = data.filter((u: any) => !['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI', 'CONTADOR'].includes(u.role));
             setClientes(listaClientes);
@@ -76,8 +73,7 @@ export default function GestaoClientes() {
           const res = await fetch('/api/admin/users', {
               method: 'PUT',
               headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + localStorage.getItem('token')
+                'Content-Type': 'application/json'
               },
               body: JSON.stringify({ 
                   id: editingUser.id, 
@@ -135,9 +131,7 @@ export default function GestaoClientes() {
       setLoadingHistory(true);
       setHistoryData([]); 
 
-      fetch(`/api/admin/users/${user.id}/history`, {
-          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-      })
+      fetch(`/api/admin/users/${user.id}/history`)
       .then(async (r) => {
           if (r.status === 404) {
               console.error("Rota de histórico não encontrada (404).");
@@ -173,8 +167,7 @@ export default function GestaoClientes() {
         const res = await fetch('/api/admin/impersonate', { 
             method: 'POST', 
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` 
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ targetUserId: targetId }) 
         });

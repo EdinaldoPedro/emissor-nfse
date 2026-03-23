@@ -55,13 +55,11 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
       try {
           setDownloadingPdfId(notaId); 
           const userId = localStorage.getItem('userId');
-          const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
 
           const res = await fetch('/api/notas/pdf', {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json', 
-                  'Authorization': `Bearer ${token}`, // <--- ENVIA TOKEN
                   'x-user-id': userId || '' 
               },
               body: JSON.stringify({ notaId })
@@ -112,7 +110,6 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
         headers: { 
-            'Authorization': `Bearer ${token}`,
             'x-empresa-id': contextId || '',
             'x-user-id': userId || ''
         }
@@ -129,14 +126,12 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const handlePedirAjuda = async (vendaId: string, motivoErro: string) => {
       const criarTicket = async (force = false) => {
           const userId = localStorage.getItem('userId');
-          const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
 
           try {
               const res = await fetch('/api/suporte/tickets', {
                   method: 'POST',
                   headers: { 
                       'Content-Type': 'application/json', 
-                      'Authorization': `Bearer ${token}`, // <--- ENVIA TOKEN
                       'x-user-id': userId || '' 
                   },
                   body: JSON.stringify({ 
@@ -192,14 +187,12 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
 
       setCancelando(true);
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); // <--- RECUPERA TOKEN
 
       try {
           const res = await fetch('/api/notas/gerenciar', {
               method: 'POST',
               headers: { 
                   'Content-Type': 'application/json', 
-                  'Authorization': `Bearer ${token}`, // <--- ENVIA TOKEN
                   'x-user-id': userId || '' 
               },
               body: JSON.stringify({ acao: 'CANCELAR', vendaId: cancelData.vendaId, motivo: justificativaCompleta })

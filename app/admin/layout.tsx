@@ -56,6 +56,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { icon: Settings, label: 'Configurações', href: '/admin/configuracoes' },
   ];
 
+  const handleLogout = async () => {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        // Limpa qualquer resquício antigo
+        localStorage.clear(); 
+        sessionStorage.clear();
+        // Redireciona para o login
+        router.push('/');
+    } catch (error) {
+        console.error("Erro ao terminar sessão", error);
+    }
+};
+
   return (
     <div className="min-h-screen bg-slate-100 flex">
         <aside className="w-64 bg-slate-900 text-white flex flex-col fixed h-full shadow-xl z-20">
@@ -92,7 +105,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </Link>
 
                 <button 
-                    onClick={() => { localStorage.clear(); router.push('/'); }} // <--- ALTERADO AQUI
+                    onClick={handleLogout}
                     className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-900/20 rounded-lg w-full transition-colors"
                 >
                     <LogOut size={20} /> Sair

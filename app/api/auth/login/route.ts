@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { signJWT } from '@/app/utils/auth';
+import { cookies } from 'next/headers';
 
 const prisma = new PrismaClient();
 
@@ -32,10 +33,20 @@ export async function POST(request: Request) {
     // === GERAÇÃO DO TOKEN JWT (Item 3) ===
     const token = await signJWT({ sub: user.id, role: user.role });
 
-    // Retorna dados + token
+    // === DEFINE O COOKIE HTTPONLY ===
+    cookies().set({
+        name: 'auth_token',
+        value: token,
+        httpOnly: true, // Protege contra XSS
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 8 // 8 horas, igual à expiração do token no auth.ts
+    });
+
+    // Retorna dados sem o token
     return NextResponse.json({
       success: true,
-      token, // O frontend deve salvar isso
       user: {
           id: user.id,
           nome: user.nome,

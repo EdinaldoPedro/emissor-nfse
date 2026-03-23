@@ -28,11 +28,8 @@ export default function BaseEmpresas() {
 
   const carregarDados = (pagina: number, busca: string, tipo: string) => {
     setLoading(true);
-    const token = localStorage.getItem('token');
 
-    fetch(`/api/admin/empresas?page=${pagina}&limit=10&search=${busca}&type=${tipo}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    })
+    fetch(`/api/admin/empresas?page=${pagina}&limit=10&search=${busca}&type=${tipo}`)
       .then(r => r.json())
       .then(res => {
         setItems(res.data || []);
@@ -44,13 +41,11 @@ export default function BaseEmpresas() {
   };
 
   const handleSave = async () => {
-      const token = localStorage.getItem('token');
       try {
           const res = await fetch('/api/admin/empresas', {
               method: 'PUT',
               headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
+                  'Content-Type': 'application/json'
               },
               body: JSON.stringify(editingItem)
           });
@@ -76,11 +71,9 @@ export default function BaseEmpresas() {
       
       if (confirmacao !== 'EXCLUIR') return;
 
-      const token = localStorage.getItem('token');
       try {
           const res = await fetch(`/api/admin/empresas?id=${id}&type=${viewType}`, { 
-              method: 'DELETE',
-              headers: { 'Authorization': `Bearer ${token}` }
+              method: 'DELETE'
           });
           
           if (res.ok) {
@@ -107,11 +100,9 @@ export default function BaseEmpresas() {
 
     if (confirm !== 'DESVINCULAR') return;
 
-    const token = localStorage.getItem('token');
     try {
         const res = await fetch(`/api/admin/empresas?id=${empresaId}&clienteId=${clienteId}&action=UNBIND`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+            method: 'DELETE'
         });
 
         if (res.ok) {

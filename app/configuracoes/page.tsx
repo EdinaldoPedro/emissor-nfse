@@ -51,9 +51,8 @@ export default function ConfiguracoesEmpresa() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); 
 
-    if (!userId || !token) { router.push('/login'); return; }
+    if (!userId) { router.push('/login'); return; }
 
     async function carregarDados() {
       try {
@@ -63,8 +62,7 @@ export default function ConfiguracoesEmpresa() {
         const res = await fetch('/api/perfil', { 
             headers: { 
                 'x-user-id': userId || '',
-                'x-empresa-id': contextId || '',
-                'Authorization': `Bearer ${token}` 
+                'x-empresa-id': contextId || ''
             } 
         });
 
@@ -99,7 +97,6 @@ export default function ConfiguracoesEmpresa() {
 
   const consultarCNPJ = async (forcarAtualizacao = false) => {
     const docLimpo = empresa.documento.replace(/\D/g, '');
-    const token = localStorage.getItem('token'); 
     
     if (isLocked && !forcarAtualizacao) return; 
     if (docLimpo.length !== 14) { alert("CNPJ inválido."); return; }
@@ -109,8 +106,7 @@ export default function ConfiguracoesEmpresa() {
       const res = await fetch('/api/external/cnpj', {
         method: 'POST',
         headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
+            'Content-Type': 'application/json'
         },
         body: JSON.stringify({ cnpj: docLimpo })
       });
@@ -169,7 +165,6 @@ export default function ConfiguracoesEmpresa() {
     setLoading(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
-    const token = localStorage.getItem('token'); 
 
     try {
       const res = await fetch('/api/perfil', {
@@ -177,8 +172,7 @@ export default function ConfiguracoesEmpresa() {
         headers: { 
             'Content-Type': 'application/json', 
             'x-user-id': userId || '', 
-            'x-empresa-id': contextId || '',
-            'Authorization': `Bearer ${token}` 
+            'x-empresa-id': contextId || ''
         },
         body: JSON.stringify({ 
             ...empresa, 

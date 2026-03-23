@@ -51,8 +51,7 @@ export default function Sidebar() {
                 const res = await fetch('/api/perfil', { 
                     headers: { 
                         'x-user-id': userId, 
-                        'x-empresa-id': contextId || '',
-                        'Authorization': `Bearer ${token}`
+                        'x-empresa-id': contextId || ''
                     }
                 });
                 
@@ -67,7 +66,7 @@ export default function Sidebar() {
 
                 if (!checkIsStaff(role || '')) {
                     const resNotif = await fetch('/api/clientes/notificacoes', {
-                        headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}` }
+                        headers: { 'x-user-id': userId }
                     });
                     if (resNotif.ok) {
                         const dataNotif = await resNotif.json();
@@ -88,7 +87,7 @@ export default function Sidebar() {
 
   }, [isOpen, pathname]); 
 
-  const handleLogoutOrReturn = () => {
+  const handleLogoutOrReturn = async () => { // <--- Adicione async aqui
     const isSupportActive = localStorage.getItem('isSupportMode') === 'true';
     let adminBackUpId = localStorage.getItem('adminBackUpId');
     const adminBackUpRole = localStorage.getItem('adminBackUpRole');
@@ -104,8 +103,15 @@ export default function Sidebar() {
         localStorage.removeItem('empresaContextId');
         window.location.href = '/admin/usuarios';
     } else {
-        localStorage.clear();
-        router.push('/');
+        // === NOVA LÓGICA DE LOGOUT AQUI ===
+        try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            localStorage.clear();
+            sessionStorage.clear();
+            router.push('/'); // Redireciona para o login em vez de '/' para forçar a tela de autenticação
+        } catch (error) {
+            console.error("Erro ao terminar sessão", error);
+        }
     }
   };
 

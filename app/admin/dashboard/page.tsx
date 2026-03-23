@@ -9,22 +9,11 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    
-    // Se não tiver token, redireciona pro login
-    if (!token) {
-        router.push('/login');
-        return;
-    }
-
-    fetch('/api/admin/stats', {
-        headers: {
-            'Authorization': `Bearer ${token}`
-        },
-        cache: 'no-store' // <--- ADICIONE ESTA LINHA
-    })
+    // 1. O Token não vem mais do localStorage! O navegador manda o Cookie.
+    fetch('/api/admin/stats', { cache: 'no-store' })
     .then(async (res) => {
         if (res.status === 401 || res.status === 403) {
+            router.push('/login');
             throw new Error('Sem permissão');
         }
         return res.json();
@@ -32,8 +21,6 @@ export default function AdminDashboard() {
     .then(setStats)
     .catch((err) => {
         console.error(err);
-        // Se der erro de permissão, talvez o token expirou
-        if (err.message === 'Sem permissão') router.push('/login');
     })
     .finally(() => setLoading(false));
   }, [router]);

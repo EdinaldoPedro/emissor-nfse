@@ -14,18 +14,18 @@ export default function AdminConfig() {
   
   // Estados de Ação
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false); // Novo estado para o teste
+  const [testing, setTesting] = useState(false); 
   
   const [msg, setMsg] = useState<{texto: string, tipo: 'sucesso' | 'erro'} | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) { router.push('/login'); return; }
-
-    fetch('/api/admin/config', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    })
+    // Não buscamos mais token do localStorage!
+    fetch('/api/admin/config') // O cookie vai automaticamente
     .then(async (r) => {
+        if (r.status === 401 || r.status === 403) {
+            router.push('/login');
+            throw new Error("Sem permissão");
+        }
         if (!r.ok) throw new Error("Erro ao carregar configurações");
         return r.json();
     })
@@ -34,7 +34,9 @@ export default function AdminConfig() {
     })
     .catch(err => {
         console.error(err);
-        showMessage('Erro ao carregar dados do servidor.', 'erro');
+        if (err.message !== "Sem permissão") {
+            showMessage('Erro ao carregar dados do servidor.', 'erro');
+        }
     })
     .finally(() => setLoading(false));
   }, [router]);
@@ -46,15 +48,11 @@ export default function AdminConfig() {
 
   const handleSave = async () => {
     setSaving(true);
-    const token = localStorage.getItem('token');
 
     try {
         const res = await fetch('/api/admin/config', {
             method: 'PUT',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
+            headers: { 'Content-Type': 'application/json' }, // Sem header Authorization!
             body: JSON.stringify(config)
         });
         
@@ -68,24 +66,19 @@ export default function AdminConfig() {
     finally { setSaving(false); }
   };
 
-  // === NOVA FUNÇÃO DE TESTE ===
   const handleTestEmail = async () => {
       setTesting(true);
-      const token = localStorage.getItem('token');
       try {
           const res = await fetch('/api/admin/config/test-email', {
               method: 'POST',
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify(config) // Envia o que está na tela
+              headers: { 'Content-Type': 'application/json' }, // Sem header Authorization!
+              body: JSON.stringify(config) 
           });
 
           const data = await res.json();
 
           if (res.ok) {
-              alert(data.message); // Alerta nativo para chamar atenção
+              alert(data.message); 
               showMessage(data.message, 'sucesso');
           } else {
               alert(`Falha no teste: ${data.details || data.error}`);
