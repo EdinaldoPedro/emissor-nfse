@@ -5,6 +5,14 @@ import crypto from 'crypto';
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '12345678901234567890123456789012'; // Fallback só pra dev
 const IV_LENGTH = 16;
 
+if (process.env.NODE_ENV === 'production' && (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length !== 32)) {
+  throw new Error('FATAL: ENCRYPTION_KEY deve existir e ter exatamente 32 caracteres em produção.');
+}
+
+if (ENCRYPTION_KEY.length !== 32) {
+  throw new Error('ENCRYPTION_KEY inválida: a chave deve ter exatamente 32 caracteres.');
+}
+
 export function encrypt(text: string | null): string | null {
   if (!text) return null;
   

@@ -170,7 +170,6 @@ export default function Cadastro() {
           
           if (res.ok) {
               // Login automático
-              localStorage.setItem('token', data.token);
               localStorage.setItem('userId', data.user.id);
               localStorage.setItem('userRole', data.user.role);
               router.push('/cliente/dashboard');

@@ -22,12 +22,11 @@ export default function VerificarEmailPage() {
         if (!password) return alert("Digite sua senha para confirmar.");
 
         setLoading(true);
-        const token = localStorage.getItem('token');
         
         try {
             const res = await fetch('/api/auth/verify-email/send', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ newEmail, password })
             });
             const data = await res.json();
@@ -44,12 +43,11 @@ export default function VerificarEmailPage() {
     const handleConfirmCode = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        const token = localStorage.getItem('token');
 
         try {
             const res = await fetch('/api/auth/verify-email/confirm', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code })
             });
             const data = await res.json();
@@ -66,7 +64,9 @@ export default function VerificarEmailPage() {
 
     const handleLogout = () => {
         localStorage.clear();
-        router.push('/login');
+        fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
+            router.push('/login');
+        });
     };
 
     return (

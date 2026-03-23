@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { signJWT } from '@/app/utils/auth';
+import { cookies } from 'next/headers';
 
 const prisma = new PrismaClient();
 
@@ -25,9 +26,18 @@ export async function POST(request: Request) {
     // Gera Token de Acesso
     const token = await signJWT({ sub: user.id, role: user.role });
 
+    cookies().set({
+        name: 'auth_token',
+        value: token,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 8
+    });
+
     return NextResponse.json({
         success: true,
-        token,
         user: { id: user.id, nome: user.nome, role: user.role }
     });
 

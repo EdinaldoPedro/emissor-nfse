@@ -8,18 +8,24 @@ const prisma = new PrismaClient();
 export async function getAuthenticatedUser(request: Request) {
   // 1. Busca o token no Cookie HttpOnly
   const cookieStore = cookies();
-  const token = cookieStore.get('auth_token')?.value;
+  const cookieToken = cookieStore.get('auth_token')?.value;
 
-  // 2. Se não tiver token, já retorna nulo (Bloqueia acesso)
+  // 2. Compatibilidade temporária:
+  // durante a migração, ainda aceitamos Bearer token se o cookie não existir.
+  const authHeader = request.headers.get('Authorization');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+  const token = cookieToken || bearerToken;
+
+  // 3. Se não tiver token, já retorna nulo (Bloqueia acesso)
   if (!token) {
     return null;
   }
 
-  // 3. Valida o Token
+  // 4. Valida o Token
   try {
     const payload = await verifyJWT(token);
     
-    // 4. Busca o usuário no banco para garantir que ele ainda existe/está ativo
+    // 5. Busca o usuário no banco para garantir que ele ainda existe/está ativo
     if (payload && payload.sub) {
         // Garantir que payload.sub é tratado como string
         const userId = typeof payload.sub === 'string' ? payload.sub : String(payload.sub);
