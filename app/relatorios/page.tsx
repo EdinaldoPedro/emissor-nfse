@@ -61,13 +61,13 @@ export default function RelatoriosPage() {
         fetchData();
     }, [page, startDate, endDate, incluirCanceladas]); 
 
-    const fetchData = async () => {
+const fetchData = async () => {
         setLoading(true);
         const userId = localStorage.getItem('userId');
-        const token = localStorage.getItem('token'); // <--- CORREÇÃO 1: Pegar token
         const contextId = localStorage.getItem('empresaContextId');
         
-        if (!token) {
+        // Substituímos a checagem do token pela checagem do userId
+        if (!userId) {
             router.push('/login');
             return;
         }
@@ -84,7 +84,7 @@ export default function RelatoriosPage() {
 
             const res = await fetch(`/api/relatorios?${query.toString()}`, {
                 headers: { 
-                    'Authorization': `Bearer ${token}`, // <--- CORREÇÃO 1: Enviar token no header
+                    // 'Authorization' removido! O Cookie HttpOnly é enviado automaticamente.
                     'x-user-id': userId || '',
                     'x-empresa-id': contextId || ''
                 }

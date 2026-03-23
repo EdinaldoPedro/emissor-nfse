@@ -304,11 +304,10 @@ function EmitirNotaContent() {
   // === CARREGAMENTO INICIAL ===
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId');
-    if(!userId || !token) { router.push('/login'); return; }
+    if(!userId) { router.push('/login'); return; }
 
-    fetch('/api/perfil', { headers: { 'x-user-id': userId, 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' } })
+    fetch('/api/perfil', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
       .then(res => res.json())
       .then(data => {
          if(data && !data.error) {
@@ -346,8 +345,8 @@ function EmitirNotaContent() {
       }).catch(console.error);
 
     // === CORREÇÃO DA LISTA DE CLIENTES (PAGINAÇÃO) ===
-    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '', 'Authorization': `Bearer ${token}` } })
-      .then(res => res.json())
+    fetch('/api/clientes', { headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } })
+    .then(res => res.json())
       .then(data => { 
         if (data && data.data && Array.isArray(data.data)) {
             setClientes(data.data);
@@ -361,11 +360,11 @@ function EmitirNotaContent() {
     if (retryId) {
         setLoadingRetry(true);
         fetch(`/api/vendas/${retryId}`, { 
-            headers: { 
-                'x-user-id': userId, 
-                'Authorization': `Bearer ${token}`,
+            headers: {
+                'x-user-id': userId,
+                // 'Authorization' removido!
                 'x-empresa-id': contextId || ''
-            } 
+            }
         })
             .then(async res => {
                 if (res.ok) {

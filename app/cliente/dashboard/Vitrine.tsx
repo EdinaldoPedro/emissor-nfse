@@ -14,14 +14,11 @@ export default function Vitrine() {
     // Busca as estatísticas ao carregar
     useEffect(() => {
         const userId = localStorage.getItem('userId');
-        const token = localStorage.getItem('token');
 
-        if (userId && token) {
+        if (userId) {
             fetch(`/api/saas/stats?t=${Date.now()}`, { 
                 cache: 'no-store',
-                headers: { 
-                    'x-user-id': userId 
-                } 
+                headers: { 'x-user-id': userId } 
             })
                 .then(res => {
                     if (!res.ok) throw new Error('Erro na API');

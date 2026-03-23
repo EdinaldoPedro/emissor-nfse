@@ -92,13 +92,17 @@ export async function GET(request: Request) {
             prisma.cliente.count({ where: whereClause }) // Corrija aqui para contar empresas se necessário
         ]);
 
-        data = empresas.map(emp => ({
-            ...emp,
-            origem: 'PRESTADOR',
-            donos: emp.donoUser ? [emp.donoUser] : [],
-            // FORMATE OS CLIENTES PARA O FRONT:
-            clientesVinculados: emp.minhaCarteira.map(v => v.cliente)
-        }));
+        data = empresas.map(emp => {
+            // Removemos os dados sensíveis antes de enviar para o Frontend Admin
+            const { certificadoA1, senhaCertificado, ...empresaSegura } = emp;
+            
+            return {
+                ...empresaSegura,
+                origem: 'PRESTADOR',
+                donos: emp.donoUser ? [emp.donoUser] : [],
+                clientesVinculados: emp.minhaCarteira.map((v: any) => v.cliente)
+            };
+        });
         total = count;
     }
 

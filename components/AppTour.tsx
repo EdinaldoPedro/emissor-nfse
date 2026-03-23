@@ -75,16 +75,11 @@ export default function AppTour() {
     if (typeof window === 'undefined') return;
 
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
 
-    if (userId && token) {
-      // Adiciona timestamp para evitar cache do navegador e forçar dados frescos
-      fetch(`/api/perfil?t=${Date.now()}`, { 
-          headers: { 
-              'x-user-id': userId,
-              'Authorization': `Bearer ${token}` 
-          } 
-      })
+    if (userId) {
+    fetch(`/api/perfil?t=${Date.now()}`, { 
+        headers: { 'x-user-id': userId } 
+    })
         .then(r => r.json())
         .then(user => {
             // Só roda se o step for menor que 4 (não concluído) e se for um número válido

@@ -101,12 +101,11 @@ export default function ListaVendas({ compact = false, onlyValid = false }: List
   const fetchVendas = useCallback(() => {
     setLoading(true);
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId'); 
     const limit = compact ? 5 : 10;
     const typeFilter = onlyValid ? 'valid' : 'all';
 
-    if (!token) return; // Segurança extra
+    if (!userId) return;
 
     fetch(`/api/notas?page=${page}&limit=${limit}&search=${debouncedSearch}&type=${typeFilter}`, {
         headers: { 

@@ -1,4 +1,5 @@
 import { ICanonicalRps } from '../interfaces/ICanonicalRps';
+import { decrypt } from '@/app/utils/crypto';
 
 export class NacionalAdapter {
     

@@ -38,15 +38,11 @@ export default function MinhaContaPage() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); 
 
-    if (!userId || !token) { router.push('/login'); return; }
+    if (!userId) { router.push('/login'); return; }
 
     fetch('/api/perfil', { 
-        headers: { 
-            'x-user-id': userId,
-            'Authorization': `Bearer ${token}` 
-        } 
+        headers: { 'x-user-id': userId } 
     })
       .then(res => {
           if (res.status === 401) { throw new Error("Sessão expirada"); }

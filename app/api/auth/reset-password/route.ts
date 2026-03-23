@@ -1,41 +1,67 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import { checkRateLimit } from '@/app/utils/rate-limit';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
-  try {
-    const { token, newPassword } = await request.json();
+    try {
+        const { token, senha } = await request.json();
 
-    // 1. Busca usuário pelo token e verifica validade
-    const user = await prisma.user.findFirst({
-        where: {
-            resetToken: token,
-            resetExpires: { gt: new Date() } // Deve ser maior que agora
+        if (!token || !senha) {
+            return NextResponse.json({ error: 'Token e nova senha são obrigatórios.' }, { status: 400 });
         }
-    });
 
-    if (!user) {
-        return NextResponse.json({ error: 'Token inválido ou expirado.' }, { status: 400 });
+        // === ESCUDO: RATE LIMITING ===
+        const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
+        
+        // Limitamos severamente por IP e também tentativas atreladas ao próprio Token
+        const ipAllowed = checkRateLimit(`reset_ip_${ip}`, 5, 15 * 60 * 1000);
+        const tokenAllowed = checkRateLimit(`reset_token_${token}`, 5, 15 * 60 * 1000);
+
+        if (!ipAllowed || !tokenAllowed) {
+            return NextResponse.json({ 
+                error: 'Muitas tentativas inválidas. Acesso temporariamente bloqueado.' 
+            }, { status: 429 });
+        }
+
+        const isSenhaForte = senha.length >= 8 && /[A-Z]/.test(senha) && /[0-9]/.test(senha) && /[^A-Za-z0-9]/.test(senha);
+        
+        if (!isSenhaForte) {
+            return NextResponse.json({ 
+                error: 'A senha deve ter pelo menos 8 caracteres, 1 letra maiúscula, 1 número e 1 caractere especial.' 
+            }, { status: 400 });
+        }
+
+        const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+        const user = await prisma.user.findFirst({
+            where: {
+                resetToken: hashedToken,
+                resetExpires: { gt: new Date() } // <--- CORRIGIDO PARA resetExpires
+            }
+        });
+
+        if (!user) {
+            return NextResponse.json({ error: 'Token inválido ou expirado.' }, { status: 400 });
+        }
+
+        const hashedPassword = await bcrypt.hash(senha, 10);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                senha: hashedPassword,
+                resetToken: null,       
+                resetExpires: null // <--- CORRIGIDO PARA resetExpires
+            }
+        });
+
+        return NextResponse.json({ success: true, message: 'Senha redefinida com sucesso.' });
+    } catch (error) {
+        console.error(error);
+        return NextResponse.json({ error: 'Erro interno ao redefinir a senha.' }, { status: 500 });
     }
-
-    // 2. Hash da nova senha
-    const senhaHash = await bcrypt.hash(newPassword, 10);
-
-    // 3. Atualiza e limpa token
-    await prisma.user.update({
-        where: { id: user.id },
-        data: {
-            senha: senhaHash,
-            resetToken: null,
-            resetExpires: null
-        }
-    });
-
-    return NextResponse.json({ success: true });
-
-  } catch (error) {
-    return NextResponse.json({ error: 'Erro interno.' }, { status: 500 });
-  }
 }

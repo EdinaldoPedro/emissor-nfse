@@ -32,7 +32,6 @@ export default function Sidebar() {
 
   useEffect(() => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
     const role = localStorage.getItem('userRole');
     
     const supportActive = localStorage.getItem("isSupportMode") === 'true';
@@ -44,7 +43,7 @@ export default function Sidebar() {
     }
 
     const fetchData = async () => {
-        if(userId && token) {
+        if(userId) {
             try {
                 const contextId = localStorage.getItem('empresaContextId');
                 

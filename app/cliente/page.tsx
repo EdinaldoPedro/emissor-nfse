@@ -73,18 +73,12 @@ export default function MeusClientes() {
     setLoading(true);
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
-    const token = localStorage.getItem('token'); 
 
-    if (!userId || !token) return;
-
-    try {
-      const res = await fetch('/api/clientes', { 
-          headers: { 
-              'x-user-id': userId, 
-              'x-empresa-id': contextId || '',
-              'Authorization': `Bearer ${token}` 
-          } 
-      });
+    if (!userId) return;
+        try {
+        const res = await fetch('/api/clientes', { 
+            headers: { 'x-user-id': userId, 'x-empresa-id': contextId || '' } 
+    });
       const dados = await res.json();
       
       // Ajuste para ler 'data' por causa da paginação

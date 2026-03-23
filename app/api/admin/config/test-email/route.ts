@@ -2,27 +2,27 @@ import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import nodemailer from 'nodemailer';
 import { getAuthenticatedUser, unauthorized } from '@/app/utils/api-middleware';
+import { decrypt } from '@/app/utils/crypto'; // <--- IMPORT DA CRIPTOGRAFIA
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
-    // 1. Segurança e Identificação do Usuário
     const userAuth = await getAuthenticatedUser(request);
     if (!userAuth) return unauthorized();
 
-    // Precisamos do email do usuário logado para enviar o teste para ele mesmo
     const userFull = await prisma.user.findUnique({ where: { id: userAuth.id } });
     if (!userFull || !userFull.email) return NextResponse.json({ error: "Usuário sem e-mail." }, { status: 400 });
 
     try {
         const body = await request.json();
 
-        // 2. Monta o transport com os dados que vieram do FRONT (para testar o que está digitado)
-        // Se a senha vier vazia, busca a do banco
         let passToUse = body.smtpPass;
-        if (!passToUse) {
+        
+        // Se a senha vier vazia ou como a MÁSCARA '********', buscamos a real no banco
+        if (!passToUse || passToUse === '********') {
             const configSalva = await prisma.configuracaoSistema.findUnique({ where: { id: 'config' } });
-            passToUse = configSalva?.smtpPass || '';
+            // === SEGURANÇA: Descriptografa a senha para usar no teste ===
+            passToUse = decrypt(configSalva?.smtpPass || '') || '';
         }
 
         if (!body.smtpHost || !body.smtpUser || !passToUse) {
@@ -32,23 +32,22 @@ export async function POST(request: Request) {
         const transporter = nodemailer.createTransport({
             host: body.smtpHost,
             port: Number(body.smtpPort) || 587,
-            secure: body.smtpSecure === true, // true para 465, false para outras
+            secure: body.smtpSecure === true, 
             auth: {
                 user: body.smtpUser,
-                pass: passToUse,
+                pass: passToUse, // Usando a senha descriptografada
             },
             tls: {
-                rejectUnauthorized: false // Ajuda em ambientes de dev, cuidado em prod
+                // === SEGURANÇA: Valida certificados apenas em Produção ===
+                rejectUnauthorized: process.env.NODE_ENV === 'production'
             }
         });
 
-        // 3. Tenta Verificar Conexão
         await transporter.verify();
 
-        // 4. Tenta Enviar E-mail Real
         const info = await transporter.sendMail({
-            from: body.emailRemetente || body.smtpUser, // Quem envia
-            to: userFull.email, // Quem recebe (o próprio admin logado)
+            from: body.emailRemetente || body.smtpUser, 
+            to: userFull.email, 
             subject: 'Teste de Configuração - Emissor NFSe',
             html: `
                 <div style="font-family: sans-serif; padding: 20px; border: 1px solid #ccc; border-radius: 8px;">
@@ -75,6 +74,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ 
             error: "Falha na conexão SMTP.", 
             details: error.message 
-        }, { status: 400 }); // Retorna erro 400 para o front pegar a mensagem
+        }, { status: 400 }); 
     }
 }

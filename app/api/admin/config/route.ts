@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { encrypt } from '@/app/utils/crypto'; // <--- IMPORT DA CRIPTOGRAFIA
 
 const prisma = new PrismaClient();
 
 // GET: Busca configs
 export async function GET(request: Request) {
-  // Verificação de segurança
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
   if (!['MASTER', 'ADMIN'].includes(user.role)) return forbidden();
@@ -21,7 +21,14 @@ export async function GET(request: Request) {
       }
     });
   }
-  return NextResponse.json(config);
+
+  // === SEGURANÇA: Mascarar a senha para não expor no frontend ===
+  const configSegura = { ...config };
+  if (configSegura.smtpPass) {
+      configSegura.smtpPass = '********'; // O frontend só verá os asteriscos
+  }
+
+  return NextResponse.json(configSegura);
 }
 
 // PUT: Salva configs
@@ -33,7 +40,6 @@ export async function PUT(request: Request) {
   const body = await request.json();
 
   try {
-    // VALIDAÇÃO SEGURA: Só tenta parsear se houver conteúdo
     if (body.modeloDpsJson && body.modeloDpsJson.trim() !== '') {
         try {
             JSON.parse(body.modeloDpsJson);
@@ -42,7 +48,6 @@ export async function PUT(request: Request) {
         }
     }
 
-    // Prepara dados para salvar
     const dataToUpdate: any = {
         ambiente: body.ambiente,
         versaoApi: body.versaoApi,
@@ -53,12 +58,12 @@ export async function PUT(request: Request) {
         emailRemetente: body.emailRemetente
     };
 
-    // Só atualiza senha se o usuário digitou algo
-    if (body.smtpPass && body.smtpPass.trim() !== '') {
-        dataToUpdate.smtpPass = body.smtpPass;
+    // === SEGURANÇA: Criptografar a senha antes de salvar ===
+    // Só atualiza se vier uma senha nova e que NÃO seja a máscara '********'
+    if (body.smtpPass && body.smtpPass.trim() !== '' && body.smtpPass !== '********') {
+        dataToUpdate.smtpPass = encrypt(body.smtpPass); 
     }
 
-    // Só atualiza o JSON se foi enviado
     if (body.modeloDpsJson) {
         dataToUpdate.modeloDpsJson = body.modeloDpsJson;
     }
@@ -68,7 +73,11 @@ export async function PUT(request: Request) {
       data: dataToUpdate
     });
 
-    return NextResponse.json(updated);
+    // Mascara novamente a resposta do PUT
+    const updatedSeguro = { ...updated };
+    if (updatedSeguro.smtpPass) updatedSeguro.smtpPass = '********';
+
+    return NextResponse.json(updatedSeguro);
 
   } catch (e: any) {
     console.error("Erro ao salvar config:", e);

@@ -39,11 +39,19 @@ export default function Cadastro() {
     }
 
     if (name === 'senha') {
-        // Agora aceita símbolos, desde que tenha letra, número e tamanho entre 6 e 20
-        const regexSenha = /^(?=.*[A-Za-z])(?=.*\d).{6,20}$/;
-        if (value.length > 0 && !regexSenha.test(value)) error = 'Mín. 6 caracteres (letras e números).';
+        const isSenhaForte = value.length >= 8 && /[A-Z]/.test(value) && /[0-9]/.test(value) && /[^A-Za-z0-9]/.test(value);
+        if (value.length > 0 && !isSenhaForte) {
+            error = 'Mín. 8 caracteres, 1 maiúscula, 1 número e 1 especial.';
+        }
     }
     
+    // CORREÇÃO: Agora o sistema LIMPA o erro do campo atual assim que ele fica válido!
+    if (error) {
+        setErrors((prev: any) => ({ ...prev, [name]: error }));
+    } else {
+        setErrors((prev: any) => ({ ...prev, [name]: '' }));
+    }
+
     // Validação cruzada: E-mail e Confirmação de E-mail
     if (name === 'email' || name === 'confirmEmail') {
         const emailToCompare = name === 'email' ? value : currentForm.email;
@@ -66,12 +74,6 @@ export default function Cadastro() {
         } else {
             setErrors((prev: any) => ({ ...prev, confirmSenha: '' }));
         }
-    }
-
-    if (error) {
-        setErrors((prev: any) => ({ ...prev, [name]: error }));
-    } else if (name !== 'email' && name !== 'confirmEmail' && name !== 'senha' && name !== 'confirmSenha') {
-        setErrors((prev: any) => ({ ...prev, [name]: '' }));
     }
   };
 
@@ -282,7 +284,7 @@ export default function Cadastro() {
                                 </button>
                             </div>
                             {errors.senha && <p className="text-xs text-red-500 mt-1">{errors.senha}</p>}
-                            <p className="text-[10px] text-slate-400 mt-1">Mín. 6 caracteres (Letras e Números).</p>
+                            <p className="text-[10px] text-slate-400 mt-1">Mín. 8 caracteres, 1 maiúscula, 1 número e 1 símbolo.</p>
                         </div>
 
                         <div>

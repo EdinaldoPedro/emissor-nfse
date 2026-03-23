@@ -8,6 +8,7 @@ import { NacionalAdapter } from '../adapters/NacionalAdapter';
 import { ICanonicalRps } from '../interfaces/ICanonicalRps';
 import { MeiHandler } from '../handlers/MeiHandler';
 import { SimplesNacionalHandler } from '../handlers/SimplesNacionalHandler';
+import { decrypt } from '@/app/utils/crypto';
 
 export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
     
@@ -33,6 +34,10 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
         }
 
         const { prestador, tomador, servico, numeroDPS, serieDPS, ambiente, dataCompetencia } = dados as any;
+
+        // === DESCRIPTOGRAFIA EM MEMÓRIA (NOVO) ===
+        if (prestador.certificadoA1) prestador.certificadoA1 = decrypt(prestador.certificadoA1) || prestador.certificadoA1;
+        if (prestador.senhaCertificado) prestador.senhaCertificado = decrypt(prestador.senhaCertificado) || prestador.senhaCertificado;
 
         try {
             // 1. Validações Prévias
@@ -129,6 +134,10 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
     async consultar(chave: string, empresa: any): Promise<IResultadoConsulta> {
         try {
+            // === DESCRIPTOGRAFIA EM MEMÓRIA (NOVO) ===
+            if (empresa.certificadoA1) empresa.certificadoA1 = decrypt(empresa.certificadoA1) || empresa.certificadoA1;
+            if (empresa.senhaCertificado) empresa.senhaCertificado = decrypt(empresa.senhaCertificado) || empresa.senhaCertificado;
+
             const credenciais = this.extrairCredenciais(empresa.certificadoA1, empresa.senhaCertificado);
             const httpsAgent = new https.Agent({ cert: credenciais.cert, key: credenciais.key, rejectUnauthorized: false, family: 4 });
             
@@ -197,6 +206,10 @@ export class NacionalStrategy extends BaseStrategy implements IEmissorStrategy {
 
     async cancelar(chave: string, protocolo: string, motivoCompleto: string, empresa: any): Promise<IResultadoCancelamento> {
         try {
+            // === DESCRIPTOGRAFIA EM MEMÓRIA (NOVO) ===
+            if (empresa.certificadoA1) empresa.certificadoA1 = decrypt(empresa.certificadoA1) || empresa.certificadoA1;
+            if (empresa.senhaCertificado) empresa.senhaCertificado = decrypt(empresa.senhaCertificado) || empresa.senhaCertificado;
+
             const dhEvento = this.formatarDataSefaz(new Date());
             const tpEvento = '101101';
             const idPed = `PRE${chave}${tpEvento}`; 

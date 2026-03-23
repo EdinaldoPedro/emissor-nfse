@@ -3,16 +3,34 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { signJWT } from '@/app/utils/auth';
 import { cookies } from 'next/headers';
+import { checkRateLimit } from '@/app/utils/rate-limit';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
+  
   try {
-    const { login, senha } = await request.json();
+        const body = await request.json();
+        const { login, senha } = body;
 
-    if (!login || !senha) {
-        return NextResponse.json({ error: 'Preencha login e senha.' }, { status: 400 });
-    }
+        if (!login || !senha) {
+            return NextResponse.json({ error: 'Credenciais inválidas' }, { status: 400 });
+        }
+
+        // === ESCUDO: RATE LIMITING ===
+        // Captura o IP do usuário (funciona bem atrás de proxies/Vercel)
+        const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
+        
+        // Regra 1: Max 10 tentativas por IP a cada 15 minutos
+        const ipAllowed = checkRateLimit(`login_ip_${ip}`, 10, 15 * 60 * 1000);
+        // Regra 2: Max 5 tentativas para o mesmo E-mail a cada 15 minutos
+        const emailAllowed = checkRateLimit(`login_email_${login}`, 5, 15 * 60 * 1000);
+
+        if (!ipAllowed || !emailAllowed) {
+            return NextResponse.json({ 
+                error: 'Muitas tentativas de login. Por segurança, aguarde 15 minutos e tente novamente.' 
+            }, { status: 429 });
+        }
 
     const loginLimpo = login.replace(/\D/g, ''); 
 
