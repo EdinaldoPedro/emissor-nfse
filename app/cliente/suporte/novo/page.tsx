@@ -25,12 +25,10 @@ export default function NovoTicketPage() {
   // Carrega opções de assunto
   useEffect(() => {
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); 
 
       fetch('/api/admin/suporte/catalogo', {
           headers: { 
-              'x-user-id': userId || '',
-              'Authorization': `Bearer ${token}` 
+              'x-user-id': userId || ''
           }
       })
       .then(r => r.json())
@@ -63,15 +61,13 @@ export default function NovoTicketPage() {
       const enviarChamado = async (force = false) => {
           setLoading(true);
           const userId = localStorage.getItem('userId');
-          const token = localStorage.getItem('token'); 
 
           try {
               const res = await fetch('/api/suporte/tickets', {
                   method: 'POST',
                   headers: { 
                       'Content-Type': 'application/json', 
-                      'x-user-id': userId || '',
-                      'Authorization': `Bearer ${token}` 
+                      'x-user-id': userId || ''
                   },
                   // Adiciona checkDuplicity
                   body: JSON.stringify({ ...form, checkDuplicity: !force })

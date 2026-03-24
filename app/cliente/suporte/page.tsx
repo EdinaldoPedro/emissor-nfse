@@ -34,12 +34,10 @@ export default function MeusChamados() {
 
   const carregarDados = async () => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); // <--- TOKEN
     
     // Header seguro
     const headers = { 
-        'x-user-id': userId || '',
-        'Authorization': `Bearer ${token}` 
+        'x-user-id': userId || ''
     };
     
     setLoading(true);
@@ -75,15 +73,13 @@ export default function MeusChamados() {
       if(!confirm(termo)) return;
 
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token');
 
       try {
           const res = await fetch('/api/contador/vinculo', {
               method: 'PUT',
               headers: {
                   'Content-Type': 'application/json', 
-                  'x-user-id': userId || '',
-                  'Authorization': `Bearer ${token}` // <--- HEADER
+                  'x-user-id': userId || ''
               },
               body: JSON.stringify({ vinculoId, acao })
           });

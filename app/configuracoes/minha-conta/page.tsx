@@ -77,11 +77,10 @@ export default function MinhaContaPage() {
   
   const handlePlanChange = async (newSlug: string, newCiclo: string) => {
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token'); 
     try {
         const res = await fetch('/api/admin/users', { 
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}` },
+            headers: { 'Content-Type': 'application/json', 'x-user-id': userId || ''},
             body: JSON.stringify({ id: userId, plano: newSlug, planoCiclo: newCiclo }) 
         });
         
@@ -99,7 +98,6 @@ export default function MinhaContaPage() {
       e.preventDefault();
       setSaving(true);
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token'); 
       try {
         const { planoDetalhado, planoCiclo, listaEmpresas, empresasAdicionais, ...restData } = data;
         const payload = {
@@ -110,7 +108,7 @@ export default function MinhaContaPage() {
 
         const res = await fetch('/api/perfil', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}` },
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userId || ''},
           body: JSON.stringify(payload) 
         });
         
@@ -129,11 +127,10 @@ export default function MinhaContaPage() {
   const handleCreatePJ = async (e: React.FormEvent) => {
       e.preventDefault();
       setAddingPJ(true);
-      const token = localStorage.getItem('token'); 
       try {
           const res = await fetch('/api/empresas/adicional', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              headers: { 'Content-Type': 'application/json'},
               body: JSON.stringify(newPJ)
           });
           if(res.ok) {

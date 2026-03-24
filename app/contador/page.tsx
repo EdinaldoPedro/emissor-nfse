@@ -30,14 +30,11 @@ export default function ContadorDashboard() {
 
   const carregar = () => {
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token');
       if (!userId) return router.push('/login');
 
       fetch('/api/contador/vinculo?mode=contador', { 
           headers: { 
-              'x-user-id': userId,
-              'Authorization': `Bearer ${token}` 
-          } 
+              'x-user-id': userId}
       })
         .then(r => r.json())
         .then(data => {
@@ -81,16 +78,13 @@ export default function ContadorDashboard() {
       setStatusMsg('Consultando Receita Federal...');
 
       const userId = localStorage.getItem('userId');
-      const token = localStorage.getItem('token');
       
       try {
           const res = await fetch('/api/contador/vinculo', {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json', 
-                  'x-user-id': userId || '',
-                  'Authorization': `Bearer ${token}`
-              },
+                  'x-user-id': userId || ''},
               body: JSON.stringify({ cnpj: cnpjLimpo })
           });
           

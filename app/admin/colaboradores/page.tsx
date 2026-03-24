@@ -26,8 +26,7 @@ export default function GestaoColaboradores() {
   const [loadingEdit, setLoadingEdit] = useState(false);
 
   const carregarDados = () => {
-    const token = localStorage.getItem('token');
-    fetch('/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch('/api/admin/users', { headers: {} })
     .then(r => r.json())
     .then(data => {
         if (Array.isArray(data)) {
@@ -43,10 +42,9 @@ export default function GestaoColaboradores() {
   const handleOpenEdit = async (userId: string) => {
       setLoadingEdit(true);
       setModalEditOpen(true);
-      const token = localStorage.getItem('token');
       
       try {
-          const res = await fetch(`/api/admin/users/${userId}`, { headers: { 'Authorization': `Bearer ${token}` } });
+          const res = await fetch(`/api/admin/users/${userId}`, { headers: {} });
           const data = await res.json();
           
           setSelectedUserFull(data);
@@ -74,12 +72,11 @@ export default function GestaoColaboradores() {
   // --- PROMOVER (Novo) ---
   const handlePromover = async () => {
     if (!searchUser) return dialog.showAlert("Selecione um usuário.");
-    const token = localStorage.getItem('token');
 
     try {
         const res = await fetch('/api/admin/users', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            headers: { 'Content-Type': 'application/json'},
             body: JSON.stringify({ id: searchUser, role: roleInput })
         });
 
@@ -97,7 +94,6 @@ export default function GestaoColaboradores() {
   // --- SALVAR EDIÇÃO ---
   const handleSaveEdit = async () => {
       if(!selectedUserFull) return;
-      const token = localStorage.getItem('token');
 
       // Monta o payload de envio com os novos limites se for contador
       const payload: any = { role: roleInput, limiteEmpresas: editLimit };
@@ -110,7 +106,7 @@ export default function GestaoColaboradores() {
           // 1. Atualiza Limites e Role (PATCH)
           const res = await fetch(`/api/admin/users/${selectedUserFull.id}`, {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              headers: { 'Content-Type': 'application/json'},
               body: JSON.stringify(payload)
           });
 
@@ -118,7 +114,7 @@ export default function GestaoColaboradores() {
           if(roleInput === 'CONTADOR' && selectedUserFull.role !== 'CONTADOR') {
                await fetch('/api/admin/users', {
                    method: 'PUT',
-                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                   headers: { 'Content-Type': 'application/json'},
                    body: JSON.stringify({ id: selectedUserFull.id, role: 'CONTADOR' })
                });
           }
@@ -139,8 +135,7 @@ export default function GestaoColaboradores() {
           type: 'warning'
       })) return;
       
-      const token = localStorage.getItem('token');
-      await fetch(`/api/contador/vinculo?id=${vinculoId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+      await fetch(`/api/contador/vinculo?id=${vinculoId}`, { method: 'DELETE', headers: {} });
       
       setSelectedUserFull((prev: any) => ({
           ...prev,
@@ -151,10 +146,9 @@ export default function GestaoColaboradores() {
   // --- DEMITIR ---
   const handleDemitir = async (id: string) => {
       if(!await dialog.showConfirm({ type: 'danger', title: 'Remover Acesso', description: 'O usuário voltará a ser um cliente comum.' })) return;
-      const token = localStorage.getItem('token');
       await fetch('/api/admin/users', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          headers: { 'Content-Type': 'application/json'},
           body: JSON.stringify({ id, role: 'COMUM' }) 
       });
       carregarDados();

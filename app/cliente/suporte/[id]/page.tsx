@@ -79,13 +79,11 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
 
     const fetchTicket = async () => {
         try {
-            const token = localStorage.getItem('token'); 
             const userId = localStorage.getItem('userId');
 
             const res = await fetch(`/api/suporte/tickets/${params.id}`, {
                 headers: { 
-                    'x-user-id': userId || '',
-                    'Authorization': `Bearer ${token}` 
+                    'x-user-id': userId || ''
                 }
             });
             
@@ -105,7 +103,6 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
         if (!resposta.trim() && !anexo) return;
 
         setSending(true);
-        const token = localStorage.getItem('token');
         const userId = localStorage.getItem('userId');
 
         try {
@@ -113,8 +110,7 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
-                    'x-user-id': userId || '',
-                    'Authorization': `Bearer ${token}` 
+                    'x-user-id': userId || ''
                 },
                 body: JSON.stringify({
                     ticketId: params.id,
@@ -144,7 +140,6 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
 
         if (!await dialog.showConfirm({ title: 'Confirmar ação?', description: `Deseja realmente ${texto}?` })) return;
 
-        const token = localStorage.getItem('token');
         const userId = localStorage.getItem('userId');
 
         try {
@@ -152,8 +147,7 @@ export default function ClienteTicketDetalhes({ params }: { params: { id: string
                 method: 'PUT',
                 headers: { 
                     'Content-Type': 'application/json',
-                    'x-user-id': userId || '',
-                    'Authorization': `Bearer ${token}` 
+                    'x-user-id': userId || ''
                 },
                 body: JSON.stringify({ status })
             });

@@ -104,16 +104,16 @@ export default function GestaoClientes() {
 
   // --- FUNÇÕES UTILITÁRIAS ---
   const handleUnlinkCompany = async () => { 
-      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+localStorage.getItem('token')}, body: JSON.stringify({ id: editingUser.id, unlinkCompany: true }) });
+      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: editingUser.id, unlinkCompany: true }) });
       if(res.ok) { dialog.showAlert("Empresa desvinculada."); setEditingUser(null); carregarUsuarios(); }
   };
   const handleUpdateCnpj = async () => { 
-      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+localStorage.getItem('token')}, body: JSON.stringify({ id: editingUser.id, empresaId: editingUser.empresa?.id, newCnpj: novoCnpj }) });
+      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: editingUser.id, empresaId: editingUser.empresa?.id, newCnpj: novoCnpj }) });
       if(res.ok) { dialog.showAlert("CNPJ atualizado."); setEditingUser(null); carregarUsuarios(); }
   };
   const handleSendReset = async () => { await fetch('/api/auth/forgot-password', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ email: editingUser.email }) }); dialog.showAlert("Email enviado."); };
   const handleResetEmail = async () => { 
-      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+localStorage.getItem('token')}, body: JSON.stringify({ id: editingUser.id, resetEmail: true }) });
+      const res = await fetch('/api/admin/users', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: editingUser.id, resetEmail: true }) });
       if(res.ok) { dialog.showAlert("Email resetado."); setEditingUser(null); carregarUsuarios(); }
   };
   
@@ -151,7 +151,6 @@ export default function GestaoClientes() {
   const acessarSuporte = async (targetId: string) => {
     const adminId = localStorage.getItem('userId');
     const adminRole = localStorage.getItem('userRole');
-    const token = localStorage.getItem('token'); 
     
     // VERIFICAÇÃO DE SEGURANÇA:
     // Só salva o backup se NÃO estivermos já em modo suporte.

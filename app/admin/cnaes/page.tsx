@@ -23,11 +23,9 @@ export default function AdminCnaes() {
   }, [page, termoBusca]);
 
   const carregar = (pagina: number, busca: string) => {
-    const token = localStorage.getItem('token'); 
 
     fetch(`/api/admin/cnaes?page=${pagina}&limit=${limit}&search=${busca}`, {
         headers: { 
-            'Authorization': `Bearer ${token}` 
         }
     })
       .then(r => r.json())
@@ -40,7 +38,6 @@ export default function AdminCnaes() {
   };
 
   const handleSave = async () => {
-    const token = localStorage.getItem('token'); 
     
     // Tratamento para garantir que enviamos nulo caso a flag seja falsa
     const payloadToSave = {
@@ -52,9 +49,7 @@ export default function AdminCnaes() {
     const res = await fetch('/api/admin/cnaes', {
         method: 'PUT',
         headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
-        },
+            'Content-Type': 'application/json'},
         body: JSON.stringify(payloadToSave)
     });
 

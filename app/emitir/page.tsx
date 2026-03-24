@@ -410,7 +410,6 @@ function EmitirNotaContent() {
     setProgressStatus("Preparando envio...");
 
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId'); 
     
     try {
@@ -427,7 +426,7 @@ function EmitirNotaContent() {
 
       const res = await fetch('/api/notas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'Authorization': `Bearer ${token}`, 'x-empresa-id': contextId || '' },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId || '', 'x-empresa-id': contextId || '' },
         body: JSON.stringify({
           vendaId: retryId || null, 
           clienteId: nfData.clienteId,

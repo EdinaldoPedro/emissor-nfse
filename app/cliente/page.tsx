@@ -145,7 +145,6 @@ export default function MeusClientes() {
   // Verifica se o cliente já existe no banco
   const verificarClienteExistente = async (doc: string) => {
         setBuscandoDados(true);
-        const token = localStorage.getItem('token');
         try {
             // OBS: O backend limpa caracteres não numéricos. 
             // Para NIF alfanumérico, o backend precisaria ser ajustado, 
@@ -153,8 +152,7 @@ export default function MeusClientes() {
             const res = await fetch('/api/clientes/check', {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json', 
-                    'Authorization': `Bearer ${token}` 
+                    'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ documento: doc })
             });
@@ -175,11 +173,10 @@ export default function MeusClientes() {
   // Busca CNPJ na API Externa
   const executarBuscaCNPJ = async (cnpjLimpo: string) => {
       setBuscandoDados(true);
-      const token = localStorage.getItem('token');
       try {
           const res = await fetch('/api/external/cnpj', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ cnpj: cnpjLimpo })
           });
           const dados = await res.json();
@@ -210,12 +207,11 @@ export default function MeusClientes() {
       }
 
       setBuscandoDados(true);
-      const token = localStorage.getItem('token');
 
       try {
           const resCnpj = await fetch('/api/external/cnpj', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ cnpj: cnpjLimpo })
           });
           const dados = await resCnpj.json();
@@ -327,7 +323,6 @@ export default function MeusClientes() {
     // GARANTIR QUE AS VARIÁVEIS SÃO DEFINIDAS AQUI DENTRO:
     const userId = localStorage.getItem('userId');
     const contextId = localStorage.getItem('empresaContextId');
-    const token = localStorage.getItem('token');
 
     try {
       const metodo = clienteAtual.id ? 'PUT' : 'POST';
@@ -336,8 +331,7 @@ export default function MeusClientes() {
         headers: { 
             'Content-Type': 'application/json', 
             'x-user-id': userId || '', 
-            'x-empresa-id': contextId || '',
-            'Authorization': `Bearer ${token}` 
+            'x-empresa-id': contextId || ''
         },
         body: JSON.stringify(clienteAtual)
       });
@@ -357,12 +351,11 @@ export default function MeusClientes() {
   const handleExcluir = async (id: string) => {
     if (!await dialog.showConfirm({ type: 'danger', title: 'Excluir?', description: 'Confirmar exclusão?' })) return;
     const userId = localStorage.getItem('userId');
-    const token = localStorage.getItem('token');
     const contextId = localStorage.getItem('empresaContextId');
 
     await fetch(`/api/clientes?id=${id}`, {
         method: 'DELETE',
-        headers: { 'x-user-id': userId || '', 'x-empresa-id': contextId || '', 'Authorization': `Bearer ${token}` }
+        headers: { 'x-user-id': userId || '', 'x-empresa-id': contextId || '' }
     });
     carregarClientes();
   };

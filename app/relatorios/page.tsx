@@ -185,14 +185,12 @@ const fetchData = async () => {
         
         setDownloading(true);
         const userId = localStorage.getItem('userId');
-        const token = localStorage.getItem('token'); // <--- CORREÇÃO 1
 
         try {
             const res = await fetch('/api/relatorios/export', {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json', 
-                    'Authorization': `Bearer ${token}`, // <--- CORREÇÃO 1
                     'x-user-id': userId || '' 
                 },
                 body: JSON.stringify({ ids: selectedIds, formato })
