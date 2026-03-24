@@ -169,11 +169,11 @@ export default function Cadastro() {
           const data = await res.json();
           
           if (res.ok) {
-              // Login automático
-              localStorage.setItem('userId', data.user.id);
-              localStorage.setItem('userRole', data.user.role);
-              router.push('/cliente/dashboard');
-          } else {
+                // Login automático via cookie HttpOnly já definido no backend
+                localStorage.setItem('userId', data.user.id);
+                localStorage.setItem('userRole', data.user.role);
+                router.push('/cliente/dashboard');
+            } else {
               setServerError(data.error || "Código inválido");
           }
       } catch (e) { setServerError("Erro de conexão."); }

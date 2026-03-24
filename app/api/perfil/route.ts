@@ -211,7 +211,10 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const userId = request.headers.get('x-user-id');
+  const { targetId, errorResponse } = await validateRequest(request);
+  if (errorResponse) return errorResponse;
+
+  const userId = targetId;
   const contextEmpresaId = request.headers.get('x-empresa-id');
   const body = await request.json();
 

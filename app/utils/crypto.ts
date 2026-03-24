@@ -1,30 +1,30 @@
 import crypto from 'crypto';
 
-// IMPORTANTE: Adicione ENCRYPTION_KEY no seu .env com exatamente 32 caracteres
-// Ex: ENCRYPTION_KEY=12345678901234567890123456789012
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '12345678901234567890123456789012'; // Fallback só pra dev
+const ENCRYPTION_KEY: Buffer = (() => {
+  const rawKey = process.env.ENCRYPTION_KEY;
+  if (!rawKey) {
+    throw new Error('FATAL: ENCRYPTION_KEY não definida no ambiente.');
+  }
+  if (Buffer.byteLength(rawKey, 'utf8') !== 32) {
+    throw new Error('FATAL: ENCRYPTION_KEY deve ter exatamente 32 bytes.');
+  }
+  return Buffer.from(rawKey, 'utf8');
+})();
+
 const IV_LENGTH = 16;
-
-if (process.env.NODE_ENV === 'production' && (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length !== 32)) {
-  throw new Error('FATAL: ENCRYPTION_KEY deve existir e ter exatamente 32 caracteres em produção.');
-}
-
-if (ENCRYPTION_KEY.length !== 32) {
-  throw new Error('ENCRYPTION_KEY inválida: a chave deve ter exatamente 32 caracteres.');
-}
 
 export function encrypt(text: string | null): string | null {
   if (!text) return null;
   
   try {
       const iv = crypto.randomBytes(IV_LENGTH);
-      const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+      const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
       let encrypted = cipher.update(text);
       encrypted = Buffer.concat([encrypted, cipher.final()]);
       return iv.toString('hex') + ':' + encrypted.toString('hex');
   } catch (e) {
       console.error("Erro ao criptografar:", e);
-      return text; // Em caso de erro grave, não perde o dado (mas não protege)
+      return null;
   }
 }
 
@@ -39,12 +39,11 @@ export function decrypt(text: string | null): string | null {
   try {
       const iv = Buffer.from(textParts[0], 'hex');
       const encryptedText = Buffer.from(textParts[1], 'hex');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+      const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
       let decrypted = decipher.update(encryptedText);
       decrypted = Buffer.concat([decrypted, decipher.final()]);
       return decrypted.toString();
   } catch (error) {
-      // Se a chave mudou ou o dado corrompeu, retorna o original para tentar salvar o dia
-      return text;
+      return null;
   }
 }

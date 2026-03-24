@@ -4,13 +4,15 @@ import { createLog } from '@/app/services/logger';
 import { EmissorFactory } from '@/app/services/emissor/factories/EmissorFactory';
 import { processarCancelamentoNota } from '@/app/services/notaProcessor';
 import { checkPlanLimits } from '@/app/services/planService'; // <--- IMPORTADO
+import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
   try {
-    // 1. Identificação do Usuário (Necessário para verificar plano)
-    const userId = request.headers.get('x-user-id');
+    const { targetId, errorResponse } = await validateRequest(request);
+    if (errorResponse) return errorResponse;
+    const userId = targetId;
     if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
     const { acao, vendaId, motivo } = await request.json();

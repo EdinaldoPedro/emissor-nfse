@@ -4,6 +4,7 @@ import { checkPlanLimits } from '@/app/services/planService';
 import { validateRequest } from '@/app/utils/api-security';
 import { getTributacaoPorCnae } from '@/app/utils/tributacao'; // <--- ADICIONE ESTA LINHA AQUI
 
+
 export const dynamic = 'force-dynamic';
 
 const prisma = new PrismaClient();

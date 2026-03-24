@@ -3,11 +3,14 @@ import { PrismaClient } from '@prisma/client';
 import JSZip from 'jszip';
 import zlib from 'zlib';
 import { checkPlanLimits } from '@/app/services/planService';
+import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
-    const userId = request.headers.get('x-user-id');
+    const { targetId, errorResponse } = await validateRequest(request);
+    if (errorResponse) return errorResponse;
+    const userId = targetId;
     if (!userId) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
 
     const planCheck = await checkPlanLimits(userId, 'VISUALIZAR');

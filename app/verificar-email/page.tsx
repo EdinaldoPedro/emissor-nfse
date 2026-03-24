@@ -22,13 +22,13 @@ export default function VerificarEmailPage() {
         if (!password) return alert("Digite sua senha para confirmar.");
 
         setLoading(true);
-        
-        try {
-            const res = await fetch('/api/auth/verify-email/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ newEmail, password })
-            });
+
+            try {
+                const res = await fetch('/api/auth/verify-email/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                });
             const data = await res.json();
             
             if (res.ok) {
