@@ -10,6 +10,7 @@ const ENCRYPTION_KEY: Buffer = (() => {
   }
   return Buffer.from(rawKey, 'utf8');
 })();
+const LEGACY_ENCRYPTION_KEY = Buffer.from('12345678901234567890123456789012', 'utf8');
 
 const IV_LENGTH = 16;
 
@@ -36,14 +37,20 @@ export function decrypt(text: string | null): string | null {
   // Se não tiver o formato iv:conteudo, assume que é dado legado (não criptografado) e retorna direto
   if (textParts.length !== 2) return text; 
 
-  try {
-      const iv = Buffer.from(textParts[0], 'hex');
-      const encryptedText = Buffer.from(textParts[1], 'hex');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+  const iv = Buffer.from(textParts[0], 'hex');
+  const encryptedText = Buffer.from(textParts[1], 'hex');
+
+  const keysToTry = [ENCRYPTION_KEY, LEGACY_ENCRYPTION_KEY];
+  for (const key of keysToTry) {
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
       let decrypted = decipher.update(encryptedText);
       decrypted = Buffer.concat([decrypted, decipher.final()]);
       return decrypted.toString();
-  } catch (error) {
-      return null;
+    } catch {
+      // tenta próxima chave
+    }
   }
+
+  return null;
 }
