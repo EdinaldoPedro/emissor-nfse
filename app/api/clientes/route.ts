@@ -131,14 +131,26 @@ export async function POST(request: Request) {
             if (!planCheck.allowed) return NextResponse.json({ error: "Limite de clientes atingido.", code: planCheck.status }, { status: 403 });
         }
 
-        const docLimpo = body.documento ? body.documento.replace(/\D/g, '') : '';
-        const cepLimpo = body.cep ? body.cep.replace(/\D/g, '') : null;
-
-        // === 1. FORÇA O TIPO CORRETO ===
+        // === 1. FORÇA O TIPO CORRETO E LIMPA O DOCUMENTO COM SUPORTE A NULO E EXT ===
         let tipoFinal = body.tipo;
-        if (!tipoFinal || tipoFinal === 'J' || tipoFinal === 'F' || tipoFinal === 'j' || tipoFinal === 'f') {
-            tipoFinal = docLimpo.length === 11 ? 'PF' : (docLimpo.length === 14 ? 'PJ' : 'EXT');
+        let docLimpo: string | null = null;
+
+        if (body.documento) {
+            if (tipoFinal === 'EXT') {
+                docLimpo = body.documento.trim(); // Permite letras no exterior
+            } else {
+                docLimpo = body.documento.replace(/\D/g, ''); // Apenas números no Brasil
+            }
         }
+        
+        // Se ficou vazio, força como NULO para o banco de dados (permite múltiplos nulos no @unique)
+        if (docLimpo === '') docLimpo = null;
+
+        if (!tipoFinal || tipoFinal === 'J' || tipoFinal === 'F' || tipoFinal === 'j' || tipoFinal === 'f') {
+            tipoFinal = (docLimpo && docLimpo.length === 11) ? 'PF' : (docLimpo && docLimpo.length === 14 ? 'PJ' : 'EXT');
+        }
+
+        const cepLimpo = body.cep ? body.cep.replace(/\D/g, '') : null;
 
         // === 2. RECUPERA IBGE FALTANTE ===
         let codigoIbgeFinal = body.codigoIbge;
@@ -147,11 +159,14 @@ export async function POST(request: Request) {
             if (ibgeEncontrado) codigoIbgeFinal = ibgeEncontrado;
         }
 
-        // 3. BUSCA O CLIENTE GLOBALMENTE NO BANCO
-        const clienteGlobal = await prisma.cliente.findUnique({
-            where: { documento: docLimpo },
-            include: { vinculos: { where: { empresaId: empresaIdAlvo } } }
-        });
+        // 3. BUSCA O CLIENTE GLOBALMENTE NO BANCO (APENAS SE TIVER DOCUMENTO VÁLIDO)
+        let clienteGlobal = null;
+        if (docLimpo) {
+            clienteGlobal = await prisma.cliente.findUnique({
+                where: { documento: docLimpo },
+                include: { vinculos: { where: { empresaId: empresaIdAlvo } } }
+            });
+        }
 
         if (clienteGlobal) {
             if (clienteGlobal.vinculos && clienteGlobal.vinculos.length > 0) {
@@ -172,11 +187,11 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: true, cliente: clienteVinculado }, { status: 201 });
         }
 
-        // 4. SE NÃO EXISTE GLOBALMENTE, CRIA DO ZERO BLINDADO
+        // 4. SE NÃO EXISTE GLOBALMENTE (OU É SEM DOCUMENTO), CRIA DO ZERO BLINDADO
         const novoCliente = await prisma.cliente.create({
             data: {
                 nome: body.nome,
-                documento: docLimpo,
+                documento: docLimpo, // Passa null em vez de '' se for vazio
                 tipo: tipoFinal,
                 email: body.email || null,
                 telefone: body.telefone ? body.telefone.replace(/\D/g, '') : null,
@@ -225,11 +240,21 @@ export async function PUT(request: Request) {
 
         if (!clienteAtual) return NextResponse.json({ error: 'Cliente não encontrado.' }, { status: 404 });
 
-        if (dadosAtualizacao.documento) {
-            dadosAtualizacao.documento = dadosAtualizacao.documento.replace(/\D/g, '');
-            // Força a atualização do tipo se estiver errado
-            if (!dadosAtualizacao.tipo || dadosAtualizacao.tipo === 'J' || dadosAtualizacao.tipo === 'F') {
-                dadosAtualizacao.tipo = dadosAtualizacao.documento.length === 11 ? 'PF' : 'PJ';
+        // === CORREÇÃO: Tratamento do Documento na Edição ===
+        if (dadosAtualizacao.documento !== undefined) {
+            if (clienteAtual.tipo === 'EXT' || dadosAtualizacao.tipo === 'EXT') {
+                dadosAtualizacao.documento = dadosAtualizacao.documento ? String(dadosAtualizacao.documento).trim() : null;
+            } else {
+                dadosAtualizacao.documento = dadosAtualizacao.documento ? String(dadosAtualizacao.documento).replace(/\D/g, '') : null;
+            }
+            
+            if (dadosAtualizacao.documento === '') dadosAtualizacao.documento = null;
+
+            // Força a atualização do tipo se estiver errado e não for EXT
+            if (dadosAtualizacao.documento && dadosAtualizacao.tipo !== 'EXT') {
+                if (!dadosAtualizacao.tipo || dadosAtualizacao.tipo === 'J' || dadosAtualizacao.tipo === 'F') {
+                    dadosAtualizacao.tipo = dadosAtualizacao.documento.length === 11 ? 'PF' : 'PJ';
+                }
             }
         }
         
@@ -251,9 +276,10 @@ export async function PUT(request: Request) {
         if ('updatedAt' in dadosAtualizacao) delete dadosAtualizacao.updatedAt;
         if ('_count' in dadosAtualizacao) delete dadosAtualizacao._count;
 
+        // Só verifica duplicidade se o documento NÃO for nulo
         if (dadosAtualizacao.documento && dadosAtualizacao.documento !== clienteAtual.documento) {
              const clienteGlobalExistente = await prisma.cliente.findUnique({ where: { documento: dadosAtualizacao.documento } });
-            if (clienteGlobalExistente) return NextResponse.json({ error: 'Este CPF/CNPJ já pertence a outro cadastro no sistema global.' }, { status: 400 });
+            if (clienteGlobalExistente) return NextResponse.json({ error: 'Este Documento já pertence a outro cadastro no sistema global.' }, { status: 400 });
         }
 
         const clienteAtualizado = await prisma.cliente.update({

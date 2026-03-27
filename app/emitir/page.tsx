@@ -362,32 +362,57 @@ function EmitirNotaContent() {
         fetch(`/api/vendas/${retryId}`, { 
             headers: {
                 'x-user-id': userId,
-                // 'Authorization' removido!
                 'x-empresa-id': contextId || ''
             }
         })
-            .then(async res => {
-                if (res.ok) {
-                    const venda = await res.json();
-                    const cnaeParaUsar = venda.cnaeRecuperado || venda.notas?.[0]?.cnae || "";
+        .then(async res => {
+            if (res.ok) {
+                const venda = await res.json();
+                
+                // Atraso de 800ms garante que a lista de clientes e perfil já carregaram antes de montar a tela
+                setTimeout(() => {
+                    const nota = venda.notas?.[0] || {};
+                    // Tenta encontrar o CNAE em todos os lugares possíveis onde o banco pode ter guardado
+                    const cnaeParaUsar = venda.codigoCnae || nota.codigoCnae || venda.cnaeRecuperado || nota.cnae || "";
+                    
+                    let dataFormatada = undefined;
+                    if (nota.dataCompetencia || venda.dataCompetencia) {
+                        const d = new Date(nota.dataCompetencia || venda.dataCompetencia);
+                        if (!isNaN(d.getTime())) {
+                            dataFormatada = d.toISOString().split('T')[0];
+                        }
+                    }
+
                     setNfData(prev => ({
                         ...prev,
                         clienteId: venda.clienteId, 
                         clienteNome: venda.cliente?.razaoSocial || venda.cliente?.nome || "Cliente", 
                         valor: String(venda.valor),
                         valorMoedaEstrangeira: venda.valorMoedaEstrangeira ? String(venda.valorMoedaEstrangeira) : "",
-                        servicoDescricao: venda.descricao,
-                        codigoCnae: cnaeParaUsar || prev.codigoCnae
+                        servicoDescricao: venda.descricao || nota.servicoDescricao || "",
+                        
+                        // Restauração blindada do CNAE e Impostos
+                        codigoCnae: cnaeParaUsar || prev.codigoCnae,
+                        aliquota: nota.aliquota || venda.aliquota || prev.aliquota,
+                        issRetido: nota.issRetido !== undefined ? nota.issRetido : (venda.issRetido !== undefined ? venda.issRetido : prev.issRetido),
+                        inssRetido: nota.inssRetido !== undefined ? nota.inssRetido : prev.inssRetido,
+                        dataCompetencia: dataFormatada || prev.dataCompetencia
                     }));
-                    setTimeout(() => setStep(3), 500);
-                    setStep(3); 
-                } else {
-                    const erro = await res.json();
-                    dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao recuperar dados da venda." });
-                }
-            })
-            .catch(() => dialog.showAlert({ type: 'danger', description: "Erro de conexão ao recuperar dados." }))
-            .finally(() => setLoadingRetry(false));
+                    
+                    setStep(3); // Pula para o passo 3 só DEPOIS de preencher tudo
+                    setLoadingRetry(false); // Remove a tela de carregamento
+                }, 800); 
+                
+            } else {
+                const erro = await res.json();
+                dialog.showAlert({ type: 'danger', description: erro.error || "Erro ao recuperar dados da venda." });
+                setLoadingRetry(false);
+            }
+        })
+        .catch(() => {
+            dialog.showAlert({ type: 'danger', description: "Erro de conexão ao recuperar dados." });
+            setLoadingRetry(false);
+        });
     }
   }, [router, retryId]);
 
@@ -538,9 +563,17 @@ function EmitirNotaContent() {
                         <Link href="/cliente" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold inline-block hover:bg-blue-700">Cadastrar Primeiro Cliente</Link>
                     </div>
                 ) : (
+                    // Para os Clientes:
                     <select className="w-full p-3 border rounded-lg bg-slate-50 outline-blue-500 text-slate-700 font-medium" value={nfData.clienteId} onChange={(e) => { const selected = clientes.find(c => c.id === e.target.value); setNfData({ ...nfData, clienteId: e.target.value, clienteNome: selected?.nome || "" }); }}>
                         <option value="">-- Selecione na lista --</option>
-                        {clientes.map(cliente => (<option key={cliente.id} value={cliente.id}>{cliente.nome} ({cliente.documento || 'Exterior'})</option>))}
+                        {clientes.map(cliente => {
+                            const nomeCurto = cliente.nome.length > 60 ? cliente.nome.substring(0, 60) + '...' : cliente.nome;
+                            return (
+                                <option key={cliente.id} value={cliente.id}>
+                                    {nomeCurto} ({cliente.documento || 'Exterior'})
+                                </option>
+                            );
+                        })}
                     </select>
                 )}
             </div>
@@ -555,7 +588,14 @@ function EmitirNotaContent() {
                 <label className="block text-sm font-bold text-yellow-800 mb-2 flex items-center gap-2"><Briefcase size={18} /> Atividade Econômica (CNAE)</label>
                 <select className="w-full p-3 border rounded-lg bg-white outline-blue-500 text-slate-700" value={nfData.codigoCnae} onChange={(e) => setNfData({...nfData, codigoCnae: e.target.value})}>
                     {!nfData.codigoCnae && <option value="">Selecione uma atividade...</option>}
-                    {meusCnaes.map(cnae => (<option key={cnae.id} value={cnae.codigo}>{cnae.codigo} - {cnae.descricao}</option>))}
+                    {meusCnaes.map(cnae => {
+                        const descCurta = cnae.descricao.length > 60 ? cnae.descricao.substring(0, 60) + '...' : cnae.descricao;
+                        return (
+                            <option key={cnae.id} value={cnae.codigo}>
+                                {cnae.codigo} - {descCurta}
+                            </option>
+                        );
+                    })}
                 </select>
             </div>
 

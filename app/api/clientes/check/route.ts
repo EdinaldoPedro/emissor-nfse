@@ -10,13 +10,18 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const docLimpo = body.documento?.replace(/\D/g, '');
+    let docLimpo = body.documento;
+    
+    // Trata corretamente exterior vs nacional
+    if (body.tipo === 'EXT') {
+        docLimpo = docLimpo?.trim();
+    } else {
+        docLimpo = docLimpo?.replace(/\D/g, '');
+    }
 
-    if (!docLimpo) return NextResponse.json(null, { status: 400 });
+    // Se estiver vazio, não busca (retorna null imediatamente permitindo o cadastro)
+    if (!docLimpo || docLimpo === '') return NextResponse.json(null); 
 
-    // === NOVA LÓGICA: INTELIGÊNCIA COLETIVA GLOBAL ===
-    // Em vez de buscar apenas nos vínculos da empresa, buscamos em todo o SaaS.
-    // Pegamos sempre o cadastro que foi atualizado por último (o mais recente).
     const clienteGlobal = await prisma.cliente.findFirst({
       where: { documento: docLimpo },
       orderBy: { updatedAt: 'desc' }

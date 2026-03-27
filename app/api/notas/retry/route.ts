@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
+import { validateRequest } from '@/app/utils/api-security';
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
-  const userId = request.headers.get('x-user-id');
+  const { targetId, errorResponse } = await validateRequest(request);
+  if (errorResponse) return errorResponse;
+  const userId = targetId;
   
   try {
     const { vendaId, dadosAtualizados } = await request.json();
