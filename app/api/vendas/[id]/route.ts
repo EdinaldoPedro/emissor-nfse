@@ -20,7 +20,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
           cliente: true,
           notas: true,
           logs: {
-              where: { action: 'DPS_GERADA' },
+              where: { action: 'EMISSAO_INICIADA' }, // <--- CORREÇÃO 1: Nome da Ação do Log
               orderBy: { createdAt: 'desc' },
               take: 1
           }
@@ -29,7 +29,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
     if (!venda) return NextResponse.json({ error: 'Venda não encontrada' }, { status: 404 });
 
-    // 2. Validação de Acesso Flexível (Admin, Dono ou Contador)
+    // 2. Validação de Acesso Flexível
     const user = await prisma.user.findUnique({ where: { id: targetId }});
     const isStaff = ['MASTER', 'ADMIN', 'SUPORTE', 'SUPORTE_TI'].includes(user?.role || '');
 
@@ -37,13 +37,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
     if (isStaff) {
         hasAccess = true;
     } else if (contextId && venda.empresaId === contextId) {
-        // Se for contador acessando a empresa do cliente
         const vinculo = await prisma.contadorVinculo.findUnique({
             where: { contadorId_empresaId: { contadorId: targetId, empresaId: contextId } }
         });
         if (vinculo && vinculo.status === 'APROVADO') hasAccess = true;
     } else if (venda.empresaId === user?.empresaId) {
-        // Se for o próprio dono da empresa
         hasAccess = true;
     }
 
@@ -51,29 +49,66 @@ export async function GET(request: Request, { params }: { params: { id: string }
         return NextResponse.json({ error: 'Não autorizado a ver esta venda.' }, { status: 403 });
     }
 
-    // --- LÓGICA DE RECUPERAÇÃO DE DADOS ---
+    // --- LÓGICA DE RECUPERAÇÃO DE DADOS (CORREÇÃO 2: Puxar TUDO) ---
     let cnaeRecuperado = null;
+    let valorMoedaEstrangeira = null;
+    let issRetido = null;
+    let inssRetido = null;
+    let aliquota = null;
+    let dataCompetencia = null;
     
-    // 1. Tenta pegar da Nota Fiscal (se existir)
-    if (venda.notas.length > 0 && venda.notas[0].cnae) {
-        cnaeRecuperado = venda.notas[0].cnae;
-    } 
-    // 2. Se falhou antes de criar nota, tenta pegar do LOG
-    else if (venda.logs.length > 0 && venda.logs[0].details) {
+    if (venda.logs.length > 0 && venda.logs[0].details) {
         try {
-            let details = venda.logs[0].details;
+            let details: any = venda.logs[0].details; // Forçamos o início como any
+            
             if (typeof details === 'string') {
                 try { 
                     const parsed = JSON.parse(details); 
-                    details = (typeof parsed === 'string') ? JSON.parse(parsed) : parsed;
+                    // Se o resultado do parse for um objeto, usamos ele, senão mantemos o original
+                    details = (parsed && typeof parsed === 'object') ? parsed : details;
+                    
+                    // Tratamento para JSON duplo (comum em alguns bancos de dados)
+                    if (typeof details === 'string') {
+                        details = JSON.parse(details);
+                    }
                 } catch(e) {}
             }
-            // @ts-ignore
-            cnaeRecuperado = details?.servico?.codigoCnae || null;
-        } catch (e) { console.error("Erro parse log", e); }
+            
+            // Agora o TypeScript não vai reclamar, pois 'details' é tratado como objeto/any
+            const payload = details?.payloadOriginal || details;
+
+            // Extrai todos os campos extras que não ficam na tabela Venda
+            if (payload?.servico) {
+                if (!cnaeRecuperado) cnaeRecuperado = payload.servico.cnae || payload.servico.codigoCnae || null;
+                valorMoedaEstrangeira = payload.servico.valorMoedaEstrangeira || null;
+                issRetido = payload.servico.issRetido;
+                aliquota = payload.servico.aliquota;
+                
+                // PIS, COFINS, CSLL e IR (Adicionando a recuperação para o Corrigir)
+                // Se esses campos existirem no seu payload original, eles serão restaurados aqui
+                if (payload.servico.retencoes) {
+                    inssRetido = payload.servico.retencoes.inss?.retido || payload.servico.inssRetido;
+                    // Você pode adicionar PIS/COFINS aqui se o seu nfData já os suportar
+                }
+            }
+            if (payload?.dataCompetencia) {
+                dataCompetencia = payload.dataCompetencia;
+            }
+        } catch (e) { 
+            console.error("Erro ao processar log de recuperação:", e); 
+        }
     }
 
-    return NextResponse.json({ ...venda, cnaeRecuperado });
+    // Retorna todos os dados "injetados" na venda para o Frontend
+    return NextResponse.json({ 
+        ...venda, 
+        cnaeRecuperado,
+        valorMoedaEstrangeira,
+        issRetido,
+        inssRetido,
+        aliquota,
+        dataCompetencia
+    });
 
   } catch (error) {
     return NextResponse.json({ error: 'Erro ao buscar venda' }, { status: 500 });
