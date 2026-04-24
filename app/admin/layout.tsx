@@ -16,12 +16,40 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
-    const role = localStorage.getItem('userRole');
-    if (!checkIsStaff(role)) {
-      router.push('/login');
-    } else {
-      setAuthorized(true);
-    }
+    let active = true;
+
+    const validateAccess = async () => {
+      try {
+        const res = await fetch('/api/perfil', { cache: 'no-store' });
+        if (!res.ok) {
+          router.push('/login');
+          return;
+        }
+
+        const data = await res.json();
+        if (!checkIsStaff(data.role)) {
+          router.push('/login');
+          return;
+        }
+
+        localStorage.setItem('userRole', data.role);
+        if (data.id || data.userId) {
+          localStorage.setItem('userId', data.id || data.userId);
+        }
+
+        if (active) {
+          setAuthorized(true);
+        }
+      } catch {
+        router.push('/login');
+      }
+    };
+
+    validateAccess();
+
+    return () => {
+      active = false;
+    };
   }, [router]);
 
   if (!authorized) return null;

@@ -1,12 +1,9 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
-import bcrypt from 'bcryptjs'; 
-import { registrarEventoCrm } from '@/app/services/crmService'; // <--- IMPORTAÇÃO DO CRM
+import { registrarEventoCrm } from '@/app/services/crmService';
+import { prisma } from '@/app/utils/prisma';
 
-const prisma = new PrismaClient();
-
-// GET: Lista usuários
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser(request);
   if (!user) return unauthorized();
@@ -14,150 +11,223 @@ export async function GET(request: Request) {
   if (!isStaff) return forbidden();
 
   const users = await prisma.user.findMany({
-    include: { 
-        empresa: true,
-        // Correção aqui: O nome correto no banco é historicoPlanos
-        historicoPlanos: { where: { status: 'ATIVO' }, include: { plan: true } } 
+    include: {
+      empresa: true,
+      historicoPlanos: { where: { status: 'ATIVO' }, include: { plan: true } },
     },
-    orderBy: { createdAt: 'desc' }
+    orderBy: { createdAt: 'desc' },
   });
-  
-  // Removemos a senha por segurança e mapeamos historicoPlanos de volta para planHistories (que o Frontend espera)
-  const safeUsers = users.map(u => { 
-      // @ts-ignore
-      const { senha, historicoPlanos, ...rest } = u; 
-      return { ...rest, planHistories: historicoPlanos }; 
+
+  const safeUsers = users.map((u) => {
+    // @ts-ignore
+    const { senha, historicoPlanos, ...rest } = u;
+    return { ...rest, planHistories: historicoPlanos };
   });
-  
+
   return NextResponse.json(safeUsers);
 }
 
-// PUT: Edição Inteligente com Auditoria e Segurança
 export async function PUT(request: Request) {
   const userAuth = await getAuthenticatedUser(request);
   if (!userAuth) return unauthorized();
-
   if (!['MASTER', 'ADMIN'].includes(userAuth.role)) return forbidden();
 
   try {
     const body = await request.json();
 
-    // === 0. VALIDAÇÃO DE SEGURANÇA ===
     if (body.plano) {
-        if (!body.adminPassword || !body.justification) {
-            return NextResponse.json({ error: 'Senha e justificativa são obrigatórios.' }, { status: 400 });
-        }
-        const adminDb = await prisma.user.findUnique({ where: { id: userAuth.id } });
-        if (!adminDb) return unauthorized();
+      if (!body.adminPassword || !body.justification) {
+        return NextResponse.json({ error: 'Senha e justificativa sÃ£o obrigatÃ³rios.' }, { status: 400 });
+      }
+      const adminDb = await prisma.user.findUnique({ where: { id: userAuth.id } });
+      if (!adminDb) return unauthorized();
 
-        const senhaValida = await bcrypt.compare(body.adminPassword, adminDb.senha);
-        if (!senhaValida) return NextResponse.json({ error: 'Senha incorreta.' }, { status: 403 });
+      const senhaValida = await bcrypt.compare(body.adminPassword, adminDb.senha);
+      if (!senhaValida) return NextResponse.json({ error: 'Senha incorreta.' }, { status: 403 });
     }
 
-    // 1. Resetar E-mail
     if (body.resetEmail) {
-        const tempPlaceholder = `reset_${Date.now()}_${body.id.substring(0,5)}@sistema.temp`;
-        await prisma.user.update({ where: { id: body.id }, data: { email: tempPlaceholder } });
-        
-        await registrarEventoCrm(body.id, 'SISTEMA', 'E-mail Resetado', `O Admin resetou o e-mail de acesso.`); // <--- GATILHO CRM
-        return NextResponse.json({ success: true, message: "E-mail resetado." });
+      const tempPlaceholder = `reset_${Date.now()}_${body.id.substring(0, 5)}@sistema.temp`;
+      await prisma.user.update({ where: { id: body.id }, data: { email: tempPlaceholder } });
+
+      await registrarEventoCrm(body.id, 'SISTEMA', 'E-mail Resetado', 'O Admin resetou o e-mail de acesso.');
+      return NextResponse.json({ success: true, message: 'E-mail resetado.' });
     }
-    
-    // 2. Desvincular Empresa
+
     if (body.unlinkCompany) {
-        await prisma.user.update({ where: { id: body.id }, data: { empresaId: null } });
-        await registrarEventoCrm(body.id, 'SISTEMA', 'Empresa Desvinculada', `A empresa foi desvinculada manualmente.`); // <--- GATILHO CRM
-        return NextResponse.json({ success: true, message: "Empresa desvinculada." });
+      await prisma.user.update({ where: { id: body.id }, data: { empresaId: null } });
+      await registrarEventoCrm(body.id, 'SISTEMA', 'Empresa Desvinculada', 'A empresa foi desvinculada manualmente.');
+      return NextResponse.json({ success: true, message: 'Empresa desvinculada.' });
     }
 
-    // 3. Trocar CNPJ
     if (body.newCnpj) {
-        const cnpjLimpo = body.newCnpj.replace(/\D/g, '');
-        if(cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ Inválido' }, { status: 400 });
+      const cnpjLimpo = body.newCnpj.replace(/\D/g, '');
+      if (cnpjLimpo.length !== 14) return NextResponse.json({ error: 'CNPJ InvÃ¡lido' }, { status: 400 });
 
-        const empresaExistente = await prisma.empresa.findUnique({ where: { documento: cnpjLimpo }, include: { donoUser: true } });
+      const empresaExistente = await prisma.empresa.findUnique({
+        where: { documento: cnpjLimpo },
+        include: { donoUser: true },
+      });
 
-        if (empresaExistente) {
-            if (empresaExistente.donoUser && empresaExistente.donoUser.id !== body.id) {
-                return NextResponse.json({ error: `CNPJ pertence a ${empresaExistente.donoUser.nome}.` }, { status: 409 });
-            }
-            await prisma.user.update({ where: { id: body.id }, data: { empresaId: empresaExistente.id } });
-            await registrarEventoCrm(body.id, 'SISTEMA', 'Novo Vínculo PJ', `O cliente foi vinculado ao CNPJ ${cnpjLimpo}.`); // <--- GATILHO CRM
-            return NextResponse.json({ success: true, message: "Usuário vinculado." });
-        } else {
-            if (body.empresaId) {
-                await prisma.empresa.update({ where: { id: body.empresaId }, data: { documento: cnpjLimpo } });
-                return NextResponse.json({ success: true, message: "CNPJ atualizado." });
-            } else {
-                return NextResponse.json({ error: "Empresa não encontrada." }, { status: 400 });
-            }
+      if (empresaExistente) {
+        if (empresaExistente.donoUser && empresaExistente.donoUser.id !== body.id) {
+          return NextResponse.json({ error: `CNPJ pertence a ${empresaExistente.donoUser.nome}.` }, { status: 409 });
         }
+        await prisma.user.update({ where: { id: body.id }, data: { empresaId: empresaExistente.id } });
+        await registrarEventoCrm(body.id, 'SISTEMA', 'Novo VÃ­nculo PJ', `O cliente foi vinculado ao CNPJ ${cnpjLimpo}.`);
+        return NextResponse.json({ success: true, message: 'UsuÃ¡rio vinculado.' });
+      }
+
+      if (body.empresaId) {
+        await prisma.empresa.update({ where: { id: body.empresaId }, data: { documento: cnpjLimpo } });
+        return NextResponse.json({ success: true, message: 'CNPJ atualizado.' });
+      }
+
+      return NextResponse.json({ error: 'Empresa nÃ£o encontrada.' }, { status: 400 });
     }
 
-    // === 4. LÓGICA DE PLANOS (MANUAL) ===
     if (body.plano) {
-        const userAlvo = await prisma.user.findUnique({ where: { id: body.id } });
-        await prisma.systemLog.create({
-            data: {
-                level: 'WARN', action: 'MANUAL_PLAN_CHANGE',
-                message: `Alteração manual de plano para: ${userAlvo?.nome}`,
-                details: JSON.stringify({ adminId: userAuth.id, newPlan: body.plano, justification: body.justification })
-            }
-        });
+      const userAlvo = await prisma.user.findUnique({ where: { id: body.id } });
+      await prisma.systemLog.create({
+        data: {
+          level: 'WARN',
+          action: 'MANUAL_PLAN_CHANGE',
+          message: `AlteraÃ§Ã£o manual de plano para: ${userAlvo?.email || userAlvo?.nome}`,
+          details: JSON.stringify({
+            adminId: userAuth.id,
+            newPlan: body.plano,
+            planCycle: body.planoCiclo,
+            justification: body.justification,
+          }),
+        },
+      });
 
-        if (body.plano === 'SUSPENDED') {
-            await prisma.planHistory.updateMany({ where: { userId: body.id, status: 'ATIVO' }, data: { status: 'CANCELADO_ADM', dataFim: new Date() } });
-            await prisma.user.update({ where: { id: body.id }, data: { plano: 'SEM_PLANO', planoStatus: 'suspended', planoExpiresAt: new Date() } });
-            
-            await registrarEventoCrm(body.id, 'FINANCEIRO', 'Plano Suspenso', `Justificativa do Admin: ${body.justification}`); // <--- GATILHO CRM
-            return NextResponse.json({ success: true, message: "Acesso suspenso." });
-        }
-
-        const novoPlano = await prisma.plan.findUnique({ where: { slug: body.plano } });
-        if (!novoPlano) return NextResponse.json({ error: 'Plano não encontrado.' }, { status: 404 });
-
-        const dataFimFinal = body.planoCiclo === 'ANUAL' ? new Date(new Date().setFullYear(new Date().getFullYear() + 1)) : new Date(new Date().setDate(new Date().getDate() + 30));
-        
-        await prisma.planHistory.updateMany({ where: { userId: body.id, status: 'ATIVO' }, data: { status: 'FINALIZADO', dataFim: new Date() } });
-        await prisma.planHistory.create({
-            data: { userId: body.id, planId: novoPlano.id, status: 'ATIVO', dataInicio: new Date(), dataFim: dataFimFinal, notasEmitidas: 0 }
+      if (body.plano === 'SUSPENDED') {
+        await prisma.planHistory.updateMany({
+          where: { userId: body.id, status: 'ATIVO' },
+          data: { status: 'CANCELADO_ADM', dataFim: new Date() },
         });
         await prisma.user.update({
-            where: { id: body.id },
-            data: { plano: novoPlano.slug, planoStatus: 'active', planoExpiresAt: dataFimFinal, planoCiclo: body.planoCiclo || 'MENSAL' }
+          where: { id: body.id },
+          data: { plano: 'SEM_PLANO', planoStatus: 'suspended', planoExpiresAt: new Date() },
         });
 
-        await registrarEventoCrm(body.id, 'FINANCEIRO', 'Plano Alterado', `Mudou para o plano ${novoPlano.name}. Justificativa: ${body.justification}`); // <--- GATILHO CRM
-        return NextResponse.json({ success: true, message: "Plano atualizado." });
+        await registrarEventoCrm(body.id, 'FINANCEIRO', 'Plano Suspenso', `Justificativa do Admin: ${body.justification}`);
+        return NextResponse.json({ success: true, message: 'Acesso suspenso.' });
+      }
+
+      const novoPlano = await prisma.plan.findUnique({ where: { slug: body.plano } });
+      if (!novoPlano) return NextResponse.json({ error: 'Plano nÃ£o encontrado.' }, { status: 404 });
+
+      if (novoPlano.tipo === 'PLANO') {
+        const dataFimFinal =
+          body.planoCiclo === 'ANUAL'
+            ? new Date(new Date().setFullYear(new Date().getFullYear() + 1))
+            : new Date(new Date().setDate(new Date().getDate() + 30));
+
+        const historicosAtivos = await prisma.planHistory.findMany({
+          where: { userId: body.id, status: 'ATIVO' },
+          include: { plan: true },
+        });
+
+        await Promise.all(
+          historicosAtivos
+            .filter((hist) => hist.plan.tipo === 'PLANO')
+            .map((hist) =>
+              prisma.planHistory.update({
+                where: { id: hist.id },
+                data: { status: 'FINALIZADO', dataFim: new Date() },
+              }),
+            ),
+        );
+
+        await prisma.planHistory.create({
+          data: {
+            userId: body.id,
+            planId: novoPlano.id,
+            status: 'ATIVO',
+            dataInicio: new Date(),
+            dataFim: dataFimFinal,
+            notasEmitidas: 0,
+          },
+        });
+
+        await prisma.user.update({
+          where: { id: body.id },
+          data: {
+            plano: novoPlano.slug,
+            planoStatus: 'active',
+            planoExpiresAt: dataFimFinal,
+            planoCiclo: body.planoCiclo || 'MENSAL',
+          },
+        });
+
+        await registrarEventoCrm(
+          body.id,
+          'FINANCEIRO',
+          'Plano Alterado',
+          `Mudou para o plano ${novoPlano.name}. Justificativa: ${body.justification}`,
+        );
+        return NextResponse.json({ success: true, message: 'Plano atualizado.' });
+      }
+
+      await prisma.planHistory.create({
+        data: {
+          userId: body.id,
+          planId: novoPlano.id,
+          status: 'ATIVO',
+          dataInicio: new Date(),
+          dataFim: null,
+          notasEmitidas: 0,
+        },
+      });
+
+      if (novoPlano.tipo === 'PACOTE_PJ') {
+        await prisma.user.update({
+          where: { id: body.id },
+          data: {
+            empresasAdicionais: { increment: 1 },
+          },
+        });
+      }
+
+      await registrarEventoCrm(
+        body.id,
+        'FINANCEIRO',
+        'Pacote Manual Adicionado',
+        `Pacote ${novoPlano.name} liberado manualmente. Justificativa: ${body.justification}`,
+      );
+      return NextResponse.json({ success: true, message: 'Pacote adicionado com sucesso.' });
     }
 
-    // === 5. PROMOÇÃO DE CARGO ===
     const dataToUpdate: any = {};
     if (body.role) {
-        dataToUpdate.role = body.role;
+      dataToUpdate.role = body.role;
 
-        if (body.role === 'CONTADOR') {
-            const planoParceiro = await prisma.plan.findUnique({ where: { slug: 'PARCEIRO' } });
-            if (planoParceiro) {
-                await prisma.planHistory.updateMany({ where: { userId: body.id, status: 'ATIVO' }, data: { status: 'FINALIZADO', dataFim: new Date() } });
-                await prisma.planHistory.create({
-                    data: { userId: body.id, planId: planoParceiro.id, status: 'ATIVO', dataInicio: new Date(), dataFim: null, notasEmitidas: 0 }
-                });
-                dataToUpdate.plano = 'PARCEIRO';
-                dataToUpdate.planoStatus = 'active';
-                dataToUpdate.planoCiclo = 'ANUAL';
-            }
-            await registrarEventoCrm(body.id, 'SISTEMA', 'Conta Promovida a Contador', 'O utilizador agora é um Contador Parceiro.'); // <--- GATILHO CRM
+      if (body.role === 'CONTADOR') {
+        const planoParceiro = await prisma.plan.findUnique({ where: { slug: 'PARCEIRO' } });
+        if (planoParceiro) {
+          await prisma.planHistory.updateMany({
+            where: { userId: body.id, status: 'ATIVO' },
+            data: { status: 'FINALIZADO', dataFim: new Date() },
+          });
+          await prisma.planHistory.create({
+            data: { userId: body.id, planId: planoParceiro.id, status: 'ATIVO', dataInicio: new Date(), dataFim: null, notasEmitidas: 0 },
+          });
+          dataToUpdate.plano = 'PARCEIRO';
+          dataToUpdate.planoStatus = 'active';
+          dataToUpdate.planoCiclo = 'ANUAL';
         }
+        await registrarEventoCrm(body.id, 'SISTEMA', 'Conta Promovida a Contador', 'O utilizador agora Ã© um Contador Parceiro.');
+      }
     }
 
     if (Object.keys(dataToUpdate).length > 0) {
-        await prisma.user.update({ where: { id: body.id }, data: dataToUpdate });
-        return NextResponse.json({ success: true });
+      await prisma.user.update({ where: { id: body.id }, data: dataToUpdate });
+      return NextResponse.json({ success: true });
     }
-    
-    return NextResponse.json({ success: true });
 
+    return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

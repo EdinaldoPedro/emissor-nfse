@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { signJWT } from '@/app/utils/auth';
 import { cookies } from 'next/headers';
 import { checkRateLimit } from '@/app/utils/rate-limit';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/utils/prisma';
 
 export async function POST(request: Request) {
   
@@ -22,9 +20,9 @@ export async function POST(request: Request) {
         const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
         
         // Regra 1: Max 10 tentativas por IP a cada 15 minutos
-        const ipAllowed = checkRateLimit(`login_ip_${ip}`, 10, 15 * 60 * 1000);
+        const ipAllowed = await checkRateLimit(`login_ip_${ip}`, 10, 15 * 60 * 1000);
         // Regra 2: Max 5 tentativas para o mesmo E-mail a cada 15 minutos
-        const emailAllowed = checkRateLimit(`login_email_${login}`, 5, 15 * 60 * 1000);
+        const emailAllowed = await checkRateLimit(`login_email_${login}`, 5, 15 * 60 * 1000);
 
         if (!ipAllowed || !emailAllowed) {
             return NextResponse.json({ 

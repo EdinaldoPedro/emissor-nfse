@@ -1,89 +1,108 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { isAdminRole } from '@/app/utils/access-control';
+import { prisma } from '@/app/utils/prisma';
 
-const prisma = new PrismaClient();
+async function ensureAdmin(request: Request) {
+  const user = await getAuthenticatedUser(request);
+  if (!user) return unauthorized();
+  if (!isAdminRole(user.role)) return forbidden();
+  return null;
+}
 
-// GET: Lista todos os cupons para o seu Dashboard e Relatórios
 export async function GET(request: Request) {
-    try {
-        // SEGURANÇA TEMPORARIAMENTE DESATIVADA PARA TESTE
-        const cupons = await prisma.cupom.findMany({
-            orderBy: { createdAt: 'desc' },
-            include: { 
-                _count: { select: { logs: true } },
-                // AQUI ESTÁ A MÁGICA: Trazemos o histórico completo do CRM!
-                logs: {
-                    include: {
-                        user: {
-                            select: { nome: true, email: true }
-                        },
-                        fatura: {
-                            select: { id: true, status: true, valorTotal: true }
-                        }
-                    },
-                    orderBy: { createdAt: 'desc' }
-                }
-            }
-        });
+  const authError = await ensureAdmin(request);
+  if (authError) return authError;
 
-        return NextResponse.json(cupons);
-    } catch (error) {
-        console.error("Erro ao buscar cupons:", error);
-        return NextResponse.json({ error: 'Erro ao listar cupons' }, { status: 500 });
-    }
+  try {
+    const cupons = await prisma.cupom.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: { select: { logs: true } },
+        logs: {
+          include: {
+            user: {
+              select: { nome: true, email: true },
+            },
+            fatura: {
+              select: { id: true, status: true, valorTotal: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    return NextResponse.json(cupons);
+  } catch (error) {
+    console.error('Erro ao buscar cupons:', error);
+    return NextResponse.json({ error: 'Erro ao listar cupons' }, { status: 500 });
+  }
 }
 
-// POST: Cria um novo cupom com todas as nossas travas
 export async function POST(request: Request) {
-    try {
-        // SEGURANÇA TEMPORARIAMENTE DESATIVADA PARA TESTE
-        const body = await request.json();
-        const { 
-            codigo, tipoDesconto, valorDesconto, aplicarEm, 
-            maxCiclos, limiteUsos, validade, parceiroNome,
-            planosValidos, apenasPrimeiraCompra // <--- NOVOS CAMPOS AQUI
-        } = body;
+  const authError = await ensureAdmin(request);
+  if (authError) return authError;
 
-        const novoCupom = await prisma.cupom.create({
-            data: {
-                codigo: codigo.toUpperCase().trim(),
-                tipoDesconto,
-                valorDesconto: parseFloat(valorDesconto),
-                aplicarEm,
-                maxCiclos: maxCiclos ? parseInt(maxCiclos) : null,
-                limiteUsos: limiteUsos ? parseInt(limiteUsos) : null,
-                validade: validade ? new Date(validade) : null, // A DATA AGORA ENTRA AQUI
-                parceiroNome,
-                planosValidos, // <--- SALVANDO OS PLANOS DO CONTAINER
-                apenasPrimeiraCompra: apenasPrimeiraCompra || false // <--- SALVANDO A TRAVA DE 1ª COMPRA
-            }
-        });
+  try {
+    const body = await request.json();
+    const {
+      codigo,
+      tipoDesconto,
+      valorDesconto,
+      aplicarEm,
+      maxCiclos,
+      limiteUsos,
+      validade,
+      parceiroNome,
+      planosValidos,
+      apenasPrimeiraCompra,
+    } = body;
 
-        return NextResponse.json(novoCupom);
-    } catch (error) {
-        console.error("Erro ao criar cupom:", error);
-        return NextResponse.json({ error: 'Erro ao criar cupom. Verifique se o código já existe.' }, { status: 400 });
-    }
+    const novoCupom = await prisma.cupom.create({
+      data: {
+        codigo: codigo.toUpperCase().trim(),
+        tipoDesconto,
+        valorDesconto: parseFloat(valorDesconto),
+        aplicarEm,
+        maxCiclos: maxCiclos ? parseInt(maxCiclos) : null,
+        limiteUsos: limiteUsos ? parseInt(limiteUsos) : null,
+        validade: validade ? new Date(validade) : null,
+        parceiroNome,
+        planosValidos,
+        apenasPrimeiraCompra: apenasPrimeiraCompra || false,
+      },
+    });
+
+    return NextResponse.json(novoCupom);
+  } catch (error) {
+    console.error('Erro ao criar cupom:', error);
+    return NextResponse.json(
+      { error: 'Erro ao criar cupom. Verifique se o cÃ³digo jÃ¡ existe.' },
+      { status: 400 },
+    );
+  }
 }
 
-// DELETE: Apaga um cupom do banco de dados
 export async function DELETE(request: Request) {
-    try {
-        // Pega o ID da URL (ex: /api/admin/cupons?id=123)
-        const { searchParams } = new URL(request.url);
-        const id = searchParams.get('id');
+  const authError = await ensureAdmin(request);
+  if (authError) return authError;
 
-        if (!id) {
-            return NextResponse.json({ error: 'ID do cupom não fornecido' }, { status: 400 });
-        }
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
 
-        await prisma.cupom.delete({
-            where: { id }
-        });
-
-        return NextResponse.json({ success: true, message: 'Cupom apagado com sucesso' });
-    } catch (error) {
-        console.error("Erro ao deletar cupom:", error);
-        return NextResponse.json({ error: 'Erro ao apagar cupom' }, { status: 500 });
+    if (!id) {
+      return NextResponse.json({ error: 'ID do cupom nÃ£o fornecido' }, { status: 400 });
     }
+
+    await prisma.cupom.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({ success: true, message: 'Cupom apagado com sucesso' });
+  } catch (error) {
+    console.error('Erro ao deletar cupom:', error);
+    return NextResponse.json({ error: 'Erro ao apagar cupom' }, { status: 500 });
+  }
 }

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
-
-const prisma = new PrismaClient();
+import { getAuthenticatedUser, forbidden, unauthorized } from '@/app/utils/api-middleware';
+import { isSupportRole } from '@/app/utils/access-control';
+import { prisma } from '@/app/utils/prisma';
 
 function extractTag(xml: string, tag: string) {
     const match = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\/${tag}>`));
@@ -15,6 +15,10 @@ function extractFullTag(xml: string, tag: string) {
 }
 
 export async function POST(request: Request) {
+    const user = await getAuthenticatedUser(request);
+    if (!user) return unauthorized();
+    if (!isSupportRole(user.role)) return forbidden();
+
     try {
         const { vendaId } = await request.json();
 
@@ -23,17 +27,15 @@ export async function POST(request: Request) {
             include: { logs: { orderBy: { createdAt: 'desc' }, take: 10 } }
         });
 
-        if (!venda) return NextResponse.json({ error: "Venda não encontrada" });
+        if (!venda) return NextResponse.json({ error: "Venda nÃ£o encontrada" });
 
         let xml = '';
-        
-        // Encontra um log que tenha XML
         const logComXml = venda.logs.find(l => 
             l.details && typeof l.details === 'string' && l.details.includes('<DPS')
         );
 
-        if (logComXml && logComXml.details) { // CORREÇÃO: Garante que details existe
-            const details = logComXml.details; // Atribui a uma const para o TS entender que é string
+        if (logComXml && logComXml.details) {
+            const details = logComXml.details;
 
             if (details.startsWith('{')) {
                 try {
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
             }
         }
 
-        if (!xml) return NextResponse.json({ error: "XML não encontrado." });
+        if (!xml) return NextResponse.json({ error: "XML nÃ£o encontrado." });
 
         const signatureValueBase64 = extractTag(xml, 'SignatureValue');
         const x509Certificate = extractTag(xml, 'X509Certificate');
@@ -61,7 +63,6 @@ export async function POST(request: Request) {
         const certPem = `-----BEGIN CERTIFICATE-----\n${x509Certificate}\n-----END CERTIFICATE-----`;
         const signatureBuffer = Buffer.from(signatureValueBase64, 'base64');
 
-        // === SIMULAÇÃO DE INJEÇÃO VIRTUAL NO SIGNED INFO ===
         let signedInfoToVerify = signedInfoBlock;
         if (!signedInfoToVerify.includes('xmlns="http://www.w3.org/2000/09/xmldsig#"')) {
             signedInfoToVerify = signedInfoToVerify.replace('<SignedInfo>', '<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">');
@@ -72,7 +73,6 @@ export async function POST(request: Request) {
         
         const isValid = verify.verify(certPem, signatureBuffer);
 
-        // === DIAGNÓSTICO DO HASH DE CONTEÚDO ===
         let hashCalculado = '';
         if (infDpsBlock) {
             let nodeToHash = infDpsBlock;
@@ -89,8 +89,8 @@ export async function POST(request: Request) {
         return NextResponse.json({
             status: isValid ? 'SUCESSO_LOCAL' : 'FALHA_LOCAL',
             mensagem: isValid 
-                ? "SUCESSO: Assinatura Válida com Injeção Virtual!" 
-                : "FALHA: Assinatura inválida.",
+                ? "SUCESSO: Assinatura VÃ¡lida com InjeÃ§Ã£o Virtual!" 
+                : "FALHA: Assinatura invÃ¡lida.",
             diagnostico: {
                 hash_Calculado: hashCalculado,
                 hash_Xml: digestNoXml,

@@ -29,6 +29,18 @@ export default function GestaoClientes() {
   const [historyUser, setHistoryUser] = useState<any>(null);
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const opcoesAssinatura = (planosDisponiveis || []).flatMap((p: any) => {
+      if (p.tipo && p.tipo !== 'PLANO') {
+          return [{ value: `${p.slug}|AVULSO`, label: `${p.name} (Pacote avulso)` }];
+      }
+      if (Number(p.priceMonthly) === 0 && Number(p.priceYearly) > 0) {
+          return [{ value: `${p.slug}|ANUAL`, label: `${p.name} Anual` }];
+      }
+      if (Number(p.priceMonthly) === 0) {
+          return [{ value: `${p.slug}|MENSAL`, label: `${p.name} (Gratuito)` }];
+      }
+      return [{ value: `${p.slug}|MENSAL`, label: `${p.name} Mensal` }];
+  });
 
   useEffect(() => {
     carregarUsuarios();
@@ -90,7 +102,7 @@ export default function GestaoClientes() {
               setJustificativa('');
               setAdminPassword('');
               carregarUsuarios();
-              dialog.showAlert({ type: 'success', title: 'Sucesso', description: "Plano atualizado e registrado." });
+              dialog.showAlert({ type: 'success', title: 'Sucesso', description: slug.startsWith('PACOTE_') ? "Pacote adicionado e registrado." : "Plano atualizado e registrado." });
           } else {
               const err = await res.json();
               dialog.showAlert({ type: 'danger', title: 'Erro', description: err.error || "Erro ao salvar." });
@@ -418,16 +430,13 @@ export default function GestaoClientes() {
                         >
                             <option value="SUSPENDED|DEFAULT" className="text-red-600 font-bold bg-red-50">⛔ SUSPENDER ACESSO / SEM PLANO</option>
                             <hr />
-                            {(planosDisponiveis || []).map((p: any) => {
-                                if (Number(p.priceMonthly) === 0) {
-                                    return <option key={`${p.slug}|MENSAL`} value={`${p.slug}|MENSAL`}>{p.name} (Gratuito)</option>
-                                }
-                                return [
-                                    <option key={`${p.slug}|MENSAL`} value={`${p.slug}|MENSAL`}>{p.name} Mensal</option>,
-                                    <option key={`${p.slug}|ANUAL`} value={`${p.slug}|ANUAL`}>{p.name} Anual</option>
-                                ]
-                            })}
+                            {opcoesAssinatura.map((opcao: any) => (
+                                <option key={opcao.value} value={opcao.value}>{opcao.label}</option>
+                            ))}
                         </select>
+                        <p className="text-[11px] text-slate-500 mt-2">
+                            Pacotes avulsos somam ao contrato atual e nÃ£o substituem o plano base do cliente.
+                        </p>
                     </div>
 
                     <div className="flex justify-end gap-2 mt-6 pt-4 border-t">

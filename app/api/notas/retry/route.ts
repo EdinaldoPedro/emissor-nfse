@@ -1,83 +1,80 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { createLog } from '@/app/services/logger';
 import { validateRequest } from '@/app/utils/api-security';
-
-const prisma = new PrismaClient();
+import { hasEmpresaAccess } from '@/app/utils/access-control';
+import { prisma } from '@/app/utils/prisma';
 
 export async function POST(request: Request) {
-  const { targetId, errorResponse } = await validateRequest(request);
+  const { user, targetId, errorResponse } = await validateRequest(request);
   if (errorResponse) return errorResponse;
   const userId = targetId;
-  
+  if (!userId || !user) return NextResponse.json({ error: 'Auth required' }, { status: 401 });
+
   try {
     const { vendaId, dadosAtualizados } = await request.json();
 
-    // 1. Busca a venda original
     const venda = await prisma.venda.findUnique({
-        where: { id: vendaId },
-        include: { empresa: true, cliente: true }
+      where: { id: vendaId },
+      include: { empresa: true, cliente: true },
     });
 
-    if (!venda) throw new Error("Venda não encontrada para reprocessamento.");
+    if (!venda) throw new Error('Venda nÃ£o encontrada para reprocessamento.');
 
-    // 2. Log de Auditoria
+    const hasAccess = await hasEmpresaAccess(user, venda.empresaId);
+    if (!hasAccess) {
+      return NextResponse.json({ error: 'Acesso proibido' }, { status: 403 });
+    }
+
     await createLog({
-        level: 'INFO',
-        action: 'REENVIO_MANUAL',
-        message: 'Solicitação de reenvio iniciada pelo painel administrativo.',
-        empresaId: venda.empresaId,
-        vendaId: venda.id
+      level: 'INFO',
+      action: 'REENVIO_MANUAL',
+      message: 'SolicitaÃ§Ã£o de reenvio iniciada pelo painel administrativo.',
+      empresaId: venda.empresaId,
+      vendaId: venda.id,
     });
 
-    // 3. Atualiza os dados no banco
     await prisma.venda.update({
-        where: { id: vendaId },
-        data: {
-            descricao: dadosAtualizados.descricao || venda.descricao,
-            valor: dadosAtualizados.valor ? parseFloat(String(dadosAtualizados.valor)) : venda.valor,
-            status: 'PROCESSANDO'
-        }
+      where: { id: vendaId },
+      data: {
+        descricao: dadosAtualizados.descricao || venda.descricao,
+        valor: dadosAtualizados.valor ? parseFloat(String(dadosAtualizados.valor)) : venda.valor,
+        status: 'PROCESSANDO',
+      },
     });
 
-    // 4. Define a URL Base
     const host = request.headers.get('host') || 'localhost:3000';
     const protocol = host.includes('localhost') ? 'http' : 'https';
     const baseUrl = process.env.URL_API_LOCAL || `${protocol}://${host}`;
-    
-    console.log(`[RETRY] Disparando para: ${baseUrl}/api/notas`);
 
-    // 5. Chamada Interna
     const resEmissao = await fetch(`${baseUrl}/api/notas`, {
-        method: 'POST',
-        headers: { 
-            'Content-Type': 'application/json',
-            'x-user-id': userId || '', 
-            'x-empresa-id': venda.empresaId 
-        },
-        body: JSON.stringify({
-            vendaId: venda.id,
-            clienteId: venda.clienteId,
-            valor: dadosAtualizados.valor || venda.valor,
-            descricao: dadosAtualizados.descricao || venda.descricao,
-            codigoCnae: dadosAtualizados.cnae,
-            // === NOVOS CAMPOS PARA CONTROLE DE DPS ===
-            numeroDPS: dadosAtualizados.numeroDPS,
-            serieDPS: dadosAtualizados.serieDPS
-        })
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        cookie: request.headers.get('cookie') || '',
+        'x-user-id': userId,
+        'x-empresa-id': venda.empresaId,
+      },
+      body: JSON.stringify({
+        vendaId: venda.id,
+        clienteId: venda.clienteId,
+        valor: dadosAtualizados.valor || venda.valor,
+        descricao: dadosAtualizados.descricao || venda.descricao,
+        codigoCnae: dadosAtualizados.cnae,
+        numeroDPS: dadosAtualizados.numeroDPS,
+        serieDPS: dadosAtualizados.serieDPS,
+      }),
     });
 
     const resultado = await resEmissao.json();
 
     if (!resEmissao.ok) {
-        await prisma.venda.update({ where: { id: vendaId }, data: { status: 'ERRO_EMISSAO' } });
-        return NextResponse.json(resultado, { status: resEmissao.status });
+      await prisma.venda.update({ where: { id: vendaId }, data: { status: 'ERRO_EMISSAO' } });
+      return NextResponse.json(resultado, { status: resEmissao.status });
     }
 
-    return NextResponse.json({ success: true, message: "Reenvio processado com sucesso!" });
-
+    return NextResponse.json({ success: true, message: 'Reenvio processado com sucesso!' });
   } catch (error: any) {
-    console.error("[RETRY ERROR]", error);
-    return NextResponse.json({ error: error.message || "Erro interno no reenvio." }, { status: 500 });
+    console.error('[RETRY ERROR]', error);
+    return NextResponse.json({ error: error.message || 'Erro interno no reenvio.' }, { status: 500 });
   }
 }

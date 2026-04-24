@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
     ArrowLeft, ShoppingCart, ShieldCheck, 
-    QrCode, Loader2, Calendar, Ticket, Copy, CheckCircle, PackagePlus, ChevronDown, Tag
+    Loader2, Calendar, Ticket, PackagePlus, ChevronDown, Tag
 } from 'lucide-react';
 
 interface Plan {
@@ -42,10 +42,11 @@ function CheckoutContent() {
     const [plano, setPlano] = useState<Plan | null>(null);
     const [pacotesDisponiveis, setPacotesDisponiveis] = useState<Plan[]>([]); 
 
-    const [step, setStep] = useState<1 | 2>(1);
     const [processing, setProcessing] = useState(false);
-    const [loadingText, setLoadingText] = useState('Finalizar Pedido');
-    const [copiado, setCopiado] = useState(false);
+    const [loadingText, setLoadingText] = useState('Solicitar Ativação Manual');
+    const [requestSent, setRequestSent] = useState('');
+    const [, setStep] = useState<1 | 2>(1);
+    const [, setCopiado] = useState(false);
     
     const [ciclo, setCiclo] = useState<'MENSAL' | 'ANUAL'>((cycleParam as 'MENSAL'|'ANUAL') || 'MENSAL');
     const [qtdCiclos, setQtdCiclos] = useState(1);
@@ -235,13 +236,55 @@ function CheckoutContent() {
         setErroCupom('');
     };
 
-    const handleGerarPix = async () => {
+    const handleManualCheckout = async () => {
         setProcessing(true);
-        setLoadingText('Montando pedido...');
+        setLoadingText('Registrando solicitacao...');
+
+        try {
+            const pacotesComprados = pacotesDisponiveis
+                .filter(p => (quantidadesPacotes[p.id] || 0) > 0)
+                .map(p => ({ planId: p.id, qtd: quantidadesPacotes[p.id] }));
+
+            const res = await fetch('/api/checkout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    planSlug: plano?.slug || null,
+                    ciclo,
+                    qtdCiclos,
+                    pacotes: pacotesComprados,
+                    cupom: cupomAtivo?.codigo || null
+                })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                alert(data.error || 'Erro ao registrar a solicitacao.');
+                setLoadingText('Solicitar Ativacao Manual');
+                setProcessing(false);
+                return;
+            }
+
+            setRequestSent(data.mensagem || 'Solicitacao enviada com sucesso.');
+            setLoadingText('Solicitacao enviada');
+            setProcessing(false);
+        } catch (error) {
+            console.error(error);
+            alert('Erro de conexao ao registrar a solicitacao.');
+            setLoadingText('Solicitar Ativacao Manual');
+            setProcessing(false);
+        }
+    };
+
+    const handleSolicitarAtivacao = async () => {
+        if (typeof window !== 'undefined') return handleManualCheckout();
+        setProcessing(true);
+        setLoadingText('Registrando solicitaÃ§Ã£o...');
 
         try {
             await new Promise(r => setTimeout(r, 600)); 
-            setLoadingText('Passando no caixa...');
+            setLoadingText('Validando itens...');
 
             const pacotesComprados = pacotesDisponiveis
                 .filter(p => (quantidadesPacotes[p.id] || 0) > 0)
@@ -286,6 +329,8 @@ function CheckoutContent() {
         setCopiado(true);
         setTimeout(() => setCopiado(false), 3000);
     };
+
+    void handleCopiarPix;
 
     return (
         <div className="min-h-screen bg-slate-50 p-4 md:p-8">
@@ -467,19 +512,28 @@ function CheckoutContent() {
                                 </div>
                             )}
                             <div className="flex justify-between items-end mt-2">
-                                <span className="font-bold text-slate-800">Total a pagar</span>
+                                <span className="font-bold text-slate-800">Estimativa comercial</span>
                                 <span className="text-3xl font-black text-slate-900 leading-none">{total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                             </div>
                         </div>
 
+                        {requestSent && (
+                            <div className="mb-4 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+                                {requestSent}
+                            </div>
+                        )}
+
                         <button 
-                            onClick={handleGerarPix}
-                            disabled={processing || total === 0}
+                            onClick={handleSolicitarAtivacao}
+                            disabled={processing || total === 0 || !!requestSent}
                             className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {processing ? <Loader2 className="animate-spin"/> : <ShieldCheck size={20}/>}
-                            {processing ? loadingText : 'Finalizar Pedido'}
+                            {processing ? loadingText : 'Solicitar Ativação Manual'}
                         </button>
+                        <p className="mt-3 text-xs text-slate-500 leading-relaxed">
+                            Nao ha cobranca automatica aqui. A equipe interna recebe a solicitacao e libera o plano ou pacote manualmente no painel administrativo.
+                        </p>
                     </div>
                 </div>
             </div>

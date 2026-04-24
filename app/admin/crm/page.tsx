@@ -13,13 +13,10 @@ export default function CrmDashboard() {
 
     useEffect(() => {
         const carregarClientes = async () => {
-            const token = localStorage.getItem('token');
             try {
-                // Reaproveitamos a sua rota de utilizadores, mas agora ela já traz o planHistories
-                const res = await fetch('/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
+                const res = await fetch('/api/admin/users');
                 if (res.ok) {
                     const data = await res.json();
-                    // Filtramos para mostrar apenas clientes (PJs e Contadores) e não a equipa de suporte/admin
                     setClientes(data.filter((u: any) => u.role !== 'MASTER' && u.role !== 'ADMIN' && u.role !== 'SUPORTE'));
                 }
             } catch (error) {
@@ -29,13 +26,11 @@ export default function CrmDashboard() {
             }
         };
         carregarClientes();
-    }, []);
+    }, [dialog]);
 
-    // Calcula MRR (Receita Mensal Recorrente) e total de ativos
     const clientesAtivos = clientes.filter(c => c.planoStatus === 'active');
     const mrrTotal = clientesAtivos.reduce((acc, cliente) => {
         const planoAtivo = cliente.planHistories?.find((h:any) => h.status === 'ATIVO');
-        // Convertemos forçadamente para Number para evitar concatenação de Strings
         const valorMensal = Number(planoAtivo?.plan?.priceMonthly || 0);
         return acc + valorMensal;
     }, 0);
@@ -47,15 +42,13 @@ export default function CrmDashboard() {
 
     return (
         <div className="p-6 max-w-7xl mx-auto space-y-6">
-            
-            {/* CABEÇALHO E MÉTRICAS */}
             <div className="flex justify-between items-end">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-800">Gestão de Relacionamento (CRM)</h1>
-                    <p className="text-sm text-slate-500">Acompanhe a sua carteira de clientes, receita e histórico.</p>
+                    <h1 className="text-2xl font-bold text-slate-800">GestÃ£o de Relacionamento (CRM)</h1>
+                    <p className="text-sm text-slate-500">Acompanhe a sua carteira de clientes, receita e histÃ³rico.</p>
                 </div>
                 <Link href="/admin/crm/metricas" className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-slate-800 transition-colors shadow-md">
-                    <TrendingUp size={18} /> Ver Relatório Financeiro
+                    <TrendingUp size={18} /> Ver RelatÃ³rio Financeiro
                 </Link>
             </div>
 
@@ -83,9 +76,7 @@ export default function CrmDashboard() {
                 </div>
             </div>
 
-            {/* TABELA DE CRM */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                
                 <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
                     <div className="relative w-72">
                         <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
@@ -109,7 +100,7 @@ export default function CrmDashboard() {
                                 <th className="p-4">Cliente / Contato</th>
                                 <th className="p-4">Perfil</th>
                                 <th className="p-4">Assinatura (MRR)</th>
-                                <th className="p-4 text-right">Ações</th>
+                                <th className="p-4 text-right">AÃ§Ãµes</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -137,7 +128,7 @@ export default function CrmDashboard() {
                                                 {plano ? (
                                                     <div>
                                                         <div className="font-bold text-blue-600">{plano.name}</div>
-                                                        <div className="text-xs text-slate-500">R$ {Number(plano.priceMonthly || 0).toFixed(2)}/mês</div>
+                                                        <div className="text-xs text-slate-500">R$ {Number(plano.priceMonthly || 0).toFixed(2)}/mÃªs</div>
                                                     </div>
                                                 ) : (
                                                     <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">Sem Plano</span>
@@ -145,7 +136,7 @@ export default function CrmDashboard() {
                                             </td>
                                             <td className="p-4 text-right">
                                                 <Link href={`/admin/crm/${cliente.id}`} className="inline-flex items-center gap-1 text-purple-600 hover:text-purple-800 font-bold bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors">
-                                                    Visão 360º <ChevronRight size={16} />
+                                                    VisÃ£o 360Âº <ChevronRight size={16} />
                                                 </Link>
                                             </td>
                                         </tr>

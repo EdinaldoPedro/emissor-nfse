@@ -6,9 +6,18 @@ import { DialogProvider } from "@/app/contexts/DialogContext"; // <--- 1. IMPORT
 
 const inter = Inter({ subsets: ["latin"] });
 
+// app/layout.tsx
+
 export const metadata: Metadata = {
-  title: "Emissor NFS-e",
-  description: "Emissor de Nota Fiscal de Serviço Eletrônica",
+  title: "NFSe Goo",
+  description: "Seu SaaS moderno para notas fiscais",
+  icons: {
+    // Aqui você aponta para o caminho dentro da pasta public
+    // Note que não precisa escrever "public", o Next já entende
+    icon: "/icons/favicon.ico", // ou .png / .svg, dependendo da sua extensão
+    shortcut: "/icons/favicon.ico",
+    apple: "/icons/favicon.ico",
+  },
 };
 
 export default function RootLayout({

@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { checkRateLimit } from '@/app/utils/rate-limit';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/utils/prisma';
 
 export async function POST(request: Request) {
     try {
@@ -18,8 +16,8 @@ export async function POST(request: Request) {
         const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
         
         // Limitamos severamente por IP e também tentativas atreladas ao próprio Token
-        const ipAllowed = checkRateLimit(`reset_ip_${ip}`, 5, 15 * 60 * 1000);
-        const tokenAllowed = checkRateLimit(`reset_token_${token}`, 5, 15 * 60 * 1000);
+        const ipAllowed = await checkRateLimit(`reset_ip_${ip}`, 5, 15 * 60 * 1000);
+        const tokenAllowed = await checkRateLimit(`reset_token_${token}`, 5, 15 * 60 * 1000);
 
         if (!ipAllowed || !tokenAllowed) {
             return NextResponse.json({ 
@@ -55,11 +53,22 @@ export async function POST(request: Request) {
             data: {
                 senha: hashedPassword,
                 resetToken: null,       
-                resetExpires: null // <--- CORRIGIDO PARA resetExpires
+                resetExpires: null 
             }
         });
+        
+        // Log de Segurança no CRM (Opcional, mas muito bom para um SaaS)
+        try {
+            await prisma.systemLog.create({
+                data: {
+                    level: 'INFO',
+                    action: 'PASSWORD_RESET',
+                    message: `Palavra-passe redefinida com sucesso para o email: ${user.email}`,
+                }
+            });
+        } catch (e) {}
 
-        return NextResponse.json({ success: true, message: 'Senha redefinida com sucesso.' });
+        return NextResponse.json({ success: true, message: 'Palavra-passe redefinida com sucesso.' });
     } catch (error) {
         console.error(error);
         return NextResponse.json({ error: 'Erro interno ao redefinir a senha.' }, { status: 500 });

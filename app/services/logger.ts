@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/utils/prisma';
 
 interface LogParams {
   level: 'INFO' | 'ERRO' | 'ALERTA' | 'DEBUG';
@@ -14,7 +12,8 @@ interface LogParams {
 // --- SANITIZAÇÃO DE DADOS SENSÍVEIS ---
 const CHAVES_SENSIVEIS = [
     'senha', 'password', 'senhaCertificado', 'certificadoA1', 
-    'Authorization', 'token', 'key', 'pfx', 'certificado'
+    'Authorization', 'token', 'key', 'pfx', 'certificado',
+    'xmlBase64', 'pdfBase64', 'qrCodePix'
 ];
 
 function sanitizarObjeto(obj: any): any {

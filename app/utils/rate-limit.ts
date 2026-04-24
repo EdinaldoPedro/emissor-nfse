@@ -1,30 +1,35 @@
-// app/utils/rate-limit.ts
+import crypto from 'crypto';
+import { prisma } from '@/app/utils/prisma';
 
-const rateLimitMap = new Map<string, { count: number; expiresAt: number }>();
+function hashKey(key: string) {
+    return crypto.createHash('sha256').update(key).digest('hex');
+}
 
-export function checkRateLimit(key: string, limit: number, windowMs: number): boolean {
-    const now = Date.now();
-    const record = rateLimitMap.get(key);
+export async function checkRateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
+    const keyHash = hashKey(key);
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - windowMs);
 
-    // Sistema de Limpeza Automática (Garbage Collection para não estourar a memória)
-    if (rateLimitMap.size > 2000) {
-        rateLimitMap.forEach((value, mapKey) => {
-            if (value.expiresAt < now) rateLimitMap.delete(mapKey);
-        });
+    const total = await prisma.systemLog.count({
+        where: {
+            action: 'RATE_LIMIT_CHECK',
+            message: keyHash,
+            createdAt: { gte: windowStart }
+        }
+    });
+
+    if (total >= limit) {
+        return false;
     }
 
-    if (!record || record.expiresAt < now) {
-        // Primeira tentativa ou janela expirada: Cria novo registo
-        rateLimitMap.set(key, { count: 1, expiresAt: now + windowMs });
-        return true; 
-    }
+    await prisma.systemLog.create({
+        data: {
+            level: 'DEBUG',
+            action: 'RATE_LIMIT_CHECK',
+            message: keyHash,
+            details: JSON.stringify({ windowMs })
+        }
+    });
 
-    if (record.count >= limit) {
-        // Estourou o limite! Bloqueado.
-        return false; 
-    }
-
-    // Ainda dentro do limite: Aumenta a contagem
-    record.count += 1;
-    return true; 
+    return true;
 }

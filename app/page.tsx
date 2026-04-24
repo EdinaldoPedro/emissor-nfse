@@ -149,10 +149,10 @@ export default function LandingPage() {
       <header className={`fixed top-0 w-full z-50 transition-all duration-500 ease-in-out ${scrolled ? 'bg-white/90 backdrop-blur-md shadow-sm py-3 translate-y-0' : 'bg-transparent py-5 animate-in slide-in-from-top-full duration-700'}`}>
         <div className="flex justify-between items-center px-6 max-w-7xl mx-auto">
             <Link href="/" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="text-2xl font-black text-blue-600 flex items-center gap-2 tracking-tight group hover:scale-105 transition-transform active:scale-95">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:shadow-blue-500/50 transition-shadow">
-                    <CheckCircle size={20} strokeWidth={3}/>
-                </div>
-                NFSe Goo
+                <img src="/icons/G.png" alt="NFSeGoo" className="w-8 h-8 object-contain" />
+                <span className="bg-gradient-to-r from-blue-700 to-emerald-400 bg-clip-text text-transparent">
+                    NFSe<span className="font-light">Goo</span>
+                </span>
             </Link>
             <nav className="space-x-2 hidden md:flex items-center">
                 
@@ -492,8 +492,11 @@ export default function LandingPage() {
       <footer className="bg-slate-950 pt-16 pb-8 border-t border-slate-800 overflow-hidden">
           <div className="max-w-7xl mx-auto px-6 text-center">
             <Reveal>
-                <div className="flex items-center justify-center gap-2 text-white text-3xl font-black mb-6 tracking-tight group hover:scale-105 transition-transform cursor-pointer">
-                    <CheckCircle size={28} className="text-blue-500 group-hover:rotate-12 transition-transform"/> NFSe Goo
+                <div className="flex items-center justify-center gap-2 text-3xl font-black mb-6 tracking-tight group hover:scale-105 transition-transform cursor-pointer">
+                    <img src="/icons/G.png" alt="NFSeGoo" className="w-10 h-10 object-contain group-hover:-translate-y-1 transition-transform" />
+                    <span className="bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
+                        NFSe<span className="font-light">Goo</span>
+                    </span>
                 </div>
             </Reveal>
             <Reveal delay={100}>

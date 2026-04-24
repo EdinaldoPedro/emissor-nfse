@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyJWT } from '@/app/utils/auth';
-import { PrismaClient } from '@prisma/client';
 import { cookies } from 'next/headers';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/utils/prisma';
 
 export async function getAuthenticatedUser(request: Request) {
   // 1. Busca o token no Cookie HttpOnly

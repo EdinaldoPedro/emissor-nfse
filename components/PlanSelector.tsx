@@ -154,7 +154,7 @@ export default function PlanSelector({ currentPlan, onSelectPlan }: PlanSelector
                       : 'bg-slate-900 text-white hover:bg-slate-800 hover:shadow-lg hover:shadow-slate-900/20 hover:-translate-y-0.5'
                 }`}
               >
-                {isCurrent ? 'Seu Plano Atual' : 'Assinar Agora'}
+                {isCurrent ? 'Seu Plano Atual' : 'Solicitar Contratacao'}
               </button>
             </div>
           );

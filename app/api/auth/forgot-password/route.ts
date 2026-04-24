@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import { EmailService } from '@/app/services/EmailService';
 import { checkRateLimit } from '@/app/utils/rate-limit';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/utils/prisma';
 
 export async function POST(request: Request) {
     try {
@@ -14,8 +12,8 @@ export async function POST(request: Request) {
         // === ESCUDO: RATE LIMITING ===
         const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
         
-        const ipAllowed = checkRateLimit(`forgot_ip_${ip}`, 3, 30 * 60 * 1000); // 30 min
-        const emailAllowed = checkRateLimit(`forgot_email_${email}`, 3, 30 * 60 * 1000);
+        const ipAllowed = await checkRateLimit(`forgot_ip_${ip}`, 3, 30 * 60 * 1000); // 30 min
+        const emailAllowed = await checkRateLimit(`forgot_email_${email}`, 3, 30 * 60 * 1000);
 
         if (!ipAllowed || !emailAllowed) {
             return NextResponse.json({ 
@@ -42,7 +40,12 @@ export async function POST(request: Request) {
             }
         });
 
-        const resetLink = `${process.env.NEXT_PUBLIC_APP_URL}/redefinir-senha?token=${resetToken}`;
+        // Captura dinamicamente o domínio/IP que o utilizador está a usar no navegador
+        const protocol = request.headers.get('x-forwarded-proto') || 'http';
+        const host = request.headers.get('host') || 'localhost:3000';
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${protocol}://${host}`;
+
+        const resetLink = `${baseUrl}/redefinir-senha?token=${resetToken}`;
         
         const emailService = new EmailService();
         const html = emailService.getTemplateRecuperacaoSenha(user.nome, resetLink);

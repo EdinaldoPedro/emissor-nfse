@@ -5,6 +5,8 @@ import forge from 'node-forge';
 import { validateRequest } from '@/app/utils/api-security';
 import { encrypt } from '@/app/utils/crypto';
 
+export const dynamic = 'force-dynamic';
+
 const prisma = new PrismaClient();
 
 async function buscarIbgePorCep(cep: string): Promise<string | null> {
@@ -187,6 +189,7 @@ export async function GET(request: Request) {
         atividades: atividadesEnriquecidas,
 
         role: user.role,
+        id: user.id,
         nome: user.nome,
         email: user.email,
         cpf: user.cpf,
